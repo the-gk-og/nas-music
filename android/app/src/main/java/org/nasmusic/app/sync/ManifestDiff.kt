@@ -59,7 +59,17 @@ object ManifestDiff {
         return out
     }
 
-    /** Size estimate before download: FLAC uses the original size; Opus ≈ bitrate × duration + 3 % container overhead. */
+    /** Bytes still to fetch for [item]: the server's size when given, else a local estimate, minus any partial file. */
+    fun plannedBytes(item: ManifestItem, partialBytes: Long, opusKbps: Int): Long {
+        val total = item.bytes ?: estimateBytes(item.format, item.durationS, null, opusKbps)
+        return (total - partialBytes).coerceAtLeast(0)
+    }
+
+    /** A finished download is checked against the manifest size only when the server says it is exact. */
+    fun sizeMismatch(item: ManifestItem, actualBytes: Long): Boolean =
+        item.bytesExact && item.bytes != null && item.bytes != actualBytes
+
+    /** Size estimate when the manifest has no size: FLAC uses the original size; Opus ≈ bitrate × duration + 3 % container overhead. */
     fun estimateBytes(format: AudioFormat, durationS: Double?, flacBytes: Long?, opusKbps: Int): Long = when (format) {
         AudioFormat.FLAC -> flacBytes ?: ((durationS ?: 300.0) * 1411 * 1000 / 8).toLong()
         AudioFormat.OPUS -> ((durationS ?: 300.0) * opusKbps * 1000 / 8 * 1.03).toLong()

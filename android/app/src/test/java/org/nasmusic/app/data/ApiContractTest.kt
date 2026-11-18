@@ -11,6 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.nasmusic.app.data.api.ApiFactory
+import org.nasmusic.app.data.api.ApiUrls
 import org.nasmusic.app.data.api.AudioFormat
 import org.nasmusic.app.data.api.NasMusicApi
 import org.nasmusic.app.data.api.PairRequest
@@ -46,11 +47,15 @@ class ApiContractTest {
     @Test fun `manifest request and response`() = runBlocking {
         server.enqueue(MockResponse().setBody(
             """{"generatedAt":"2026-11-18T02:00:00Z","items":[{"trackId":"t1","format":"flac","why":"favourite"},
-               {"trackId":"t2","format":"opus","why":"mix","mixIds":["m1"]}]}""",
+               {"trackId":"t2","format":"opus","why":"mix","mixIds":["m1"],"durationS":200.5,"bytes":4100000,"bytesExact":false}]}""",
         ))
         val man = api.manifest("flac")
         assertEquals(AudioFormat.FLAC, man.items[0].format)
         assertEquals(listOf("m1"), man.items[1].mixIds)
+        assertEquals(4_100_000L, man.items[1].bytes)
+        assertEquals(false, man.items[1].bytesExact)
+        assertEquals(200.5, man.items[1].durationS!!, 0.0)
+        assertNull(man.items[0].bytes)
         assertEquals("/api/v1/sync/manifest?favouritesFormat=flac", server.takeRequest().path)
     }
 
@@ -71,10 +76,26 @@ class ApiContractTest {
     @Test fun `why and suggestions`() = runBlocking {
         server.enqueue(MockResponse().setBody("""{"reason":"Similar to X","similarTo":[$track]}"""))
         server.enqueue(MockResponse().setBody(
-            """[{"id":"s1","artist":"A","album":"B","year":null,"coverUrl":null,"previewUrl":"https://p/x.mp3",
+            """[{"id":"s1","artist":"A","album":"B","year":null,"hasCover":true,"hasPreview":false,"coverUrl":null,"previewUrl":"https://upstream/x.mp3",
                "buyLinks":[{"name":"Bandcamp","url":"https://b"}],"reason":"r","status":"new","createdAt":"2026-11-18T00:00:00Z"}]""",
         ))
         assertEquals("t1", api.why("t1").similarTo.single().id)
-        assertEquals("Bandcamp", api.suggestions().single().buyLinks.single().name)
+        val s = api.suggestions().single()
+        assertEquals("Bandcamp", s.buyLinks.single().name)
+        assertTrue(s.hasCover)
+        assertEquals(false, s.hasPreview)
+    }
+
+    @Test fun `more-like 404 is a friendly not-analysed message`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(404))
+        val code = try { api.moreLike("t1"); null } catch (e: retrofit2.HttpException) { e.code() }
+        assertEquals("/api/v1/mixes/more-like/t1?minutes=40", server.takeRequest().path)
+        assertEquals("This track hasn't been analysed yet — try again later.", ApiUrls.moreLikeError(code))
+        assertTrue(ApiUrls.moreLikeError(503).contains("try again later"))
+    }
+
+    @Test fun `suggestion media goes through the routed virtual host`() {
+        assertEquals("http://nas.invalid/api/v1/suggestions/s%201/cover?size=256", ApiUrls.suggestionCover("s 1"))
+        assertEquals("http://nas.invalid/api/v1/suggestions/s1/preview", ApiUrls.suggestionPreview("s1"))
     }
 }
