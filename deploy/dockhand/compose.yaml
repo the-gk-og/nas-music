@@ -1,0 +1,48 @@
+# nas-music for a Docker host managed with Dockhand (or any Compose UI) where cloudflared already
+# runs on host networking with a remotely managed tunnel.
+#
+# - Config is inlined below (Compose `configs.content`), so no files need creating on the NAS.
+# - Data lives in a named volume; Docker seeds it from the image, so it is owned by uid 568.
+# - Tunnel: add a public hostname in Cloudflare -> service http://localhost:8080 (bound to 127.0.0.1 only).
+#
+# Replace: ADMIN_PASSWORD_HASH (from `nasmusic hash-password`). Music path, LAN IP and tunnel URL are
+# this install's values; change them for another NAS.
+
+services:
+  nasmusic:
+    image: ghcr.io/the-gk-og/nasmusic:latest
+    container_name: nasmusic
+    user: "568:568"
+    group_add:
+      - "3000"                 # group that owns the music folder (770 perms); read-only access via group
+    restart: unless-stopped
+    ports:
+      - "8443:8443"              # LAN HTTPS for the app (self-signed cert, pinned at pairing)
+      - "127.0.0.1:8080:8080"    # plain HTTP for the host-network cloudflared only
+    environment:
+      NASMUSIC_CONFIG: /etc/nasmusic/config.toml
+    configs:
+      - source: nasmusic_config
+        target: /etc/nasmusic/config.toml
+    volumes:
+      - /mnt/NAS/Shared/music:/music:ro
+      - nasmusic-data:/data
+
+configs:
+  nasmusic_config:
+    content: |
+      library_root = "/music"
+      data_dir = "/data"
+      lan_host = "192.168.68.2"
+      https_port = 8443
+      http_port = 8080
+      server_name = "Home NAS"
+      tunnel_url = "https://music.whoactuallyneeds.men"
+      cf_access_client_id = ""
+      cf_access_client_secret = ""
+      admin_password_hash = "ADMIN_PASSWORD_HASH"
+      timezone = "Europe/London"
+      opus_cache_gb = 10
+
+volumes:
+  nasmusic-data:
