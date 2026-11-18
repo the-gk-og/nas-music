@@ -215,4 +215,40 @@ interface NasMusicApi {
 
     @POST("admin/users/{id}/reset-password")
     suspend fun resetPassword(@Path("id") id: String, @Body body: NewPassword): Response<Unit>
+    // ---- v3 (docs/v3-ux.md) ----
+    @GET("home")
+    suspend fun home(): Feed
+
+    @GET("foryou")
+    suspend fun forYou(): Feed
+
+    @GET("search")
+    suspend fun globalSearch(@Query("q") q: String, @Query("limit") limit: Int = 20): GlobalSearch
+
+    @GET("toget")
+    suspend fun toGet(): List<ToGetItem>
+
+    @POST("toget")
+    suspend fun addToGet(@Body body: NewToGet): ToGetItem
+
+    @PATCH("toget/{id}")
+    suspend fun patchToGet(@Path("id") id: String, @Body body: ToGetPatch): Response<Unit>
+
+    @DELETE("toget/{id}")
+    suspend fun deleteToGet(@Path("id") id: String): Response<Unit>
+
+    @GET("pins")
+    suspend fun pins(): List<Pin>
+
+    @POST("pins")
+    suspend fun pin(@Body body: NewPin): Response<Unit>
+
+    @DELETE("pins/{type}/{id}")
+    suspend fun unpin(@Path("type") type: String, @Path("id") id: String): Response<Unit>
+
+    @POST("radio")
+    suspend fun startRadio(@Body body: RadioRequest): Queue
+
+    @POST("radio/{queueId}/more")
+    suspend fun radioMore(@Path("queueId") queueId: String): RadioMore
 }

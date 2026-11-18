@@ -136,7 +136,12 @@ data class Queue(
     val trackCount: Int = 0,
     val updatedAt: String? = null,
     val tracks: List<Track> = emptyList(),
-)
+    /** v3: endless radio queue (the client asks /radio/{id}/more when 5 tracks remain). */
+    val radio: Boolean = false,
+    val kind: String? = null,
+) {
+    val isRadio: Boolean get() = radio || kind == "radio"
+}
 
 @Serializable
 data class NewQueue(val name: String, val trackIds: List<String>, val startIndex: Int = 0)

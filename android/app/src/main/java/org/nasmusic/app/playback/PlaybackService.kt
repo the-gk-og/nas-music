@@ -149,11 +149,35 @@ class PlaybackService : MediaSessionService() {
             val now = System.currentTimeMillis()
             AbRepeat.check(c.abRepeat.loop.value, player.currentMediaItem?.mediaId, player.currentPosition)?.let { player.seekTo(it) }
             if (player.isPlaying && now - lastStateSentMs > 5_000) sendState()
+            maybeExtendRadio()
             if (player.isPlaying && now - lastProgressMs > 15_000) {
                 lastProgressMs = now
                 c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)
             }
             handler.postDelayed(this, 250)
+        }
+    }
+
+    private var radioFetching = false
+
+    /** Radio queues are endless: when 5 tracks remain, fetch more and append them. */
+    private fun maybeExtendRadio() {
+        val qid = c.queueSync.currentId.value ?: return
+        if (radioFetching || !c.queueSync.isRadio(qid)) return
+        if (!RadioLogic.needsMore(player.mediaItemCount, player.currentMediaItemIndex)) return
+        radioFetching = true
+        scope.launch {
+            try {
+                val localIds = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
+                val resp = runCatching { c.api.radioMore(qid) }.getOrNull() ?: return@launch
+                val fresh = RadioLogic.newTracks(resp, localIds, org.nasmusic.app.data.api.ApiFactory.json)
+                if (fresh.isEmpty() || c.queueSync.currentId.value != qid) return@launch
+                val items = withContext(Dispatchers.IO) { fresh.map { resolve(MediaItems.fromTrack(it, PlaySource.MIX)) } }
+                player.addMediaItems(items)
+            } finally {
+                // Back off a little so a server that returns nothing isn't hammered every tick.
+                handler.postDelayed({ radioFetching = false }, 30_000)
+            }
         }
     }
 

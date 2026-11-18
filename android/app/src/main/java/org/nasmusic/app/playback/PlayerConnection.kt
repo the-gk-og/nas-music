@@ -216,6 +216,15 @@ class PlayerConnection(
         }
     }
 
+    /** Start a radio (docs/v3-ux.md §5) and play it here, or on the active device when remote. */
+    suspend fun startRadio(seed: org.nasmusic.app.data.api.RadioSeed): Boolean {
+        val q = runCatching { api().startRadio(org.nasmusic.app.data.api.RadioRequest(seed)) }.getOrNull() ?: return false
+        queues.markRadio(q.id)
+        queues.refresh()
+        playQueue(q, 0)
+        return true
+    }
+
     fun playNext(tracks: List<Track>) = enqueue(tracks, next = true)
     fun addToQueue(tracks: List<Track>) = enqueue(tracks, next = false)
 
