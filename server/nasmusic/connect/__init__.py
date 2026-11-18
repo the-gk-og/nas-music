@@ -125,6 +125,11 @@ class Hub:
         u = self.users.get(uid)
         return set(list(u.conns)) if u else set()
 
+    def devices_for(self, uid: str) -> list[dict]:
+        """The user's Connect devices (online ones + an offline active one), for the Home "devices" shelf."""
+        u = self.users.get(uid)
+        return self._devices(u) if u else []
+
     def snapshot(self, uid: str) -> dict | None:
         u = self.users.get(uid)
         return dict(u.state) if u else None

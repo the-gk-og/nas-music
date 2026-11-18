@@ -37,8 +37,29 @@ def get_settings(conn: sqlite3.Connection, uid: str) -> dict[str, Any]:
     return out
 
 
+# v3 appearance settings (docs/v3-ux.md §7): validated when present; other keys are free-form.
+ACCENTS = ("green", "blue", "purple", "pink", "orange", "red", "teal")
+_ENUMS = {"appearance.animations": ("off", "quick", "expressive"), "appearance.defaultView": ("grid", "list"),
+          "appearance.albumPage": ("big", "simple")}
+_SHELF_LISTS = ("home.shelves", "home.hidden", "foryou.shelves", "foryou.hidden")
+
+
+def _validate(key: str, value: Any) -> None:
+    base = key.split(".", 2)[2] if key.startswith("device.") and key.count(".") >= 2 else key
+    if base in _ENUMS and value not in _ENUMS[base]:
+        raise ValueError(f"{base} must be one of {', '.join(_ENUMS[base])}")
+    if base.startswith("library.view.") and value not in ("grid", "list"):
+        raise ValueError(f"{base} must be grid or list")
+    if base == "appearance.accent" and not (value in ACCENTS or (
+            isinstance(value, str) and len(value) == 7 and value[0] == "#"
+            and all(ch in "0123456789abcdefABCDEF" for ch in value[1:]))):
+        raise ValueError(f"appearance.accent must be one of {', '.join(ACCENTS)} or #rrggbb")
+    if base in _SHELF_LISTS and not (isinstance(value, list) and all(isinstance(x, str) for x in value)):
+        raise ValueError(f"{base} must be a list of shelf ids")
+
+
 def put_settings(conn: sqlite3.Connection, uid: str, changes: dict[str, Any]) -> dict[str, Any]:
-    """Merge `changes` (None deletes a key). Raises ValueError for oversized input."""
+    """Merge `changes` (None deletes a key). Raises ValueError for oversized or invalid input."""
     conn.execute("BEGIN IMMEDIATE")
     try:
         for k, v in changes.items():
@@ -47,6 +68,7 @@ def put_settings(conn: sqlite3.Connection, uid: str, changes: dict[str, Any]) ->
             if v is None:
                 conn.execute("DELETE FROM user_settings WHERE user_id = ? AND key = ?", (uid, k))
                 continue
+            _validate(k, v)
             raw = json.dumps(v)
             if len(raw) > MAX_VALUE_BYTES:
                 raise ValueError(f"value for {k} is too large")

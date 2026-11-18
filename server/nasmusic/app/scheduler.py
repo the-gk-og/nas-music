@@ -37,8 +37,11 @@ class Jobs:
     def _scan(self, conn, full: bool = False):
         from nasmusic.library import scanner
 
-        res = scanner.scan(self.cfg, conn, full=full)
-        return res.as_dict()
+        from nasmusic.app import toget
+
+        res = scanner.scan(self.cfg, conn, full=full).as_dict()
+        res["togetGot"] = toget.match_owned(conn)  # wanted albums/songs that the library now has
+        return res
 
     def _analyse(self, conn):
         return {"analysed": ai_adapter.analyse_pending(conn, ai_config(self.cfg))}

@@ -100,6 +100,9 @@ def cmd_scan(args) -> None:
     conn = open_db(cfg)
     try:
         res = scanner.scan(cfg, conn, full=args.full)
+        from nasmusic.app import toget
+
+        toget.match_owned(conn)
     finally:
         conn.close()
     print(json.dumps(res.as_dict(), indent=2))

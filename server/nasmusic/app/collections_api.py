@@ -101,9 +101,15 @@ def _notify(c: AppContext, uid: str, qid: str) -> None:
         c.hub.notify_queue(uid, qid)
 
 
+class QueueSource(BaseModel):
+    type: Literal["album", "artist", "playlist", "mix", "radio", "genre", "folder", "smart_list", "search", "other"]
+    id: str | None = Field(default=None, max_length=4096)
+
+
 class NewQueue(Name):
     trackIds: list[str] = Field(max_length=10_000)
     startIndex: int = Field(default=0, ge=0)
+    source: QueueSource | None = None
 
 
 @router.get("/queues")
@@ -115,7 +121,9 @@ def queues(me: Device = Depends(device), conn: Conn = Depends(db)):
 def create_queue(body: NewQueue, me: Device = Depends(device), conn: Conn = Depends(db),
                  c: AppContext = Depends(ctx)):
     playing = (c.hub.snapshot(me.user_id) or {}).get("queueId") if c.hub else None
-    q = _run(coll.create_queue, conn, me.user_id, body.name, body.trackIds, body.startIndex, protect=playing)
+    src = (body.source.type, body.source.id) if body.source else None
+    q = _run(coll.create_queue, conn, me.user_id, body.name, body.trackIds, body.startIndex, protect=playing,
+             source=src)
     _notify(c, me.user_id, q["id"])
     return q
 
@@ -145,6 +153,19 @@ def delete_queue(qid: str, me: Device = Depends(device), conn: Conn = Depends(db
     _run(coll.delete_queue, conn, me.user_id, qid)
     _notify(c, me.user_id, qid)
     return Response(status_code=204)
+
+
+class ReplaceQueueTracks(BaseModel):
+    trackIds: list[str] = Field(max_length=10_000)
+    currentIndex: int | None = Field(default=None, ge=0)
+
+
+@router.put("/queues/{qid}/tracks")
+def replace_queue_tracks(qid: str, body: ReplaceQueueTracks, me: Device = Depends(device), conn: Conn = Depends(db),
+                         c: AppContext = Depends(ctx)):
+    q = _run(coll.replace_queue_tracks, conn, me.user_id, qid, body.trackIds, body.currentIndex)
+    _notify(c, me.user_id, qid)
+    return q
 
 
 class AddQueueTracks(BaseModel):

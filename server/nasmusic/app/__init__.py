@@ -1,6 +1,8 @@
 """FastAPI application factory: the /api/v1 API and the admin web UI on one app."""
 from __future__ import annotations
 
+import logging
+import re
 import secrets
 from importlib.metadata import PackageNotFoundError, version
 
@@ -41,6 +43,7 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
     finally:
         conn.close()
     from nasmusic.app.connect_api import make_hub
+    from nasmusic.catalog import Catalog
     from nasmusic.app.weather import Weather
 
     return AppContext(
@@ -53,7 +56,28 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
         jobs=jobs,
         hub=make_hub(cfg),
         weather=Weather(),
+        catalog=Catalog(),
     )
+
+
+_TOKEN_RE = re.compile(r"([?&]token=)[^&\s\"]+")
+
+
+class _RedactTokens(logging.Filter):
+    """Keep `?token=` (accepted on /stream and /art) out of the access log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(_TOKEN_RE.sub(r"\1REDACTED", a) if isinstance(a, str) else a for a in record.args)
+        elif isinstance(record.msg, str):
+            record.msg = _TOKEN_RE.sub(r"\1REDACTED", record.msg)
+        return True
+
+
+def install_token_redaction() -> None:
+    lg = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, _RedactTokens) for f in lg.filters):
+        lg.addFilter(_RedactTokens())
 
 
 TAURI_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"]
@@ -66,13 +90,14 @@ PLAYER_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-i
 
 def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None = None) -> FastAPI:
     from nasmusic import web
-    from nasmusic.app import account_api, api, collections_api, connect_api
+    from nasmusic.app import account_api, api, collections_api, connect_api, discover_api
     from nasmusic.web import spa
 
+    install_token_redaction()
     app = FastAPI(title="nas-music", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.ctx = context or build_context(cfg, jobs)
     for r in (api.public, account_api.public, api.router, account_api.router, account_api.admin,
-              collections_api.router, connect_api.router):
+              collections_api.router, discover_api.router, connect_api.router):
         app.include_router(r, prefix="/api/v1")
     app.include_router(web.router)
     app.include_router(spa.router_for(cfg, web.render_join))  # catch-all: must stay last

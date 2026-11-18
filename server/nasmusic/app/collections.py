@@ -4,6 +4,7 @@ Positions are dense (0..n-1). Edits read the id list, change it in Python and re
 transaction, which is simple and fast enough for lists of a few thousand tracks."""
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from collections.abc import Iterator
@@ -162,9 +163,17 @@ def _queue_ids(conn: sqlite3.Connection, qid: str) -> list[str]:
 def _queue_summary(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     s = conn.execute("SELECT COUNT(*), COALESCE(SUM(t.duration_s), 0) FROM queue_tracks q "
                      "JOIN tracks t ON t.id = q.track_id WHERE q.queue_id = ?", (row["id"],)).fetchone()
+    radio = None
+    if row["radio_seed"]:
+        try:
+            radio = json.loads(row["radio_seed"])
+        except ValueError:
+            radio = None
     return {"id": row["id"], "name": row["name"], "slot": row["slot"], "currentIndex": row["current_index"],
             "positionMs": row["position_ms"], "trackCount": s[0], "durationS": round(s[1], 3),
-            "createdAt": row["created_at"], "updatedAt": row["updated_at"]}
+            "createdAt": row["created_at"], "updatedAt": row["updated_at"],
+            "source": {"type": row["source_type"], "id": row["source_id"]} if row["source_type"] else None,
+            "radio": radio}
 
 
 def list_queues(conn: sqlite3.Connection, uid: str) -> list[dict]:
@@ -191,7 +200,8 @@ def _write_queue(conn: sqlite3.Connection, qid: str, ids: list[str], current: in
 
 
 def create_queue(conn: sqlite3.Connection, uid: str, name: str, track_ids: list[str], start_index: int = 0,
-                 protect: str | None = None, replace_same_name: bool = False) -> dict:
+                 protect: str | None = None, replace_same_name: bool = False,
+                 source: tuple[str, str | None] | None = None, radio_seed: dict | None = None) -> dict:
     """New queue in the lowest free slot. With 20 already, the least recently updated queue (never `protect`,
     the one playing) is replaced and its slot reused. `replace_same_name` reuses a queue with that name."""
     _check_tracks(conn, track_ids)
@@ -216,7 +226,36 @@ def create_queue(conn: sqlite3.Connection, uid: str, name: str, track_ids: list[
             conn.execute("INSERT INTO queues (id, user_id, name, slot, created_at, updated_at) "
                          "VALUES (?, ?, ?, ?, ?, ?)", (qid, uid, name, slot, now, now))
         _write_queue(conn, qid, track_ids, start_index, 0)
+        conn.execute("UPDATE queues SET source_type = ?, source_id = ?, radio_seed = ? WHERE id = ?",
+                     (source[0] if source else None, source[1] if source else None,
+                      json.dumps(radio_seed) if radio_seed else None, qid))
     return get_queue(conn, uid, qid)
+
+
+def replace_queue_tracks(conn: sqlite3.Connection, uid: str, qid: str, track_ids: list[str],
+                         current_index: int | None = None) -> dict:
+    """Replace every track. currentIndex: given, else the current track's new position, else 0."""
+    _queue_row(conn, uid, qid)
+    _check_tracks(conn, track_ids)
+    with _tx(conn):
+        row = _queue_row(conn, uid, qid)
+        old = _queue_ids(conn, qid)
+        if current_index is None:
+            cur_track = old[row["current_index"]] if 0 <= row["current_index"] < len(old) else None
+            current_index = track_ids.index(cur_track) if cur_track in track_ids else 0
+        elif track_ids and not 0 <= current_index < len(track_ids):
+            raise BadRequest("currentIndex out of range")
+        _write_queue(conn, qid, track_ids, current_index)
+    return get_queue(conn, uid, qid)
+
+
+def queue_track_ids(conn: sqlite3.Connection, uid: str, qid: str) -> list[str]:
+    _queue_row(conn, uid, qid)
+    return _queue_ids(conn, qid)
+
+
+def queue_row(conn: sqlite3.Connection, uid: str, qid: str) -> sqlite3.Row:
+    return _queue_row(conn, uid, qid)
 
 
 def patch_queue(conn: sqlite3.Connection, uid: str, qid: str, name: str | None = None,

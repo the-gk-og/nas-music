@@ -28,6 +28,7 @@ class AppContext:
     http_transport: object | None = None   # httpx transport override for upstream calls (tests)
     hub: object | None = None              # nasmusic.connect.Hub
     weather: object | None = None          # nasmusic.app.weather.Weather
+    catalog: object | None = None          # nasmusic.catalog.Catalog (online catalogue for search)
     login_limiter: users.RateLimiter = field(default_factory=lambda: users.RateLimiter(5, 60.0))
 
     @property
@@ -50,13 +51,22 @@ def db(request: Request) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+QUERY_TOKEN_PATHS = ("/api/v1/stream/", "/api/v1/art/")
+
+
 def request_token(request: Request) -> str | None:
-    """Bearer header first; else the web player's httpOnly `nm_session` cookie."""
+    """Bearer header first; else the web player's httpOnly `nm_session` cookie; else, for /stream and /art
+    only (<audio>/<img> in cross-origin clients can't send headers), `?token=`."""
     header = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
     if scheme.lower() == "bearer" and token.strip():
         return token.strip()
-    return request.cookies.get(SESSION_COOKIE) or None
+    cookie = request.cookies.get(SESSION_COOKIE)
+    if cookie:
+        return cookie
+    if request.url.path.startswith(QUERY_TOKEN_PATHS):
+        return request.query_params.get("token") or None
+    return None
 
 
 def device(request: Request, conn: sqlite3.Connection = Depends(db)) -> auth.Device:

@@ -37,12 +37,28 @@ async def resolve_preview(c: httpx.AsyncClient, preview_url: str) -> str:
         data = r.json()
     except (httpx.HTTPError, ValueError) as e:
         raise UpstreamError(f"deezer lookup failed: {e}") from e
-    link = data.get("preview") if isinstance(data, dict) else None
+    link = _find_preview(data)
     if not link:
         err = data.get("error") if isinstance(data, dict) else None
         raise UpstreamError(f"deezer returned no preview ({err or 'empty'})")
     _check_url(link)
     return link
+
+
+def _find_preview(data) -> str | None:
+    """`preview` of a track object; for an album its first track with one (tracks.data); for an
+    artist's top tracks the first of data[]."""
+    if not isinstance(data, dict):
+        return None
+    if data.get("preview"):
+        return data["preview"]
+    for key in ("tracks", None):
+        lst = (data.get(key) or {}).get("data") if key else data.get("data")
+        if isinstance(lst, list):
+            for t in lst:
+                if isinstance(t, dict) and t.get("preview"):
+                    return t["preview"]
+    return None
 
 
 def fetch_bytes(c: httpx.Client, url: str, limit: int = MAX_COVER_BYTES) -> bytes:
