@@ -1,14 +1,20 @@
 """The only entry points server core may call into the AI engine.
 
 Owned by the AI engine. Server core imports these names and nothing else from `nasmusic.ai`.
-The stub bodies below are deliberately simple so server core can be built and tested before the
-real engine lands; the AI engine replaces them, keeping the signatures.
+Signatures are the contract; bodies delegate to the engine modules.
+
+Error policy: `analyse_pending`, `run_nightly` and `run_weekly_discovery` never raise (they log and
+return what they managed). `more_like` raises `KeyError` for an unknown / not-yet-analysed track
+(server core maps it to 404). `explain` always answers.
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+
+log = logging.getLogger("nasmusic.ai")
 
 
 @dataclass(frozen=True)
@@ -23,17 +29,51 @@ class AIConfig:
 def analyse_pending(conn: sqlite3.Connection, cfg: AIConfig, limit: int | None = None) -> int:
     """Fingerprint tracks with no `features` row for cfg.model_version. Returns count analysed.
     Called after each library scan and nightly. Must be safe to interrupt and resume."""
-    return 0
+    from dataclasses import replace
+
+    from . import analyser, models
+    from .common import BASIC_VERSION, ensure_default_settings
+    from .extractors import effective_version
+
+    try:
+        ensure_default_settings(conn)
+        version = effective_version(cfg.model_version)
+        if version != BASIC_VERSION:
+            try:
+                models.ensure_models(Path(cfg.data_dir), version)
+            except Exception:
+                log.exception("model files for %s unavailable; analysing with %s for now", version, BASIC_VERSION)
+                cfg = replace(cfg, model_version=BASIC_VERSION)
+        return analyser.analyse_pending(conn, cfg, limit)
+    except Exception:
+        log.exception("analyse_pending failed")
+        return 0
 
 
 def run_nightly(conn: sqlite3.Connection, cfg: AIConfig) -> list[str]:
     """Ingest feedback, retrain, deactivate yesterday's mixes, write today's mixes. Returns new mix ids."""
-    return []
+    from .common import ensure_default_settings
+    from .mixes import build_nightly
+    from .recommender import Recommender
+
+    try:
+        ensure_default_settings(conn)
+        rec = Recommender(conn, cfg)
+        if len(rec.lib):
+            rec.train(save=True)
+        return build_nightly(rec)
+    except Exception:
+        log.exception("nightly run failed")
+        return []
 
 
 def more_like(conn: sqlite3.Connection, cfg: AIConfig, track_id: str, minutes: int = 40) -> str:
     """Build and store a `more_like` mix seeded by track_id. Returns the mix id."""
-    raise NotImplementedError("AI engine not installed yet")
+    from .mixes import build_more_like
+    from .recommender import Recommender
+
+    minutes = max(10, min(int(minutes), 240))
+    return build_more_like(Recommender(conn, cfg), track_id, minutes)
 
 
 def explain(conn: sqlite3.Connection, cfg: AIConfig, track_id: str) -> tuple[str, list[str]]:
@@ -43,9 +83,33 @@ def explain(conn: sqlite3.Connection, cfg: AIConfig, track_id: str) -> tuple[str
         "WHERE mt.track_id = ? ORDER BY m.created_at DESC LIMIT 1",
         (track_id,),
     ).fetchone()
-    return (row[0] if row else "Picked from your library."), []
+    reason = row[0] if row else None
+    similar: list[str] = []
+    try:
+        from .mixes import MixBuilder
+        from .recommender import Recommender
+
+        rec = Recommender(conn, cfg)
+        i = rec.lib.index.get(track_id)
+        if i is not None:
+            similar = [rec.lib.ids[j] for j in rec.similar(i, 3)]
+            if reason is None:
+                rec.load_or_train()
+                liked = rec.sig.weight[i] >= 0.75 or rec.lib.starred[i] or rec.lib.rating[i] >= 4
+                reason = MixBuilder(rec).reason(i, "known" if liked else "rare")
+    except Exception:
+        log.exception("explain failed for %s", track_id)
+    return (reason or "Picked from your library."), similar
 
 
 def run_weekly_discovery(conn: sqlite3.Connection, cfg: AIConfig) -> int:
     """Refresh the `suggestions` table. Returns number of new suggestions."""
-    return 0
+    from . import discovery
+    from .common import ensure_default_settings
+
+    try:
+        ensure_default_settings(conn)
+        return discovery.run(conn, cfg)
+    except Exception:
+        log.exception("weekly discovery failed")
+        return 0
