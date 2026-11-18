@@ -1,0 +1,60 @@
+# nas-music web player
+
+Vite + Svelte 5 + TypeScript. Built to `dist/` and served by the server at `/` (the desktop app in
+`../desktop` bundles the same build). Spec: `docs/v2.md` §6–§8, §10.
+
+```bash
+npm ci
+npm run dev:mock     # whole UI against the in-browser mock server (sign in: admin / admin123)
+NM_SERVER=https://192.168.68.2:8443 npm run dev   # proxy /api (incl. the Connect WebSocket) to a real server
+npm test             # Vitest: Connect state machine, lyrics, queue ops, EQ graph, events
+npm run lint         # eslint + svelte-check
+npm run build        # → dist/
+```
+
+Typing `mock` as the server address on the Connect screen also runs against the mock (in any build).
+The mock includes a fake library, generated cover art and tones, invites (`WELCOME1`), and a Connect hub
+with a simulated phone ("Pixel 8 (mock)") so transfer in/out and remote mode can be exercised.
+
+## Layout
+- `src/lib/api/client.ts` – typed client for every v1/v2 endpoint; cookie (same-origin) or bearer auth.
+- `src/lib/api/mock.ts`, `mockData.ts` – mock HTTP API + Connect hub.
+- `src/lib/connect.ts` – Connect WebSocket client (hello/welcome, rev-ordered state, takeover/release,
+  commands, 25 s ping + pong timeout, exponential reconnect).
+- `src/lib/player.svelte.ts` – `<audio>` → Web Audio graph, queues mirrored to the server, Connect roles,
+  listening events, Media Session, A-B repeat, speed/pitch, per-output EQ profiles.
+- `src/lib/eq.ts` – 10-band EQ, presets, preamp, bass boost, widening/mono matrix, balance; pitch worklet.
+- `src/lib/events.ts` – play (≥ 80 % or end) / skip detection, batching to `/events`, opt-in context.
+- `src/lib/lyrics.ts`, `queue.ts` – pure helpers.
+- `src/screens/*`, `src/components/*` – Musicolet-style UI (tabs: Queues, Now Playing, Folders, Albums,
+  Artists, Genres, Playlists, Search, More).
+
+Keyboard: Space play/pause · ←/→ seek 5 s · Shift+←/→ previous/next · L lyrics · M mute · S shuffle ·
+R repeat · / search.
+
+## Contract notes (checked against server core's v2 `api/openapi.yaml`, branch claude/server-core-b7e7a3)
+Aligned: settings envelope `{settings}` with `context.<signal>` keys, `DataSummary`, `DELETE /me/data?signal=…`
+(`all` sends `confirm=true`), `EventContext` (`seeks [{fromMs,toMs}]`, `volumeChanges [{atMs,volume}]`,
+`network` wifi/cellular/ethernet/none, ISO weekday), lyrics `?source=user|embedded|lrc_file`, `Device.current`,
+Connect `error {detail}`, Tauri CORS and the `/join/<code>` SPA fallback.
+
+Still open:
+1. **`/stream` and `/art` don't accept `?token=`.** `<audio>`/`<img>` can't send `Authorization`, so the
+   desktop app (cross-origin, bearer) fetches art with the header into blob URLs and, for audio, tries
+   `?token=` first and then downloads the whole track with the header into a blob. That works but loses
+   streaming/Range for the first seconds of each track. Please accept `?token=` on `/stream` (as on `/connect`).
+2. **Connect `state` shape**: the client accepts flat `{"type":"state", ...PlaybackState}` and wrapped
+   `{"type":"state","state":{...}}`, and sends flat.
+3. **Transfer to self**: the client sends `transfer{toDeviceId: self}` before local playback and ignores a
+   `takeover` for the same track arriving within 5 s.
+4. **Per-device switches** (`device.<deviceId>.context.<signal>`) aren't offered in the web UI yet; the web
+   writes the user-level keys.
+5. **No bulk queue edit.** Sorting replays `POST /queues/{id}/move`; "Clear" deletes one position at a time.
+   Suggest `PUT /queues/{id}/tracks {trackIds, currentIndex}`.
+6. **Share link** has no track deep link; it copies `/#/album/<albumId>?track=<id>`.
+7. **Pair code** is shown as text (no QR rendering on web; `qrPayload` is ignored).
+8. **Cloudflare Access on the tunnel.** Browsers and the desktop webview can't attach the Access service
+   token to `<audio>`, `<img>` or WebSockets; using the player through the tunnel needs an Access policy that
+   lets browsers in (an Access login, or a bypass for `/` and `/api` since the app has its own auth).
+9. **CSP**: the player CSP has `script-src 'self'`, so the pitch-shifter AudioWorklet ships as
+   `dist/pitch-worklet.js` (no blob: modules). Keep serving files from `dist/` root.

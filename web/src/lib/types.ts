@@ -106,7 +106,7 @@ export interface Session {
 }
 
 export interface Me {
-  userId: string;
+  id: string;
   username: string;
   isAdmin: boolean;
 }
@@ -127,6 +127,13 @@ export interface MyDevice {
   kind: DeviceKind;
   lastSeen?: string | null;
   online?: boolean;
+  current?: boolean;
+  appVersion?: string | null;
+}
+
+export interface DataSummary {
+  events: { count: number; withContext: number; first: string | null; last: string | null };
+  signals: Record<string, { enabled?: boolean; fields?: string[]; count: number; first?: string | null; last?: string | null }>;
 }
 
 export interface FolderListing {
@@ -173,6 +180,7 @@ export interface Invite {
   expiresAt: string;
   usedBy?: string | null;
   usedAt?: string | null;
+  createdBy?: string;
 }
 
 export interface AdminUser {
@@ -182,6 +190,7 @@ export interface AdminUser {
   disabled: boolean;
   createdAt?: string;
   lastLogin?: string | null;
+  deviceCount?: number;
 }
 
 export type EventType = 'play' | 'skip' | 'star' | 'unstar' | 'rate' | 'thumb_up' | 'thumb_down' | 'thumb_clear';
@@ -189,8 +198,8 @@ export type EventSource = 'mix' | 'library' | 'favourites' | 'more_like' | 'sear
 
 export interface EventContext {
   // Listening details
-  seeks?: { fromS: number; toS: number }[];
-  volumeChanges?: { atS: number; volume: number }[];
+  seeks?: { fromMs: number; toMs: number }[];
+  volumeChanges?: { atMs: number; volume: number }[];
   repeatOfPrevious?: boolean;
   addedFrom?: string;
   sessionId?: string;
@@ -199,7 +208,7 @@ export interface EventContext {
   output?: string;
   // Device & network
   deviceKind?: DeviceKind;
-  network?: 'wifi' | 'cellular' | 'ethernet' | 'unknown';
+  network?: 'wifi' | 'cellular' | 'ethernet' | 'none';
   charging?: boolean;
   batteryPct?: number;
   screenOn?: boolean;
@@ -281,4 +290,5 @@ export type ServerMessage =
   | { type: 'takeover'; state: PlaybackState }
   | { type: 'release' }
   | { type: 'queues'; queueId: string }
-  | { type: 'pong' };
+  | { type: 'pong' }
+  | { type: 'error'; detail: string };

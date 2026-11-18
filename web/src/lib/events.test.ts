@@ -31,7 +31,7 @@ describe('PlaybackTracker', () => {
     p.ended();
     p.start(tr('a'));
     p.finish(3);
-    expect(details[0]).toMatchObject({ seeks: [{ fromS: 10, toS: 50 }], repeatOfPrevious: false });
+    expect(details[0]).toMatchObject({ seeks: [{ fromMs: 10000, toMs: 50000 }], repeatOfPrevious: false });
     expect(details[1]).toMatchObject({ repeatOfPrevious: true, sessionPosition: 2 });
   });
 });
@@ -55,7 +55,7 @@ describe('EventQueue', () => {
 });
 
 describe('buildContext', () => {
-  const details = { seeks: [{ fromS: 1, toS: 2 }], volumeChanges: [], repeatOfPrevious: false, sessionPosition: 3, meta: { searchQuery: 'conver', addedFrom: 'search' } };
+  const details = { seeks: [{ fromMs: 1000, toMs: 2000 }], volumeChanges: [], repeatOfPrevious: false, sessionPosition: 3, meta: { searchQuery: 'conver', addedFrom: 'search' } };
   const env = { output: 'moto buds', deviceKind: 'web' as const, network: 'wifi' as const, now: new Date(2026, 10, 18, 21, 5) };
   it('is empty when every switch is off', () => {
     expect(buildContext({}, details, env)).toBeUndefined();
@@ -64,6 +64,6 @@ describe('buildContext', () => {
     const c = buildContext({ search: true, time: true }, details, env)!;
     expect(c).toEqual({ searchQuery: 'conver', localHour: 21, weekday: 3 });
     const all = buildContext({ listening: true, output: true, device: true }, details, env)!;
-    expect(all).toMatchObject({ seeks: [{ fromS: 1, toS: 2 }], addedFrom: 'search', sessionPosition: 3, output: 'moto buds', deviceKind: 'web', network: 'wifi' });
+    expect(all).toMatchObject({ seeks: [{ fromMs: 1000, toMs: 2000 }], addedFrom: 'search', sessionPosition: 3, output: 'moto buds', deviceKind: 'web', network: 'wifi' });
   });
 });

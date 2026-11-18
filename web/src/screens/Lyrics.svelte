@@ -4,7 +4,7 @@
   import { currentLineIndex, noLyricsMessage, SOURCE_LABEL, toLrc } from '../lib/lyrics';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
-  import type { Lyrics, Track } from '../lib/types';
+  import type { Lyrics, LyricsSource, Track } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
 
   let { track }: { track: Track } = $props();
@@ -17,12 +17,14 @@
   let box: HTMLDivElement | undefined = $state();
   let userScrolledAt = 0;
 
+  let source = $state<LyricsSource | undefined>(undefined);
+
   async function load(id: string) {
     loading = true;
     missing = false;
     lyrics = null;
     try {
-      lyrics = await session.api.lyrics(id);
+      lyrics = await session.api.lyrics(id, source);
     } catch (e) {
       missing = true;
       if (!(e instanceof ApiError) || e.status !== 404) ui.toast("Couldn't load lyrics");
@@ -58,10 +60,17 @@
     ui.open({ kind: 'lyricsEditor', track, raw });
   }
 
+  function pick(k: LyricsSource) {
+    srcOpen = false;
+    source = k;
+    void load(track.id);
+  }
+
   async function revert() {
     srcOpen = false;
     try {
       await session.api.deleteLyrics(track.id);
+      source = undefined;
       await load(track.id);
     } catch (e) {
       ui.toast((e as Error).message);
@@ -81,15 +90,15 @@
   <div class="head">
     <div class="src">
       <button class="srcbtn" onclick={() => (srcOpen = !srcOpen)}>
-        {lyrics ? SOURCE_LABEL[lyrics.source] : 'Embedded lyrics'}<ChevronDown size={16} />
+        {SOURCE_LABEL[lyrics?.source ?? source ?? 'embedded']}<ChevronDown size={16} />
       </button>
       {#if srcOpen}
         <div class="menu">
-          <div class="item sel">{lyrics ? SOURCE_LABEL[lyrics.source] : 'Embedded lyrics'}</div>
+          {#each ['embedded', 'lrc_file', 'user'] as const as k}
+            <button class="item" class:sel={(lyrics?.source ?? source ?? 'embedded') === k} onclick={() => pick(k)}>{SOURCE_LABEL[k]}</button>
+          {/each}
           {#if lyrics?.source === 'user'}
-            <button class="item" onclick={revert}>Revert to the file's lyrics</button>
-          {:else}
-            <button class="item" onclick={edit}>Your edit…</button>
+            <button class="item" onclick={revert}>Delete your edit</button>
           {/if}
         </div>
       {/if}

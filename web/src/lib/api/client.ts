@@ -1,4 +1,5 @@
 import type {
+  DataSummary,
   AdminUser,
   Album,
   Artist,
@@ -7,6 +8,7 @@ import type {
   Genre,
   Invite,
   Lyrics,
+  LyricsSource,
   Me,
   Mix,
   MyDevice,
@@ -208,13 +210,15 @@ export class ApiClient {
   changePassword = (current: string, next: string) => this.put<void>('/me/password', { current, new: next });
   myDevices = () => this.get<MyDevice[]>('/me/devices');
   removeDevice = (id: string) => this.del<void>(`/me/devices/${encodeURIComponent(id)}`);
-  pairCode = () => this.post<{ pairCode: string; qrPayload: string }>('/me/pair-code');
-  getSettings = () => this.get<Record<string, unknown>>('/me/settings');
-  putSettings = (s: Record<string, unknown>) => this.put<Record<string, unknown>>('/me/settings', s);
-  dataSummary = () => this.get<Record<string, unknown>>('/me/data');
+  pairCode = () => this.post<{ pairCode: string; expiresAt?: string; qrPayload: unknown }>('/me/pair-code');
+  getSettings = () => this.get<{ settings: Record<string, unknown> }>('/me/settings');
+  /** Merge keys (null deletes). */
+  putSettings = (b: { settings: Record<string, unknown> }) => this.put<{ settings: Record<string, unknown> }>('/me/settings', b);
+  dataSummary = () => this.get<DataSummary>('/me/data');
   dataExportUrl = () => `${this.base}/me/data/export`;
   dataExport = () => this.get<unknown>('/me/data/export');
-  deleteData = (signal: string) => this.del<void>('/me/data', { signal });
+  deleteData = (signal: string) =>
+    this.del<{ eventsUpdated?: number; eventsDeleted?: number }>('/me/data', signal === 'all' ? { signal, confirm: true } : { signal });
 
   // ---- library ----
   artists = (offset = 0, limit = 1000) => this.get<Artist[]>('/library/artists', { offset, limit });
@@ -236,7 +240,7 @@ export class ApiClient {
   // ---- favourites / lyrics / ai ----
   star = (id: string) => this.put<void>(`/favourites/${encodeURIComponent(id)}`);
   unstar = (id: string) => this.del<void>(`/favourites/${encodeURIComponent(id)}`);
-  lyrics = (id: string) => this.get<Lyrics>(`/tracks/${encodeURIComponent(id)}/lyrics`);
+  lyrics = (id: string, source?: LyricsSource) => this.get<Lyrics>(`/tracks/${encodeURIComponent(id)}/lyrics`, { source });
   saveLyrics = (id: string, raw: string) => this.put<Lyrics | void>(`/tracks/${encodeURIComponent(id)}/lyrics`, { raw });
   deleteLyrics = (id: string) => this.del<void>(`/tracks/${encodeURIComponent(id)}/lyrics`);
   why = (id: string) => this.get<{ reason: string; similarTo?: Track[] }>(`/tracks/${encodeURIComponent(id)}/why`);

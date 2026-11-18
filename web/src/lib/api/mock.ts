@@ -193,22 +193,22 @@ export class MockBackend {
       this.tokens.delete(token!);
       return undefined;
     }
-    if (path === '/me') return { userId: me.id, username: me.username, isAdmin: me.isAdmin };
+    if (path === '/me') return { id: me.id, username: me.username, isAdmin: me.isAdmin, createdAt: me.createdAt };
     if (path === '/me/password') {
       if (body.current !== me.password) throw new HttpError(403, 'Current password is wrong');
       me.password = String(body.new);
       return undefined;
     }
-    if (path === '/me/devices') return this.hub.devices().map((d) => ({ id: d.id, name: d.name, kind: d.kind, online: d.online, lastSeen: iso() }));
+    if (path === '/me/devices') return this.hub.devices().map((d) => ({ id: d.id, name: d.name, kind: d.kind, online: d.online, lastSeen: iso(), current: d.id === who.deviceId }));
     if ((r = m(/^\/me\/devices\/([^/]+)$/)) && method === 'DELETE') return undefined;
     if (path === '/me/pair-code') return { pairCode: 'ABCD2345', qrPayload: 'nasmusic://pair?code=ABCD2345' };
     if (path === '/me/settings') {
-      if (method === 'PUT') Object.assign(this.settings, body);
-      return this.settings;
+      if (method === 'PUT') Object.assign(this.settings, (body.settings as Record<string, unknown>) ?? {});
+      return { settings: this.settings };
     }
     if (path === '/me/data') {
       if (method === 'DELETE') return undefined;
-      return { events: this.events.length, withContext: this.events.filter((e) => (e as { context?: unknown }).context).length, from: null, to: null };
+      return { events: { count: this.events.length, withContext: this.events.filter((e) => (e as { context?: unknown }).context).length, first: null, last: null }, signals: {} };
     }
     if (path === '/me/data/export') return { events: this.events };
 
@@ -310,11 +310,13 @@ export class MockBackend {
         this.lyricOverrides.delete(id);
         return undefined;
       }
-      const own = this.lyricOverrides.get(id);
-      const raw = own ?? L.lyrics.get(id);
+      const want = qs.get('source');
+      const own = want && want !== 'user' ? undefined : this.lyricOverrides.get(id);
+      const fileSrc = hashSource(id) ? 'lrc_file' : 'embedded';
+      const raw = own ?? (want === 'user' || (want && want !== fileSrc) ? undefined : L.lyrics.get(id));
       if (raw == null) throw new HttpError(404, `no lyrics for ${t.fileName}`);
       const p = parseLrc(raw);
-      return { trackId: id, synced: p.synced, source: own != null ? 'user' : (hashSource(id) ? 'lrc_file' : 'embedded'), lines: p.lines, text: p.text, canEdit: true };
+      return { trackId: id, synced: p.synced, source: own != null ? 'user' : fileSrc, lines: p.lines, text: p.text, canEdit: true };
     }
     if ((r = m(/^\/tracks\/([^/]+)\/why$/))) {
       const t = this.track(r[1]);
@@ -446,7 +448,7 @@ export class MockBackend {
     if (path === '/admin/invites') {
       if (method === 'POST') {
         const code = Math.random().toString(36).slice(2, 10).toUpperCase();
-        const inv: Invite = { code, note: (body.note as string) ?? null, createdAt: iso(), expiresAt: new Date(Date.now() + Number(body.expiresInDays ?? 7) * 864e5).toISOString(), url: `${location.origin}/join/${code}` };
+        const inv: Invite = { code, note: (body.note as string) ?? null, createdAt: iso(), expiresAt: new Date(Date.now() + Number(body.expiresInDays ?? 7) * 864e5).toISOString(), url: `${location.origin}/join/${code}`, createdBy: me.username };
         this.invites.push(inv);
         return inv;
       }

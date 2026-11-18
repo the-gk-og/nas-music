@@ -5,11 +5,17 @@
   import { session } from '../lib/session.svelte';
   import { ui } from '../lib/ui.svelte';
 
+  import type { DataSummary } from '../lib/types';
+
   let deviceName = $state(session.saved.deviceName);
-  let summary = $state<Record<string, unknown> | null>(null);
+  let summary = $state<DataSummary | null>(null);
+  const day = (s?: string | null) => (s ? new Date(s).toLocaleDateString() : '—');
   $effect(() => {
     session.api.dataSummary().then((s) => (summary = s)).catch(() => (summary = null));
   });
+
+  // Every context signal (also the Android-only ones), for "Erase collected context".
+  const ALL_SIGNALS = ['listening', 'output', 'device', 'motion', 'location', 'weather', 'search', 'time', 'health'];
 
   const allOn = $derived(WEB_SIGNALS.every((s) => player.signals[s.key]));
 
@@ -38,7 +44,8 @@
     );
     if (!ok) return;
     try {
-      await session.api.deleteData(signal);
+      if (signal === 'context') for (const s of ALL_SIGNALS) await session.api.deleteData(s);
+      else await session.api.deleteData(signal);
       ui.toast('Erased');
       summary = await session.api.dataSummary().catch(() => null);
     } catch (e) {
@@ -80,7 +87,12 @@
 
   <div class="section-title">Your data</div>
   <div class="pad">
-    {#if summary}<pre class="sum">{JSON.stringify(summary, null, 2)}</pre>{/if}
+    {#if summary?.events}
+      <p class="small">{summary.events.count} listening events ({summary.events.withContext} with context), {day(summary.events.first)} – {day(summary.events.last)}</p>
+      {#each Object.entries(summary.signals ?? {}).filter(([, v]) => v.count) as [name, v]}
+        <div class="small muted">{name}: {v.count} events · {day(v.first)} – {day(v.last)}</div>
+      {/each}
+    {/if}
     <div class="btns">
       <button class="btn" onclick={exportData}>Export my data (JSON)</button>
       <button class="btn danger" onclick={() => erase('context')}>Erase collected context</button>
@@ -109,12 +121,5 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-  }
-  .sum {
-    background: var(--bg-1);
-    padding: 10px;
-    border-radius: 8px;
-    font-size: 0.8rem;
-    overflow-x: auto;
   }
 </style>

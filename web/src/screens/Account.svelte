@@ -9,7 +9,7 @@
   let next = $state('');
   let next2 = $state('');
   let msg = $state<string | null>(null);
-  let pair = $state<{ pairCode: string; qrPayload: string } | null>(null);
+  let pair = $state<{ pairCode: string; qrPayload: unknown } | null>(null);
 
   function load() {
     session.api.myDevices().then((d) => (devices = d)).catch(() => (devices = []));
@@ -48,10 +48,10 @@
   {#each devices ?? [] as d (d.id)}
     <div class="dev">
       <div>
-        <div>{d.name}{#if d.id === session.saved.deviceId}<span class="muted"> (this device)</span>{/if}</div>
+        <div>{d.name}{#if d.current || d.id === session.saved.deviceId}<span class="muted"> (this device)</span>{/if}</div>
         <div class="muted small">{d.kind}{d.online ? ' · online' : d.lastSeen ? ` · last seen ${new Date(d.lastSeen).toLocaleString()}` : ''}</div>
       </div>
-      {#if d.id !== session.saved.deviceId}<button class="btn danger" onclick={() => remove(d)}>Remove</button>{/if}
+      {#if !d.current && d.id !== session.saved.deviceId}<button class="btn danger" onclick={() => remove(d)}>Remove</button>{/if}
     </div>
   {/each}
   <div class="pad">

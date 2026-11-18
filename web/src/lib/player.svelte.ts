@@ -4,7 +4,7 @@ import { ApiError } from './api/client';
 import { mockBackend } from './api/mock';
 import { ConnectClient, extrapolatePosition, type ConnectStatus } from './connect';
 import {
-  PITCH_WORKLET,
+  PITCH_WORKLET_URL,
   buildEqGraph,
   defaultEq,
   loadProfiles,
@@ -296,8 +296,7 @@ export class Player {
   private async loadPitchWorklet() {
     if (!this.ctx?.audioWorklet || !this.graph) return;
     try {
-      const url = URL.createObjectURL(new Blob([PITCH_WORKLET], { type: 'application/javascript' }));
-      await this.ctx.audioWorklet.addModule(url);
+      await this.ctx.audioWorklet.addModule(new URL(PITCH_WORKLET_URL, document.baseURI).href);
       this.pitchNode = new AudioWorkletNode(this.ctx, 'nm-pitch', { outputChannelCount: [2] });
       this.graph.insert(this.pitchNode);
       this.pitchAvailable = true;
@@ -1063,11 +1062,11 @@ export class Player {
   /** Desktop shell hook (native notification on track change). */
   onTrackChange: ((t: Track) => void) | null = null;
 
-  private network(): 'wifi' | 'cellular' | 'ethernet' | 'unknown' | undefined {
+  private network(): 'wifi' | 'cellular' | 'ethernet' | 'none' | undefined {
     const c = (navigator as Navigator & { connection?: { type?: string } }).connection;
     const t = c?.type;
-    if (t === 'wifi' || t === 'cellular' || t === 'ethernet') return t;
-    return t ? 'unknown' : undefined;
+    if (t === 'wifi' || t === 'cellular' || t === 'ethernet' || t === 'none') return t;
+    return undefined;
   }
 
   private watchEnvironment() {
@@ -1091,7 +1090,7 @@ export class Player {
 
   async loadSignals() {
     try {
-      const s = await session.api.getSettings();
+      const s = (await session.api.getSettings()).settings ?? {};
       const out: Partial<Record<SignalKey, boolean>> = {};
       for (const sig of WEB_SIGNALS) out[sig.key] = s[signalSetting(sig.key)] === true;
       this.signals = out;
@@ -1106,7 +1105,7 @@ export class Player {
     const body: Record<string, boolean> = {};
     for (const [k, v] of Object.entries(patch)) body[signalSetting(k as SignalKey)] = !!v;
     try {
-      await session.api.putSettings(body);
+      await session.api.putSettings({ settings: body });
     } catch (e) {
       ui.toast(e instanceof ApiError && e.status === 404 ? 'Saved on this device only (server has no settings endpoint yet)' : 'Saved on this device only');
     }

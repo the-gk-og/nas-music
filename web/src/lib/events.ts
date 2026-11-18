@@ -25,8 +25,8 @@ export class PlaybackTracker {
   private maxPos = 0;
   private lastPos = 0;
   private counted = false;
-  private seeks: { fromS: number; toS: number }[] = [];
-  private volumeChanges: { atS: number; volume: number }[] = [];
+  private seeks: { fromMs: number; toMs: number }[] = [];
+  private volumeChanges: { atMs: number; volume: number }[] = [];
   private lastTrackId: string | null = null;
   private sessionPosition = 0;
 
@@ -64,7 +64,7 @@ export class PlaybackTracker {
 
   seek(fromS: number, toS: number) {
     if (!this.track) return;
-    this.seeks.push({ fromS: round1(fromS), toS: round1(toS) });
+    this.seeks.push({ fromMs: Math.round(fromS * 1000), toMs: Math.round(toS * 1000) });
     this.lastPos = toS;
     if (toS < this.maxPos) this.maxPos = toS;
   }
@@ -72,8 +72,9 @@ export class PlaybackTracker {
   volume(atS: number, volume: number) {
     if (!this.track) return;
     const last = this.volumeChanges[this.volumeChanges.length - 1];
-    if (last && atS - last.atS < 1) last.volume = volume;
-    else this.volumeChanges.push({ atS: round1(atS), volume: Math.round(volume * 100) / 100 });
+    const atMs = Math.round(atS * 1000);
+    if (last && atMs - last.atMs < 1000) last.volume = Math.round(volume * 100) / 100;
+    else this.volumeChanges.push({ atMs, volume: Math.round(volume * 100) / 100 });
   }
 
   /** Track reached its end naturally. */
@@ -243,7 +244,7 @@ export interface ContextEnv {
 
 export function buildContext(
   enabled: Partial<Record<SignalKey, boolean>>,
-  details: { seeks: { fromS: number; toS: number }[]; volumeChanges: { atS: number; volume: number }[]; repeatOfPrevious: boolean; sessionPosition: number; meta: PlayMeta },
+  details: { seeks: { fromMs: number; toMs: number }[]; volumeChanges: { atMs: number; volume: number }[]; repeatOfPrevious: boolean; sessionPosition: number; meta: PlayMeta },
   env: ContextEnv,
 ): EventContext | undefined {
   const c: EventContext = {};
