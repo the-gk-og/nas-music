@@ -12,13 +12,8 @@ from nasmusic.app.scheduler import Jobs
 from nasmusic.core import get_setting
 
 
-@pytest.fixture(autouse=True)
-def _reset_rate_limit():
-    from nasmusic import web as web_mod
-
-    web_mod._fails.clear()
-    yield
-    web_mod._fails.clear()
+def _admin_id(conn):
+    return conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()[0]
 
 
 @pytest.fixture
@@ -38,11 +33,11 @@ def test_login_required_and_login(web):
     assert r.status_code == 303 and r.headers["location"] == "/admin/login"
     assert web.get("/admin/pair", follow_redirects=False).status_code == 303
     r = login(web, "wrong")
-    assert r.status_code == 200 and "Wrong password" in r.text
+    assert r.status_code == 200 and "Wrong username or password" in r.text
     r = login(web)
     assert r.status_code == 303
     cookie = r.headers["set-cookie"]
-    assert "HttpOnly" in cookie and "SameSite=strict" in cookie and "Secure" in cookie
+    assert "HttpOnly" in cookie and "SameSite=lax" in cookie and "Secure" in cookie
     r = web.get("/admin")
     assert r.status_code == 200 and "Dashboard" in r.text and ">5</b><span>tracks" in r.text
     assert r.headers["x-frame-options"] == "DENY"
@@ -52,7 +47,7 @@ def test_login_required_and_login(web):
 
 
 def test_forged_cookie_rejected(web):
-    web.cookies.set("nm_admin", "99999999999.deadbeef")
+    web.cookies.set("nm_session", "forged-token")
     assert web.get("/admin", follow_redirects=False).status_code == 303
 
 
@@ -95,7 +90,7 @@ def test_pair_page_qr_payload(web, conn):
 
 def test_devices_revoke_from_dashboard(web, conn):
     login(web)
-    code, _ = auth.create_pair_code(conn)
+    code, _ = auth.create_pair_code(conn, _admin_id(conn))
     token = web.post("/api/v1/pair", json={"pairCode": code, "deviceName": "My Pixel"}).json()
     assert "My Pixel" in web.get("/admin").text
     r = web.post(f"/admin/devices/{token['deviceId']}/revoke", follow_redirects=False)
@@ -106,8 +101,8 @@ def test_devices_revoke_from_dashboard(web, conn):
 
 
 def test_suggestions_page(web, conn):
-    conn.execute("INSERT INTO suggestions (id, artist, album, reason, created_at) VALUES "
-                 "('s1', 'Artist <b>', 'Album', 'Because', '2026-11-15T03:00:00Z')")
+    conn.execute("INSERT INTO suggestions (id, user_id, artist, album, reason, created_at) VALUES "
+                 "('s1', (SELECT id FROM users WHERE username = 'admin'), 'Artist <b>', 'Album', 'Because', '2026-11-15T03:00:00Z')")
     login(web)
     r = web.get("/admin/suggestions")
     assert "Artist &lt;b&gt;" in r.text  # escaped
@@ -125,7 +120,7 @@ def test_settings_and_jobs(web, conn):
     assert rec["ok"] and rec["result"]["unchanged"] == 5
     assert get_setting(conn, "job.scan")["ok"] is True
     rec = jobs.run("nightly")
-    assert rec["ok"] and rec["result"] == {"mixIds": []}
+    assert rec["ok"] and all(ids == [] for ids in rec["result"]["mixIds"].values())  # {user or "*": [ids]}
     assert "Nightly mixes" in web.get("/admin").text
     assert web.post("/admin/jobs/bogus", follow_redirects=False).status_code == 404
 

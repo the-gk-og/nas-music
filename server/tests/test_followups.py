@@ -11,10 +11,10 @@ from PIL import Image
 
 from nasmusic import auth
 from nasmusic.ai import api as ai
-from nasmusic.app import create_app
+from nasmusic.app import ai_adapter, create_app
 from nasmusic.app.scheduler import Jobs
 from nasmusic.sync import SYNC_KBPS, estimate_opus_bytes
-from tests.conftest import track_ids
+from tests.conftest import make_user, track_ids
 
 MP3 = b"ID3\x04\x00\x00\x00\x00\x00\x00" + bytes(range(256)) * 40  # fake MP3 bytes
 DEEZER_API = "https://api.deezer.com/track/3135556"
@@ -66,11 +66,12 @@ def upstream(app):
 
 @pytest.fixture
 def sugg(conn):
+    make_user(conn, "alice", admin=True)
     rows = [("full", DEEZER_API, COVER), ("bare", None, None), ("direct", DEEZER_CDN, None)]
     for sid, preview, cover in rows:
         conn.execute(
-            "INSERT INTO suggestions (id, artist, album, reason, preview_url, cover_url, created_at) "
-            "VALUES (?, 'A', ?, 'r', ?, ?, '2026-11-15T03:00:00Z')", (sid, f"Album {sid}", preview, cover))
+            "INSERT INTO suggestions (id, user_id, artist, album, reason, preview_url, cover_url, created_at) "
+            "VALUES (?, (SELECT id FROM users WHERE username = 'alice'), 'A', ?, 'r', ?, ?, '2026-11-15T03:00:00Z')", (sid, f"Album {sid}", preview, cover))
 
 
 def _files(d):
@@ -170,14 +171,13 @@ def test_suggestion_flags(client, sugg):
 def test_admin_suggestions_page_uses_proxy(cfg, scanned, sugg, monkeypatch):
     from nasmusic import web
 
-    web._fails.clear()
     cfg = replace(cfg, admin_password_hash=auth.hash_password("hunter22"))
     app = create_app(cfg, jobs=Jobs(cfg))
     u = Upstream()
     app.state.ctx.http_transport = httpx.MockTransport(u)
     with TestClient(app) as c:
         assert c.get("/admin/suggestions/full/cover", follow_redirects=False).status_code == 303
-        c.post("/admin/login", data={"password": "hunter22"})
+        c.post("/admin/login", data={"username": "alice", "password": "password123"})  # the suggestions' owner
         page = c.get("/admin/suggestions").text
         assert "/admin/suggestions/full/cover" in page and "/admin/suggestions/full/preview" in page
         assert "dzcdn.net" not in page  # browser never gets the upstream URLs
@@ -207,6 +207,7 @@ def test_more_like_error_mapping(client, conn, monkeypatch):
     assert client.post(f"/api/v1/mixes/more-like/{tid}").status_code == 500
 
 
+@pytest.mark.skipif(not ai_adapter.is_v2(), reason="needs the v2 (per-user) AI engine")
 def test_more_like_real_engine_unanalysed_track_is_404(client, conn):
     """With the real AI engine and nothing analysed yet, the seed is unknown to it -> 404."""
     tid = track_ids(conn)["Song 1"]
@@ -217,8 +218,8 @@ def test_more_like_real_engine_unanalysed_track_is_404(client, conn):
 
 
 def _mix(conn, mix_id, tracks):
-    conn.execute("INSERT INTO mixes (id, kind, title, for_date, created_at) "
-                 "VALUES (?, 'daily', 'Daily', '2026-11-18', '2026-11-18T02:00:00Z')", (mix_id,))
+    conn.execute("INSERT INTO mixes (id, user_id, kind, title, for_date, created_at) "
+                 "VALUES (?, (SELECT id FROM users WHERE username = 'alice'), 'daily', 'Daily', '2026-11-18', '2026-11-18T02:00:00Z')", (mix_id,))
     for i, t in enumerate(tracks):
         conn.execute("INSERT INTO mix_tracks (mix_id, position, track_id, reason) VALUES (?, ?, ?, 'r')",
                      (mix_id, i, t))
@@ -271,7 +272,9 @@ def test_pretranscode_runs_ffmpeg_niced(cfg, conn, scanned, monkeypatch):
         return real_run(*a, **k)
 
     monkeypatch.setattr(subprocess, "run", spy)
-    conn.execute("UPDATE tracks SET starred_at = '2026-11-18T00:00:00Z' WHERE title = 'Song 1'")
+    conn.execute("INSERT INTO user_tracks (user_id, track_id, starred_at) SELECT "
+                 "(SELECT id FROM users WHERE username = 'admin'), id, '2026-11-18T00:00:00Z' "
+                 "FROM tracks WHERE title = 'Song 1'")
     jobs = Jobs(cfg)
     assert jobs.run("pretranscode")["result"]["transcoded"] == 1
     assert len(seen) == 1 and seen[0] is not None
@@ -288,9 +291,11 @@ def test_thumb_clear(client, conn):
             {"id": str(uuid.uuid4()), "type": t, "trackId": tid, "at": "2026-11-18T10:00:00Z"}]}).json()
 
     assert post("thumb_down")["accepted"] == 1
-    assert conn.execute("SELECT blocked FROM tracks WHERE id = ?", (tid,)).fetchone()[0] == 1
+    blocked = lambda: conn.execute("SELECT blocked FROM user_tracks WHERE track_id = ? AND user_id = ?",  # noqa: E731
+                                   (tid, client.user_id)).fetchone()[0]
+    assert blocked() == 1
     assert post("thumb_clear")["accepted"] == 1
-    assert conn.execute("SELECT blocked FROM tracks WHERE id = ?", (tid,)).fetchone()[0] == 0
+    assert blocked() == 0
     assert conn.execute("SELECT COUNT(*) FROM events WHERE type = 'thumb_clear'").fetchone()[0] == 1
 
 
@@ -300,7 +305,6 @@ def test_thumb_clear(client, conn):
 def test_dashboard_progress_uses_fallback_model(cfg, scanned, conn):
     from nasmusic import web
 
-    web._fails.clear()
     ids = list(track_ids(conn).values())
     for tid in ids[:2]:
         conn.execute("INSERT INTO features (track_id, model_version, embedding, dims, analysed_at) "

@@ -25,7 +25,10 @@ class Config:
     tunnel_url: str | None = None
     cf_access_client_id: str | None = None      # only ever put into the pairing QR
     cf_access_client_secret: str | None = None
-    admin_password_hash: str | None = None      # from `nasmusic hash-password`
+    admin_password_hash: str | None = None      # from `nasmusic hash-password`; seeds the first admin user
+    admin_username: str = "admin"               # name of the first admin user (v1 data is migrated to it)
+    web_root: Path | None = None                # built web player (web/dist); default /opt/nasmusic/web
+    cors_origins: list[str] = field(default_factory=list)  # extra CORS origins (e.g. a Vite dev server)
     timezone: str = "Europe/London"
     opus_cache_gb: float = 20.0
     lastfm_api_key: str | None = None
@@ -76,6 +79,11 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
             raise ConfigError(f"missing required config key: {req}")
     vals = dict(raw)
     base = source.parent if source else Path.cwd()
+    if vals.get("web_root"):
+        wr = Path(vals["web_root"]).expanduser()
+        vals["web_root"] = wr if wr.is_absolute() else (base / wr).resolve()
+    else:
+        vals["web_root"] = None
     for key in ("library_root", "data_dir"):
         pth = Path(vals[key]).expanduser()
         vals[key] = pth if pth.is_absolute() else (base / pth).resolve()

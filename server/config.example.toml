@@ -15,8 +15,17 @@ tunnel_url = ""                    # e.g. "https://music.example.com"
 cf_access_client_id = ""
 cf_access_client_secret = ""
 
-# Web admin password: run `nasmusic hash-password` and paste the output here.
+# The first admin user. On a fresh install it is created with this password hash; a v1 database's
+# listening history is migrated to this user. Run `nasmusic hash-password` and paste the output here.
+# Other people join with invites (admin pages -> Users). Changing the hash later does not change an
+# existing password: use `nasmusic user passwd <name>` or the admin pages for that.
+admin_username = "admin"
 admin_password_hash = ""
+
+# Web player: built web/dist. Default: /opt/nasmusic/web (Docker image), else ../web/dist next to server/.
+# web_root = "/path/to/web/dist"
+# Extra CORS origins (the Tauri desktop app's origins are always allowed), e.g. a Vite dev server:
+# cors_origins = ["http://localhost:5173"]
 
 timezone = "Europe/London"         # nightly mixes run at 02:00, discovery Sunday 03:00 in this zone
 opus_cache_gb = 20                 # LRU limit for transcoded Opus files

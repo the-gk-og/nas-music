@@ -121,20 +121,43 @@ def anon(app):
         yield c
 
 
-@pytest.fixture
-def client(app, conn):
-    """A TestClient authenticated as a freshly paired device."""
+def make_user(conn, username: str, admin: bool = False, password: str = "password123"):
+    from nasmusic.auth import hash_password, users
+
+    u = users.by_username(conn, username)
+    if u is None:
+        u = users.create(conn, username, None, is_admin=admin, password_hash=hash_password(password))
+    return u
+
+
+def user_client(app, conn, username: str = "alice", admin: bool = True, kind: str = "android"):
+    """A TestClient (not yet entered) with a device token for `username`; attributes user_id/device_id/token."""
     from fastapi.testclient import TestClient
 
     from nasmusic import auth
 
-    code, _ = auth.create_pair_code(conn)
-    with TestClient(app) as c:
-        r = c.post("/api/v1/pair", json={"pairCode": code, "deviceName": "Test phone"})
-        assert r.status_code == 200, r.text
-        c.headers["Authorization"] = f"Bearer {r.json()['deviceToken']}"
-        c.device_id = r.json()["deviceId"]
+    u = make_user(conn, username, admin)
+    device_id, token = auth.create_device(conn, u.id, f"{username}'s {kind}", kind)
+    c = TestClient(app)
+    c.headers["Authorization"] = f"Bearer {token}"
+    c.user_id, c.device_id, c.token, c.username = u.id, device_id, token, username
+    return c
+
+
+@pytest.fixture
+def client(app, conn):
+    """A TestClient authenticated as admin user "alice"."""
+    with user_client(app, conn, "alice", admin=True) as c:
         yield c
+
+
+@pytest.fixture
+def bob(app, conn, client):
+    """A second, non-admin user (shares the app with `client`)."""
+    c = user_client(app, conn, "bob", admin=False)
+    c.__enter__()
+    yield c
+    c.__exit__(None, None, None)
 
 
 def track_ids(conn) -> dict[str, str]:

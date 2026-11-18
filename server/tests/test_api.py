@@ -65,7 +65,8 @@ def test_events_idempotent_with_side_effects(client, conn):
     r = client.post("/api/v1/events", json={"events": batch})
     assert r.status_code == 200 and r.json() == {"accepted": 5, "duplicates": 0}
 
-    row = lambda t: conn.execute("SELECT * FROM tracks WHERE id = ?", (t,)).fetchone()  # noqa: E731
+    row = lambda t: conn.execute("SELECT * FROM user_tracks WHERE track_id = ? AND user_id = ?",  # noqa: E731
+                                 (t, client.user_id)).fetchone()
     assert row(s1)["starred_at"] == "2026-11-18T10:01:00Z"
     assert row(s2)["rating"] == 4
     assert row(op)["blocked"] == 1
@@ -117,7 +118,8 @@ def test_favourites(client, conn):
 
 
 def _make_mix(conn, mix_id, kind, track_list, active=1, created="2026-11-18T02:00:00Z"):
-    conn.execute("INSERT INTO mixes (id, kind, title, for_date, created_at, active) VALUES (?,?,?,?,?,?)",
+    conn.execute("INSERT INTO mixes (id, user_id, kind, title, for_date, created_at, active) "
+                 "VALUES (?,(SELECT id FROM users WHERE username = 'alice'),?,?,?,?,?)",
                  (mix_id, kind, f"{kind} mix", "2026-11-18", created, active))
     for i, t in enumerate(track_list):
         conn.execute("INSERT INTO mix_tracks (mix_id, position, track_id, score, reason) VALUES (?,?,?,?,?)",
@@ -198,8 +200,8 @@ def test_manifest(client, conn):
 def test_suggestions(client, conn):
     for i, status in enumerate(["want", "new"]):
         conn.execute(
-            "INSERT INTO suggestions (id, artist, album, year, reason, status, created_at, buy_links) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO suggestions (id, user_id, artist, album, year, reason, status, created_at, buy_links) "
+            "VALUES (?,(SELECT id FROM users WHERE username = 'alice'),?,?,?,?,?,?,?)",
             (f"s{i}", "Someone", f"Record {i}", 2020, "Sounds like your favourites", status,
              "2026-11-15T03:00:00Z", json.dumps([{"name": "Bandcamp", "url": "https://example.com"}])),
         )

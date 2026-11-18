@@ -3,7 +3,8 @@
 {% block content %}
 <h1>Pair a phone</h1>
 <section class="card">
-  <p>Open the nas-music app and scan this code. It works once and expires at
+  <p>Open the nas-music app and scan this code to sign the phone in as <b>{{ username }}</b>.
+    It works once and expires at
     <b>{{ expires|localtime(tz, '%H:%M') }}</b> (10 minutes).</p>
   <img class="qr" src="{{ qr }}" alt="Pairing QR code">
   <p>Code: <span class="code mono">{{ code }}</span></p>

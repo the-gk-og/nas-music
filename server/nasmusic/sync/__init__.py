@@ -15,7 +15,8 @@ def estimate_opus_bytes(duration_s: float, kbps: int = SYNC_KBPS) -> int:
     return math.ceil(duration_s * kbps * 1000 / 8 * OGG_OVERHEAD)
 
 
-def manifest(conn: sqlite3.Connection, favourites_format: str = "opus", opus: OpusCache | None = None) -> dict:
+def manifest(conn: sqlite3.Connection, uid: str, favourites_format: str = "opus",
+             opus: OpusCache | None = None) -> dict:
     """Mix tracks are always Opus; favourites use `favourites_format`. A track that is both a favourite
     and in a mix appears once, as a favourite (so a FLAC favourite isn't downgraded), with its mixIds.
     `bytes` is what /stream returns for that format: exact for FLAC and for Opus already in the
@@ -25,7 +26,8 @@ def manifest(conn: sqlite3.Connection, favourites_format: str = "opus", opus: Op
     for r in conn.execute(
         "SELECT mt.track_id, mt.mix_id, t.duration_s, t.flac_bytes, t.mtime FROM mix_tracks mt "
         "JOIN mixes m ON m.id = mt.mix_id JOIN tracks t ON t.id = mt.track_id "
-        "WHERE m.active = 1 AND t.missing = 0 ORDER BY m.created_at DESC, mt.mix_id, mt.position"
+        "WHERE m.user_id = ? AND m.active = 1 AND t.missing = 0 ORDER BY m.created_at DESC, mt.mix_id, mt.position",
+        (uid,),
     ):
         files[r["track_id"]] = r
         it = items.setdefault(r["track_id"], {"trackId": r["track_id"], "format": "opus", "why": "mix",
@@ -33,8 +35,10 @@ def manifest(conn: sqlite3.Connection, favourites_format: str = "opus", opus: Op
         if r["mix_id"] not in it["mixIds"]:
             it["mixIds"].append(r["mix_id"])
     for r in conn.execute(
-        "SELECT id AS track_id, duration_s, flac_bytes, mtime FROM tracks "
-        "WHERE starred_at IS NOT NULL AND missing = 0 ORDER BY starred_at DESC, id"
+        "SELECT t.id AS track_id, t.duration_s, t.flac_bytes, t.mtime FROM user_tracks ut "
+        "JOIN tracks t ON t.id = ut.track_id "
+        "WHERE ut.user_id = ? AND ut.starred_at IS NOT NULL AND t.missing = 0 ORDER BY ut.starred_at DESC, t.id",
+        (uid,),
     ):
         files[r["track_id"]] = r
         it = items.get(r["track_id"])
@@ -63,9 +67,14 @@ def manifest(conn: sqlite3.Connection, favourites_format: str = "opus", opus: Op
 
 
 def sync_tracks(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Every present track that can appear in the manifest (active mix tracks first, then favourites)."""
+    """Every present track that can appear in any active user's manifest (mix tracks first, then favourites)."""
     return conn.execute(
-        "SELECT id, path, mtime FROM tracks WHERE missing = 0 AND (id IN ("
-        "  SELECT mt.track_id FROM mix_tracks mt JOIN mixes m ON m.id = mt.mix_id WHERE m.active = 1"
-        ") OR starred_at IS NOT NULL) ORDER BY starred_at IS NOT NULL, id"
+        "SELECT t.id, t.path, t.mtime, "
+        "  EXISTS (SELECT 1 FROM user_tracks ut JOIN users u ON u.id = ut.user_id "
+        "          WHERE ut.track_id = t.id AND ut.starred_at IS NOT NULL AND u.disabled = 0) AS fav "
+        "FROM tracks t WHERE t.missing = 0 AND (t.id IN ("
+        "  SELECT mt.track_id FROM mix_tracks mt JOIN mixes m ON m.id = mt.mix_id JOIN users u ON u.id = m.user_id "
+        "  WHERE m.active = 1 AND u.disabled = 0"
+        ") OR t.id IN (SELECT ut.track_id FROM user_tracks ut JOIN users u ON u.id = ut.user_id "
+        "              WHERE ut.starred_at IS NOT NULL AND u.disabled = 0)) ORDER BY fav, t.id"
     ).fetchall()

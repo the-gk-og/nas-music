@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from nasmusic.ai import api as ai
+from nasmusic.app import ai_adapter
 from nasmusic.config import Config
 from nasmusic.core import ai_config, get_setting, now_iso, open_db, set_setting
 from nasmusic.stream.transcode import OpusCache
@@ -41,10 +41,10 @@ class Jobs:
         return res.as_dict()
 
     def _analyse(self, conn):
-        return {"analysed": ai.analyse_pending(conn, ai_config(self.cfg))}
+        return {"analysed": ai_adapter.analyse_pending(conn, ai_config(self.cfg))}
 
     def _nightly(self, conn):
-        return {"mixIds": ai.run_nightly(conn, ai_config(self.cfg))}
+        return {"mixIds": ai_adapter.run_nightly(conn, ai_config(self.cfg))}
 
     def _pretranscode(self, conn):
         """Transcode every manifest track to Opus at the sync bitrate, one ffmpeg at a time at nice 19,
@@ -66,7 +66,7 @@ class Jobs:
         return {"transcoded": done, "alreadyCached": cached, "failed": failed}
 
     def _discovery(self, conn):
-        return {"newSuggestions": ai.run_weekly_discovery(conn, ai_config(self.cfg))}
+        return {"newSuggestions": ai_adapter.run_weekly_discovery(conn, ai_config(self.cfg))}
 
     def _body(self, name: str) -> Callable:
         return {

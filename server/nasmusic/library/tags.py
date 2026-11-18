@@ -29,6 +29,14 @@ class TrackTags:
     mb_artist: str | None = None
     mb_albumartist: str | None = None
     mb_releasegroup: str | None = None
+    composer: str | None = None
+    lyricist: str | None = None
+    comment: str | None = None
+    codec: str | None = None
+    bitrate: int | None = None           # kbps
+    sample_rate: int | None = None
+    bits_per_sample: int | None = None
+    channels: int | None = None
 
 
 _NUM = re.compile(r"\d+")
@@ -70,12 +78,14 @@ _VORBIS = {
     "title": "title", "artist": "artist", "albumartist": "albumartist", "album": "album",
     "genre": "genre", "mb_track": "musicbrainz_trackid", "mb_artist": "musicbrainz_artistid",
     "mb_albumartist": "musicbrainz_albumartistid", "mb_releasegroup": "musicbrainz_releasegroupid",
+    "composer": "composer", "lyricist": "lyricist",
 }
 
 _ID3 = {
     "title": "TIT2", "artist": "TPE1", "albumartist": "TPE2", "album": "TALB", "genre": "TCON",
     "mb_artist": "TXXX:MusicBrainz Artist Id", "mb_albumartist": "TXXX:MusicBrainz Album Artist Id",
     "mb_releasegroup": "TXXX:MusicBrainz Release Group Id",
+    "composer": "TCOM", "lyricist": "TEXT",
 }
 
 _MP4 = {
@@ -84,6 +94,7 @@ _MP4 = {
     "mb_artist": "----:com.apple.iTunes:MusicBrainz Artist Id",
     "mb_albumartist": "----:com.apple.iTunes:MusicBrainz Album Artist Id",
     "mb_releasegroup": "----:com.apple.iTunes:MusicBrainz Release Group Id",
+    "composer": "\xa9wrt", "lyricist": "----:com.apple.iTunes:LYRICIST", "comment": "\xa9cmt",
 }
 
 
@@ -103,6 +114,7 @@ def read(path: Path) -> tuple[TrackTags, mutagen.FileType | None]:
         return t, None
     if f.info is not None:
         t.duration_s = float(getattr(f.info, "length", 0.0) or 0.0)
+        _audio_info(t, f)
     tags = f.tags
     if tags is None:
         return t, f
@@ -121,6 +133,8 @@ def read(path: Path) -> tuple[TrackTags, mutagen.FileType | None]:
         t.disc_no = _int(tags.get("TPOS").text if tags.get("TPOS") else None)
         day = tags.get("TDRC") or tags.get("TYER") or tags.get("TDOR")
         t.year = _year(str(day.text[0]) if day is not None and day.text else None)
+        comms = [fr for fr in tags.getall("COMM") if fr.text and not fr.desc.startswith("iTun")]
+        t.comment = _first(comms[0].text) if comms else None
         ufid = tags.get("UFID:http://musicbrainz.org")
         if ufid is not None:
             t.mb_track = _first(ufid.data.decode("ascii", "replace"))
@@ -132,7 +146,28 @@ def read(path: Path) -> tuple[TrackTags, mutagen.FileType | None]:
         t.track_no = _int(tags.get("tracknumber"))
         t.disc_no = _int(tags.get("discnumber"))
         t.year = _year(tags.get("date") or tags.get("originaldate") or tags.get("year"))
+        t.comment = _first(tags.get("comment") or tags.get("description"))
     return t, f
+
+
+_CODECS = {"FLAC": "FLAC", "MP3": "MP3", "OggVorbis": "Vorbis", "OggOpus": "Opus", "OggFLAC": "FLAC",
+           "AAC": "AAC", "WavPack": "WavPack", "MonkeysAudio": "APE"}
+
+
+def _audio_info(t: TrackTags, f) -> None:
+    info = f.info
+    name = type(f).__name__
+    if isinstance(f, MP4):
+        c = (getattr(info, "codec", "") or "").lower()
+        t.codec = "ALAC" if c == "alac" else "AAC" if c.startswith("mp4a") else (c.upper() or "MP4")
+    else:
+        t.codec = _CODECS.get(name, name.upper())
+    br = getattr(info, "bitrate", None)
+    if br:
+        t.bitrate = round(br / 1000)
+    t.sample_rate = getattr(info, "sample_rate", None) or None
+    t.bits_per_sample = getattr(info, "bits_per_sample", None) or None
+    t.channels = getattr(info, "channels", None) or None
 
 
 def embedded_picture(f: mutagen.FileType | None) -> bytes | None:

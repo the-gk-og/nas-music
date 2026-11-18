@@ -1,19 +1,22 @@
-"""Listening-feedback events: idempotent storage plus side effects on `tracks`."""
+"""Listening-feedback events: idempotent storage plus side effects on the user's `user_tracks` row."""
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from nasmusic.app import userdata
 from nasmusic.core import iso, now_iso
 
 log = logging.getLogger(__name__)
 
 EventType = Literal["play", "skip", "star", "unstar", "rate", "thumb_up", "thumb_down", "thumb_clear"]
 Source = Literal["mix", "library", "favourites", "more_like", "search"]
+MAX_CONTEXT_BYTES = 20_000
 
 
 class Event(BaseModel):
@@ -27,68 +30,101 @@ class Event(BaseModel):
     mixId: str | None = None
     rating: int | None = Field(default=None, ge=1, le=5)
     offline: bool = False
+    context: dict[str, Any] | None = None
 
 
 class EventBatch(BaseModel):
     events: list[Event] = Field(max_length=1000)
 
 
-def star(conn: sqlite3.Connection, track_id: str, at: str | None = None) -> bool:
+def _ensure_row(conn: sqlite3.Connection, uid: str, track_id: str) -> None:
+    conn.execute("INSERT OR IGNORE INTO user_tracks (user_id, track_id) VALUES (?, ?)", (uid, track_id))
+
+
+def star(conn: sqlite3.Connection, uid: str, track_id: str, at: str | None = None) -> bool:
     """Star a track (keeps the original star time if already starred). False if the track is unknown."""
-    cur = conn.execute(
-        "UPDATE tracks SET starred_at = COALESCE(starred_at, ?) WHERE id = ?", (at or now_iso(), track_id)
-    )
-    return cur.rowcount == 1
+    if not conn.execute("SELECT 1 FROM tracks WHERE id = ?", (track_id,)).fetchone():
+        return False
+    _ensure_row(conn, uid, track_id)
+    conn.execute("UPDATE user_tracks SET starred_at = COALESCE(starred_at, ?) WHERE user_id = ? AND track_id = ?",
+                 (at or now_iso(), uid, track_id))
+    return True
 
 
-def unstar(conn: sqlite3.Connection, track_id: str) -> bool:
-    return conn.execute("UPDATE tracks SET starred_at = NULL WHERE id = ?", (track_id,)).rowcount == 1
+def unstar(conn: sqlite3.Connection, uid: str, track_id: str) -> bool:
+    if not conn.execute("SELECT 1 FROM tracks WHERE id = ?", (track_id,)).fetchone():
+        return False
+    conn.execute("UPDATE user_tracks SET starred_at = NULL WHERE user_id = ? AND track_id = ?", (uid, track_id))
+    return True
 
 
-def _apply(conn: sqlite3.Connection, e: Event, at: str) -> None:
+def _apply(conn: sqlite3.Connection, uid: str, e: Event, at: str) -> None:
     if e.type == "star":
-        star(conn, e.trackId, at)
-    elif e.type == "unstar":
-        unstar(conn, e.trackId)
-    elif e.type == "rate":
-        conn.execute("UPDATE tracks SET rating = ? WHERE id = ?", (e.rating, e.trackId))
-    elif e.type == "thumb_down":
-        conn.execute("UPDATE tracks SET blocked = 1 WHERE id = ?", (e.trackId,))
-    elif e.type in ("thumb_up", "thumb_clear"):
-        conn.execute("UPDATE tracks SET blocked = 0 WHERE id = ?", (e.trackId,))
+        star(conn, uid, e.trackId, at)
+        return
+    if e.type == "unstar":
+        unstar(conn, uid, e.trackId)
+        return
+    _ensure_row(conn, uid, e.trackId)
+    sets = {
+        "rate": ("rating = ?", (e.rating,)),
+        "thumb_down": ("blocked = 1", ()),
+        "thumb_up": ("blocked = 0", ()),
+        "thumb_clear": ("blocked = 0", ()),
+        "play": ("play_count = play_count + 1, last_played = MAX(COALESCE(last_played, ''), ?)", (at,)),
+        "skip": ("skip_count = skip_count + 1", ()),
+    }
+    clause, params = sets[e.type]
+    conn.execute(f"UPDATE user_tracks SET {clause} WHERE user_id = ? AND track_id = ?", (*params, uid, e.trackId))
 
 
-def ingest(conn: sqlite3.Connection, events: list[Event], device_id: str | None) -> dict:
-    """Store new events and apply their side effects in event-time order. Events whose id was already
-    stored count as duplicates and have no effect. Events for unknown tracks are dropped (logged)."""
+def ingest(conn: sqlite3.Connection, events: list[Event], device_id: str | None, uid: str,
+           weather=None) -> dict:
+    """Store new events for user `uid` and apply their side effects in event-time order. Events whose id was
+    already stored count as duplicates and have no effect. Events for unknown tracks are dropped (logged).
+    `context` is filtered by the user's data switches; `weather` (a nasmusic.app.weather.Weather) fills
+    context.weather from geohash5 when that switch is on (geohash5 itself is kept only if location is on)."""
     accepted = duplicates = unknown = 0
     received = now_iso()
     for e in events:  # naive timestamps are taken as UTC
         if e.at.tzinfo is None:
             e.at = e.at.replace(tzinfo=UTC)
     ordered = sorted(events, key=lambda e: e.at)
+    settings = userdata.get_settings(conn, uid) if any(e.context for e in ordered) else {}
+    contexts: dict[str, str | None] = {}
+    for e in ordered:
+        if not e.context:
+            continue
+        ctx = userdata.filter_context(e.context, settings, device_id)
+        gh = e.context.get("geohash5")
+        if weather is not None and gh and userdata.signal_enabled(settings, device_id, "weather"):
+            w = weather.at(gh, e.at)
+            if w:
+                ctx = {**(ctx or {}), "weather": w}
+        raw = json.dumps(ctx) if ctx else None
+        contexts[e.id] = raw if raw is None or len(raw) <= MAX_CONTEXT_BYTES else None
     conn.execute("BEGIN IMMEDIATE")
     try:
+        ids = list({e.trackId for e in ordered})
         known = {r[0] for r in conn.execute(
-            f"SELECT id FROM tracks WHERE id IN ({','.join('?' * len({e.trackId for e in ordered}))})",
-            list({e.trackId for e in ordered}),
-        )} if ordered else set()
+            f"SELECT id FROM tracks WHERE id IN ({','.join('?' * len(ids))})", ids)} if ids else set()
         for e in ordered:
             if e.trackId not in known:
                 unknown += 1
                 continue
             at = iso(e.at)
             cur = conn.execute(
-                "INSERT OR IGNORE INTO events (id, device_id, type, track_id, at, position_s, duration_s, source, "
-                "mix_id, rating, offline, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (e.id, device_id, e.type, e.trackId, at, e.positionS, e.durationS, e.source, e.mixId,
-                 e.rating, int(e.offline), received),
+                "INSERT OR IGNORE INTO events (id, user_id, device_id, type, track_id, at, position_s, duration_s, "
+                "source, mix_id, rating, offline, received_at, context) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (e.id, uid, device_id, e.type, e.trackId, at, e.positionS, e.durationS, e.source, e.mixId,
+                 e.rating, int(e.offline), received, contexts.get(e.id)),
             )
             if cur.rowcount == 0:
                 duplicates += 1
                 continue
             accepted += 1
-            _apply(conn, e, at)
+            _apply(conn, uid, e, at)
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")

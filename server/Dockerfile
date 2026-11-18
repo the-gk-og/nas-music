@@ -1,9 +1,23 @@
-# nas-music server image.
-#   docker build -t nasmusic:latest server/
-#   docker build --build-arg WITH_ANALYSIS=1 -t nasmusic:latest server/   # + Essentia analysis extra
+# nas-music server image, including the web player. Build from the REPO ROOT (BuildKit required):
+#   docker build -f server/Dockerfile -t nasmusic:latest .
+#   docker build -f server/Dockerfile --build-arg WITH_ANALYSIS=1 -t nasmusic:latest .   # + Essentia extra
+# The build context is filtered by server/Dockerfile.dockerignore.
 # Runs as uid/gid 568 (TrueNAS "apps"). Expects /data (rw: config.toml, db, cert, caches) and /music (ro).
 
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+ARG NODE_IMAGE=node:22-bookworm-slim
+
+# ---------- web player: web/ -> /out (empty when the repo has no web/ yet; the server then shows a placeholder)
+FROM ${NODE_IMAGE} AS web
+WORKDIR /web
+RUN --mount=type=bind,source=.,target=/ctx \
+    --mount=type=cache,target=/root/.npm \
+    mkdir -p /out; \
+    if [ -f /ctx/web/package.json ]; then \
+      cp -a /ctx/web/. /web/ && npm ci --no-audit --no-fund && npm run build && cp -a dist/. /out/; \
+    else \
+      echo "web/package.json not found: building the server without the web player"; \
+    fi
 
 # ---------- build: resolve the locked deps into /opt/venv ----------
 FROM ${PYTHON_IMAGE} AS build
@@ -15,11 +29,11 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /src
 # Dependencies first (cached layer), then the project itself.
-COPY pyproject.toml uv.lock ./
+COPY server/pyproject.toml server/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     EXTRA=""; if [ "$WITH_ANALYSIS" = "1" ]; then EXTRA="--extra analysis"; fi; \
     uv sync --frozen --no-dev --no-install-project $EXTRA
-COPY nasmusic ./nasmusic
+COPY server/nasmusic ./nasmusic
 RUN --mount=type=cache,target=/root/.cache/uv \
     EXTRA=""; if [ "$WITH_ANALYSIS" = "1" ]; then EXTRA="--extra analysis"; fi; \
     uv sync --frozen --no-dev --no-editable $EXTRA
@@ -34,7 +48,8 @@ RUN apt-get update \
  && mkdir -p /data /music \
  && chown 568:568 /data
 COPY --from=build /opt/venv /opt/venv
-COPY config.example.toml /opt/nasmusic/config.example.toml
+COPY server/config.example.toml /opt/nasmusic/config.example.toml
+COPY --from=web /out /opt/nasmusic/web
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

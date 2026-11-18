@@ -5,6 +5,7 @@ import secrets
 from importlib.metadata import PackageNotFoundError, version
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
 from nasmusic.app.context import AppContext
@@ -39,6 +40,9 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
         set_setting(conn, "server_version", VERSION)
     finally:
         conn.close()
+    from nasmusic.app.connect_api import make_hub
+    from nasmusic.app.weather import Weather
+
     return AppContext(
         cfg=cfg,
         server_id=sid,
@@ -47,18 +51,39 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
         version=VERSION,
         web_secret=secret,
         jobs=jobs,
+        hub=make_hub(cfg),
+        weather=Weather(),
     )
+
+
+TAURI_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"]
+ADMIN_CSP = ("default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; "
+             "form-action 'self'; frame-ancestors 'none'")
+PLAYER_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+              "media-src 'self' blob:; connect-src 'self' ws: wss:; font-src 'self' data:; frame-ancestors 'none'; "
+              "base-uri 'self'; form-action 'self'")
 
 
 def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None = None) -> FastAPI:
     from nasmusic import web
-    from nasmusic.app import api
+    from nasmusic.app import account_api, api, collections_api, connect_api
+    from nasmusic.web import spa
 
     app = FastAPI(title="nas-music", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.ctx = context or build_context(cfg, jobs)
-    app.include_router(api.public, prefix="/api/v1")
-    app.include_router(api.router, prefix="/api/v1")
+    for r in (api.public, account_api.public, api.router, account_api.router, account_api.admin,
+              collections_api.router, connect_api.router):
+        app.include_router(r, prefix="/api/v1")
     app.include_router(web.router)
+    app.include_router(spa.router_for(cfg, web.render_join))  # catch-all: must stay last
+
+    # Desktop app (Tauri) calls the API cross-origin with the bearer token; no cookies cross-origin.
+    app.add_middleware(
+        CORSMiddleware, allow_origins=TAURI_ORIGINS + list(cfg.cors_origins), allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Range", "CF-Access-Client-Id", "CF-Access-Client-Secret"],
+        expose_headers=["Content-Range", "Content-Length", "Accept-Ranges", "Content-Disposition"], max_age=600,
+    )
 
     @app.exception_handler(web.LoginRequired)
     async def _login_required(request: Request, exc: web.LoginRequired):
@@ -67,15 +92,13 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
     @app.middleware("http")
     async def _security_headers(request: Request, call_next):
         resp = await call_next(request)
-        if not request.url.path.startswith("/api/"):
-            resp.headers.setdefault("X-Frame-Options", "DENY")
+        path = request.url.path
+        if not path.startswith("/api/"):
             resp.headers.setdefault("X-Content-Type-Options", "nosniff")
             resp.headers.setdefault("Referrer-Policy", "no-referrer")
-            resp.headers.setdefault(
-                "Content-Security-Policy",
-                "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
-                "media-src 'self'; form-action 'self'; frame-ancestors 'none'",
-            )
+            resp.headers.setdefault("X-Frame-Options", "DENY")
+            admin_like = path.startswith("/admin") or (path.startswith("/join/") and spa.web_root(cfg) is None)
+            resp.headers.setdefault("Content-Security-Policy", ADMIN_CSP if admin_like else PLAYER_CSP)
         return resp
 
     return app

@@ -146,3 +146,23 @@ def read(path: Path) -> Lyrics | None:
     synced = [o for o in options if o[1][0]]
     source, (is_synced, lines) = (synced or options)[0]
     return Lyrics(synced=is_synced, source=source, lines=lines)
+
+
+def read_all(path: Path) -> dict[str, Lyrics]:
+    """Best lyrics per file source: {"embedded": ..., "lrc_file": ...} (only sources that have lyrics)."""
+    out: dict[str, Lyrics] = {}
+    emb = [p for p in (parse(raw) for raw in _embedded_candidates(path)) if p]
+    if emb:
+        synced = [p for p in emb if p[0]]
+        is_synced, lines = (synced or emb)[0]
+        out["embedded"] = Lyrics(synced=is_synced, source="embedded", lines=lines)
+    side = _sidecar(path)
+    p = parse(side) if side else None
+    if p:
+        out["lrc_file"] = Lyrics(synced=p[0], source="lrc_file", lines=p[1])
+    return out
+
+
+def from_raw(raw: str, source: str = "user") -> Lyrics | None:
+    p = parse(raw)
+    return Lyrics(synced=p[0], source=source, lines=p[1]) if p else None

@@ -1,10 +1,15 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Contract between the nas-music server and the Android app. All paths are under /api/v1.
-    Auth: `Authorization: Bearer <deviceToken>` on every endpoint except /health and /pair.
+    Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
+    are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
+    Auth: `Authorization: Bearer <deviceToken>` on every endpoint except /health, /server-info, /auth/login,
+    /auth/register and /pair. The web player may instead rely on the httpOnly `nm_session` cookie (same token)
+    set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
+    header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
+    Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
     Times are ISO-8601 UTC strings. IDs are opaque strings.
 servers:
@@ -31,7 +36,10 @@ paths:
   /pair:
     post:
       security: []
-      summary: Exchange a one-time pairing code (from the QR shown in the web UI) for a device token.
+      summary: |
+        Exchange a one-time pairing code (QR from POST /me/pair-code or the admin web UI) for a device token.
+        The code belongs to the user who created it; the device is logged in as that user. The response is a
+        full Session (a superset of the v1 `{deviceId, deviceToken}`).
       requestBody:
         required: true
         content:
@@ -42,17 +50,12 @@ paths:
               properties:
                 pairCode: { type: string }
                 deviceName: { type: string }
+                deviceKind: { $ref: '#/components/schemas/DeviceKind' }
+                appVersion: { type: [string, 'null'] }
       responses:
         '200':
           description: paired
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [deviceId, deviceToken]
-                properties:
-                  deviceId: { type: string }
-                  deviceToken: { type: string }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } }
         '403': { description: code invalid or expired (codes live 10 minutes, single use) }
   /library/artists:
     get:
@@ -217,12 +220,30 @@ paths:
         Lyrics for a track, read from the file itself: embedded tags (FLAC/Vorbis LYRICS, UNSYNCEDLYRICS,
         SYNCEDLYRICS; MP3 USLT/SYLT; M4A ©lyr) or a sidecar `.lrc` file with the same name. Synced (LRC)
         lyrics are preferred when both exist. The app caches these for downloaded tracks so they work offline.
-      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+        v2: the caller's own edit (PUT) wins over the file (`source: "user"`); `?source=` picks one explicitly.
+      parameters:
+        - { name: trackId, in: path, required: true, schema: { type: string } }
+        - { name: source, in: query, schema: { type: string, enum: [user, embedded, lrc_file] }, description: 'default: user edit, else best from the file' }
       responses:
         '200':
           description: lyrics
           content: { application/json: { schema: { $ref: '#/components/schemas/Lyrics' } } }
-        '404': { description: unknown track, or the track has no lyrics }
+        '404': { description: unknown track, or no lyrics (from that source) }
+    put:
+      summary: Save the caller's own lyrics for this track (LRC or plain text). Never written to the music file.
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [raw], properties: { raw: { type: string, maxLength: 200000 } } } } }
+      responses:
+        '200':
+          description: the saved lyrics, parsed (source=user)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Lyrics' } } }
+        '422': { description: empty lyrics }
+    delete:
+      summary: Remove the caller's edit; GET falls back to the file's lyrics.
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      responses: { '204': { description: removed (also when there was none) } }
   /sync/manifest:
     get:
       summary: |
@@ -300,10 +321,740 @@ paths:
       responses:
         '200': { description: image/jpeg }
         '404': { description: no cover }
+  /server-info:
+    get:
+      security: []
+      summary: Identity and addresses of this server, so a client logged in via one address learns the other and the LAN cert pin.
+      responses:
+        '200':
+          description: server info
+          content: { application/json: { schema: { $ref: '#/components/schemas/ServerInfo' } } }
+  /auth/login:
+    post:
+      security: []
+      summary: Log in with username + password; creates a device and returns its token. Rate-limited (5 failed tries/min/IP → 429).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, deviceName, deviceKind]
+              properties:
+                username: { type: string }
+                password: { type: string }
+                deviceName: { type: string, maxLength: 100 }
+                deviceKind: { $ref: '#/components/schemas/DeviceKind' }
+                appVersion: { type: [string, 'null'] }
+                cookie: { type: boolean, default: false, description: 'also set the httpOnly `nm_session` cookie (web player)' }
+      responses:
+        '200':
+          description: logged in
+          content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } }
+        '401': { description: wrong username or password }
+        '403': { description: account disabled }
+        '429': { description: too many failed attempts; retry later }
+  /auth/register:
+    post:
+      security: []
+      summary: Create an account with an invite code. Username 3–32 chars `[A-Za-z0-9_.-]`, password ≥ 8. Rate-limited like login.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inviteCode, username, password, deviceName, deviceKind]
+              properties:
+                inviteCode: { type: string }
+                username: { type: string, minLength: 3, maxLength: 32, pattern: '^[A-Za-z0-9_.-]+$' }
+                password: { type: string, minLength: 8 }
+                deviceName: { type: string, maxLength: 100 }
+                deviceKind: { $ref: '#/components/schemas/DeviceKind' }
+                appVersion: { type: [string, 'null'] }
+                cookie: { type: boolean, default: false }
+      responses:
+        '200':
+          description: account created and logged in
+          content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } }
+        '403': { description: invite code unknown, used or expired }
+        '409': { description: username taken }
+        '422': { description: invalid username or password }
+        '429': { description: too many failed attempts }
+  /auth/logout:
+    post:
+      summary: Revoke the calling device's token and clear the `nm_session` cookie.
+      responses: { '204': { description: logged out } }
+  /me:
+    get:
+      responses:
+        '200':
+          description: the signed-in user
+          content: { application/json: { schema: { $ref: '#/components/schemas/User' } } }
+  /me/password:
+    put:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current, new]
+              properties:
+                current: { type: string }
+                new: { type: string, minLength: 8 }
+      responses:
+        '204': { description: changed }
+        '403': { description: current password wrong }
+  /me/devices:
+    get:
+      summary: The user's own devices (revoked ones are not listed).
+      responses:
+        '200':
+          description: devices
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Device' } } } }
+  /me/devices/{deviceId}:
+    delete:
+      summary: Sign a device out (revokes its token, closes its Connect socket).
+      parameters: [ { name: deviceId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '204': { description: revoked }
+        '404': { description: not one of your devices }
+  /me/pair-code:
+    post:
+      summary: One-time code (10 min) that logs another device in as this user via POST /pair (QR shortcut).
+      responses:
+        '200':
+          description: code + QR payload (docs/pairing.md)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pairCode, expiresAt, qrPayload]
+                properties:
+                  pairCode: { type: string }
+                  expiresAt: { type: string, format: date-time }
+                  qrPayload: { type: object, description: 'the docs/pairing.md JSON object; encode it compactly into the QR' }
+  /me/settings:
+    get:
+      summary: |
+        The user's synced settings: a flat map of client-defined keys to JSON values, shared by all their devices.
+        Known keys: `offline.favourites` (bool) and the §10 data switches `context.listening`, `context.output`,
+        `context.device`, `context.motion`, `context.location`, `context.weather`, `context.search`, `context.time`,
+        `context.health` (bool, default false). A per-device override is stored as `device.<deviceId>.<key>`.
+      responses:
+        '200':
+          description: settings
+          content: { application/json: { schema: { $ref: '#/components/schemas/UserSettings' } } }
+    put:
+      summary: Merge keys into the settings (a null value deletes the key). Returns the full map.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UserSettings' } } }
+      responses:
+        '200':
+          description: settings after the merge
+          content: { application/json: { schema: { $ref: '#/components/schemas/UserSettings' } } }
+  /me/data:
+    get:
+      summary: What has been collected about the user (counts per context signal and date range).
+      responses:
+        '200':
+          description: summary
+          content: { application/json: { schema: { $ref: '#/components/schemas/DataSummary' } } }
+    delete:
+      summary: |
+        Erase collected context for one signal (the fields listed in DataSummary.signals) or `all`.
+        `signal=all` erases ALL listening history too (events, play/skip counts, taste snapshots) and needs
+        `confirm=true`. Favourites, ratings, thumbs, playlists and queues are kept.
+      parameters:
+        - { name: signal, in: query, required: true, schema: { type: string, enum: [listening, output, device, motion, location, weather, search, time, health, all] } }
+        - { name: confirm, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: what was erased
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  eventsUpdated: { type: integer }
+                  eventsDeleted: { type: integer }
+        '400': { description: signal=all without confirm=true }
+  /me/data/export:
+    get:
+      summary: Everything stored about the user as one JSON document (attachment).
+      responses:
+        '200':
+          description: export (Content-Disposition attachment)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exportedAt: { type: string, format: date-time }
+                  user: { $ref: '#/components/schemas/User' }
+                  settings: { type: object }
+                  devices: { type: array, items: { $ref: '#/components/schemas/Device' } }
+                  tracks: { type: array, items: { type: object }, description: 'per-track state: trackId, path, starredAt, rating, blocked, playCount, skipCount, lastPlayed' }
+                  events: { type: array, items: { type: object }, description: 'all events incl. context' }
+                  playlists: { type: array, items: { $ref: '#/components/schemas/PlaylistDetail' } }
+                  queues: { type: array, items: { $ref: '#/components/schemas/QueueDetail' } }
+                  lyricsOverrides: { type: array, items: { type: object } }
+                  suggestions: { type: array, items: { $ref: '#/components/schemas/Suggestion' } }
+  /library/folders:
+    get:
+      summary: Browse the library by folder. `path` is relative to the library root; "" is the root.
+      parameters:
+        - { name: path, in: query, schema: { type: string, default: '' } }
+      responses:
+        '200':
+          description: one folder level
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, parent, folders, tracks]
+                properties:
+                  path: { type: string }
+                  parent: { type: [string, 'null'], description: null at the root }
+                  folders:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, path, trackCount]
+                      properties:
+                        name: { type: string }
+                        path: { type: string }
+                        trackCount: { type: integer, description: tracks in this folder and below }
+                  tracks: { type: array, items: { $ref: '#/components/schemas/Track' }, description: 'tracks directly in this folder, by file name' }
+        '404': { description: no such folder }
+  /library/genres:
+    get:
+      responses:
+        '200':
+          description: genres (tag values as written), by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [name, trackCount, albumCount]
+                  properties:
+                    name: { type: string }
+                    trackCount: { type: integer }
+                    albumCount: { type: integer }
+  /library/genres/{genre}/tracks:
+    get:
+      parameters:
+        - { name: genre, in: path, required: true, schema: { type: string }, description: URL-encoded genre name (case-insensitive) }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 1000 } }
+      responses:
+        '200':
+          description: tracks by artist, album, disc, track number
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Track' } } } }
+  /library/tracks:
+    get:
+      summary: All songs.
+      parameters:
+        - { name: sort, in: query, schema: { type: string, enum: [title, added, year], default: title } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 1000 } }
+      responses:
+        '200':
+          description: tracks
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Track' } } } }
+  /library/tracks/{trackId}/info:
+    get:
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: song info
+          content: { application/json: { schema: { $ref: '#/components/schemas/TrackInfo' } } }
+        '404': { description: not found }
+  /lists/{kind}:
+    get:
+      summary: Smart lists for the calling user.
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [favourites, recently_added, recently_played, most_played, not_played] } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 1000 } }
+      responses:
+        '200':
+          description: tracks
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Track' } } } }
+  /playlists:
+    get:
+      responses:
+        '200':
+          description: the user's playlists, most recently updated first
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Playlist' } } } }
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                trackIds: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: created
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+  /playlists/{playlistId}:
+    parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
+    get:
+      responses:
+        '200':
+          description: playlist with tracks
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+        '404': { description: not found (or not yours) }
+    patch:
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { name: { type: string, minLength: 1, maxLength: 200 } } } } }
+      responses:
+        '200':
+          description: updated
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+    delete:
+      responses: { '204': { description: deleted } }
+  /playlists/{playlistId}/tracks:
+    post:
+      parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackIds]
+              properties:
+                trackIds: { type: array, items: { type: string }, maxItems: 5000 }
+                position: { type: [integer, 'null'], description: insert before this position; omitted/null = append }
+      responses:
+        '200':
+          description: playlist after the change
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+        '404': { description: playlist or a track not found }
+  /playlists/{playlistId}/tracks/{position}:
+    delete:
+      parameters:
+        - { name: playlistId, in: path, required: true, schema: { type: string } }
+        - { name: position, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: playlist after the change
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+  /playlists/{playlistId}/move:
+    post:
+      parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Move' } } } }
+      responses:
+        '200':
+          description: playlist after the change
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+  /queues:
+    get:
+      responses:
+        '200':
+          description: the user's queues by slot (max 20)
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Queue' } } } }
+    post:
+      summary: Create a queue in the lowest free slot. With 20 queues already, the least recently updated one that isn't currently playing is replaced (its slot is reused), like Musicolet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, trackIds]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                trackIds: { type: array, items: { type: string }, maxItems: 10000 }
+                startIndex: { type: integer, default: 0 }
+      responses:
+        '200':
+          description: created
+          content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
+  /queues/{queueId}:
+    parameters: [ { name: queueId, in: path, required: true, schema: { type: string } } ]
+    get:
+      responses:
+        '200':
+          description: queue with tracks
+          content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
+        '404': { description: not found (or not yours) }
+    patch:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                currentIndex: { type: integer, minimum: 0 }
+                positionMs: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: updated (tracks included)
+          content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
+    delete:
+      responses: { '204': { description: deleted } }
+  /queues/{queueId}/tracks:
+    post:
+      parameters: [ { name: queueId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackIds]
+              properties:
+                trackIds: { type: array, items: { type: string }, maxItems: 10000 }
+                position:
+                  description: 'insert before this index, or "next" (after the current track), or "end" (default)'
+                  oneOf: [ { type: integer }, { type: string, enum: [next, end] } ]
+      responses:
+        '200':
+          description: queue after the change
+          content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
+  /queues/{queueId}/tracks/{position}:
+    delete:
+      parameters:
+        - { name: queueId, in: path, required: true, schema: { type: string } }
+        - { name: position, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: queue after the change (currentIndex adjusted)
+          content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
+  /queues/{queueId}/move:
+    post:
+      parameters: [ { name: queueId, in: path, required: true, schema: { type: string } } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Move' } } } }
+      responses:
+        '200':
+          description: queue after the change (currentIndex follows the current track)
+          content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
+  /queues/{queueId}/save-as-playlist:
+    post:
+      parameters: [ { name: queueId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 200 } } } } }
+      responses:
+        '200':
+          description: the new playlist
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+  /connect:
+    get:
+      summary: |
+        WebSocket (upgrade) for Connect device control — see docs/v2.md §5. Auth: `Authorization: Bearer`,
+        or `?token=<deviceToken>` (browsers), or the `nm_session` cookie. Messages are JSON `{"type": ...}`.
+        Client → server: `hello`, `state` (PlaybackState, active device only), `command`, `transfer`, `ping`.
+        Server → client: `welcome {deviceId, devices, state}`, `devices {devices}`, `state` (PlaybackState),
+        `command {action, args, fromDeviceId}`, `takeover {state}`, `release`, `queues {queueId}`, `pong`,
+        `error {detail}`. The server sends WebSocket protocol pings every 20 s (keeps the Cloudflare tunnel open);
+        clients still send `ping` every 25 s. A newer socket from the same device replaces the older one.
+      responses:
+        '101': { description: switching protocols }
+        '403': { description: bad token (the socket is closed with code 4401) }
+  /admin/invites:
+    get:
+      summary: Admin only.
+      responses:
+        '200':
+          description: invites, newest first
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Invite' } } } }
+        '403': { description: not an admin }
+    post:
+      summary: Admin only. `url` = `<tunnelUrl or lanUrl>/join/<code>`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: [string, 'null'], maxLength: 200 }
+                expiresInDays: { type: integer, default: 7, minimum: 1, maximum: 90 }
+      responses:
+        '200':
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, url, expiresAt]
+                properties:
+                  code: { type: string }
+                  url: { type: string }
+                  expiresAt: { type: string, format: date-time }
+  /admin/invites/{code}:
+    delete:
+      parameters: [ { name: code, in: path, required: true, schema: { type: string } } ]
+      responses: { '204': { description: deleted }, '404': { description: not found } }
+  /admin/users:
+    get:
+      summary: Admin only.
+      responses:
+        '200':
+          description: users
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AdminUser' } } } }
+  /admin/users/{userId}:
+    patch:
+      summary: Admin only. Disabling a user revokes their devices. Removing or disabling the last active admin → 409.
+      parameters: [ { name: userId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                disabled: { type: boolean }
+                isAdmin: { type: boolean }
+      responses:
+        '200':
+          description: updated
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminUser' } } }
+        '404': { description: not found }
+        '409': { description: would leave no active admin }
+  /admin/users/{userId}/reset-password:
+    post:
+      summary: Admin only. Sets a new password and signs the user out everywhere.
+      parameters: [ { name: userId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [new], properties: { new: { type: string, minLength: 8 } } } } }
+      responses: { '204': { description: reset }, '404': { description: not found } }
 components:
   securitySchemes:
     device: { type: http, scheme: bearer }
   schemas:
+    DeviceKind:
+      type: string
+      enum: [android, web, desktop, watch, other]
+    Session:
+      type: object
+      required: [userId, username, isAdmin, deviceId, deviceToken]
+      properties:
+        userId: { type: string }
+        username: { type: string }
+        isAdmin: { type: boolean }
+        deviceId: { type: string }
+        deviceToken: { type: string }
+    ServerInfo:
+      type: object
+      required: [serverId, name, version, lanUrl, registration]
+      properties:
+        serverId: { type: string }
+        name: { type: string }
+        version: { type: string }
+        lanUrl: { type: string }
+        tunnelUrl: { type: [string, 'null'] }
+        certSha256: { type: [string, 'null'], description: LAN certificate SHA-256 (DER), colon-separated upper-case hex }
+        registration: { type: string, enum: [invite] }
+    User:
+      type: object
+      required: [id, username, isAdmin, createdAt]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        isAdmin: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        lastLogin: { type: [string, 'null'], format: date-time }
+    AdminUser:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          required: [disabled, deviceCount]
+          properties:
+            disabled: { type: boolean }
+            deviceCount: { type: integer, description: active (non-revoked) devices }
+    Device:
+      type: object
+      required: [id, name, kind, createdAt, online, current]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { $ref: '#/components/schemas/DeviceKind' }
+        appVersion: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        lastSeen: { type: [string, 'null'], format: date-time }
+        online: { type: boolean, description: connected to /connect right now }
+        current: { type: boolean, description: the device making this request }
+    Invite:
+      type: object
+      required: [code, url, createdAt, expiresAt, createdBy]
+      properties:
+        code: { type: string }
+        url: { type: string }
+        note: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        createdBy: { type: string, description: username }
+        usedBy: { type: [string, 'null'], description: username }
+        usedAt: { type: [string, 'null'], format: date-time }
+    TrackInfo:
+      allOf:
+        - $ref: '#/components/schemas/Track'
+        - type: object
+          properties:
+            fileName: { type: string }
+            folder: { type: string, description: relative to the library root }
+            albumArtist: { type: [string, 'null'] }
+            composer: { type: [string, 'null'] }
+            lyricist: { type: [string, 'null'] }
+            comment: { type: [string, 'null'] }
+            codec: { type: [string, 'null'], description: 'e.g. FLAC, MP3, AAC, Opus, Vorbis' }
+            bitrateKbps: { type: [integer, 'null'] }
+            sampleRate: { type: [integer, 'null'], description: Hz }
+            bitsPerSample: { type: [integer, 'null'] }
+            channels: { type: [integer, 'null'] }
+            fileBytes: { type: integer }
+            addedAt: { type: string, format: date-time }
+            playCount: { type: integer, description: the caller's }
+            skipCount: { type: integer }
+            lastPlayed: { type: [string, 'null'], format: date-time }
+    Playlist:
+      type: object
+      required: [id, name, createdAt, updatedAt, trackCount, durationS]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        trackCount: { type: integer }
+        durationS: { type: number }
+    PlaylistDetail:
+      allOf:
+        - $ref: '#/components/schemas/Playlist'
+        - type: object
+          required: [tracks]
+          properties:
+            tracks: { type: array, items: { $ref: '#/components/schemas/Track' }, description: 'in order; array index = position. Tracks whose file is gone stay listed with missing=true.' }
+    Queue:
+      type: object
+      required: [id, name, slot, currentIndex, positionMs, trackCount, durationS, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slot: { type: integer, minimum: 1, maximum: 20, description: 'display number, as in "20. Search: conver"' }
+        currentIndex: { type: integer }
+        positionMs: { type: integer }
+        trackCount: { type: integer }
+        durationS: { type: number }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    QueueDetail:
+      allOf:
+        - $ref: '#/components/schemas/Queue'
+        - type: object
+          required: [tracks]
+          properties:
+            tracks: { type: array, items: { $ref: '#/components/schemas/Track' }, description: 'array index = position; missing files stay listed with missing=true' }
+    Move:
+      type: object
+      required: [from, to]
+      properties:
+        from: { type: integer, minimum: 0 }
+        to: { type: integer, minimum: 0, description: the moved item's index after the move }
+    PlaybackState:
+      type: object
+      description: Connect playback state (docs/v2.md §5). `rev` is set by the server and increments on every change.
+      properties:
+        activeDeviceId: { type: [string, 'null'] }
+        queueId: { type: [string, 'null'] }
+        index: { type: integer }
+        trackId: { type: [string, 'null'] }
+        positionMs: { type: integer }
+        positionAt: { type: string, format: date-time, description: when positionMs was true; extrapolate while playing }
+        playing: { type: boolean }
+        volume: { type: number, minimum: 0, maximum: 1 }
+        shuffle: { type: boolean }
+        repeat: { type: string, enum: ['off', all, one] }
+        speed: { type: number }
+        rev: { type: integer }
+    ConnectDevice:
+      type: object
+      required: [id, name, kind, canPlay, online, isActive]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { $ref: '#/components/schemas/DeviceKind' }
+        canPlay: { type: boolean }
+        online: { type: boolean }
+        isActive: { type: boolean }
+    UserSettings:
+      type: object
+      required: [settings]
+      properties:
+        settings: { type: object, additionalProperties: true, description: 'key → JSON value' }
+    DataSummary:
+      type: object
+      required: [events, signals]
+      properties:
+        events:
+          type: object
+          properties:
+            count: { type: integer }
+            withContext: { type: integer }
+            first: { type: [string, 'null'], format: date-time }
+            last: { type: [string, 'null'], format: date-time }
+        signals:
+          type: object
+          description: 'per signal name (listening, output, device, motion, location, weather, search, time, health)'
+          additionalProperties:
+            type: object
+            properties:
+              enabled: { type: boolean, description: the user-level switch }
+              fields: { type: array, items: { type: string } }
+              count: { type: integer, description: events carrying at least one of these fields }
+              first: { type: [string, 'null'], format: date-time }
+              last: { type: [string, 'null'], format: date-time }
+    EventContext:
+      type: object
+      description: |
+        Optional listening context (docs/v2.md §10). Clients include only fields whose switch is on; the server
+        drops fields whose switch is off (user setting `context.<signal>`, or a `device.<deviceId>.context.<signal>`
+        override) and fields it doesn't know, and fills `weather` itself from `geohash5` when `context.weather` is
+        on (geohash5 is only stored when `context.location` is on). Signals → fields: listening (seeks,
+        volumeChanges, repeatOfPrevious, addedFrom, sessionId, sessionPosition), output (output), device
+        (deviceKind, network, charging, batteryPct, screenOn), motion (motion, cadenceSpm), location (place,
+        geohash5), weather (weather), search (searchQuery), time (localHour, weekday, holiday), health
+        (heartRate, workout).
+      additionalProperties: false
+      properties:
+        seeks: { type: array, items: { type: object, properties: { fromMs: { type: integer }, toMs: { type: integer } } } }
+        volumeChanges: { type: array, items: { type: object, properties: { atMs: { type: integer }, volume: { type: number } } } }
+        repeatOfPrevious: { type: boolean }
+        addedFrom: { type: string, description: 'search, queue, mix, playlist, album, artist, folder, …' }
+        sessionId: { type: string }
+        sessionPosition: { type: integer }
+        output: { type: string, description: 'speaker | wired | bluetooth:<device name> | cast | car' }
+        deviceKind: { type: string }
+        network: { type: string, enum: [wifi, cellular, ethernet, none] }
+        charging: { type: boolean }
+        batteryPct: { type: integer }
+        screenOn: { type: boolean }
+        motion: { type: string, enum: [still, walking, running, vehicle] }
+        cadenceSpm: { type: number }
+        place: { type: string, description: 'user-named cluster label: home, work, gym, place-3' }
+        geohash5: { type: string, minLength: 5, maxLength: 5 }
+        weather: { type: object, description: 'set by the server', properties: { condition: { type: string }, tempC: { type: number }, code: { type: integer } } }
+        searchQuery: { type: string }
+        localHour: { type: integer, minimum: 0, maximum: 23 }
+        weekday: { type: integer, minimum: 1, maximum: 7, description: ISO weekday, 1 = Monday }
+        holiday: { type: [string, 'null'] }
+        heartRate: { type: number }
+        workout: { type: string }
     Artist:
       type: object
       required: [id, name, albumCount]
@@ -342,14 +1093,17 @@ components:
         durationS: { type: number }
         flacBytes: { type: integer, description: size of the original file }
         starred: { type: boolean }
-        rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
+        rating: { type: [integer, 'null'], minimum: 1, maximum: 5, description: the caller's }
+        missing: { type: boolean, description: 'only present (true) in playlists/queues when the file is gone' }
     Lyrics:
       type: object
       required: [trackId, synced, source, lines, text]
       properties:
         trackId: { type: string }
         synced: { type: boolean, description: 'true when every line has a timeMs (LRC timestamps)' }
-        source: { type: string, enum: [embedded, lrc_file] }
+        source: { type: string, enum: [user, embedded, lrc_file] }
+        sources: { type: array, items: { type: string, enum: [user, embedded, lrc_file] }, description: 'every source that has lyrics for this track (for the source dropdown)' }
+        canEdit: { type: boolean, description: 'always true in v2: the caller may PUT their own lyrics' }
         lines:
           type: array
           description: In display order. Synced lines are sorted by timeMs; a line repeated at several timestamps appears once per timestamp.
@@ -371,7 +1125,7 @@ components:
       required: [id, kind, title, createdAt, tracks]
       properties:
         id: { type: string }
-        kind: { type: string, enum: [daily, morning, evening, deep_cuts, more_like] }
+        kind: { type: string, enum: [daily, morning, evening, deep_cuts, more_like, context], description: 'context = listening-context mixes (Workout, Drive, Late night, At <place>; docs/v2.md §10)' }
         title: { type: string }
         createdAt: { type: string, format: date-time }
         durationS: { type: number }
@@ -416,6 +1170,7 @@ components:
         mixId: { type: [string, 'null'] }
         rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
         offline: { type: boolean, default: false, description: true if recorded without a connection and uploaded later }
+        context: { oneOf: [ { $ref: '#/components/schemas/EventContext' }, { type: 'null' } ] }
     Suggestion:
       type: object
       required: [id, artist, album, reason, status]
