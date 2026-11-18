@@ -1024,8 +1024,13 @@ components:
       description: |
         Optional listening context (docs/v2.md §10). Clients include only fields whose switch is on; the server
         drops fields whose switch is off (user setting `context.<signal>`, or a `device.<deviceId>.context.<signal>`
-        override) and fills `weather` itself from `geohash5` when `context.weather` is on.
-      additionalProperties: true
+        override) and fields it doesn't know, and fills `weather` itself from `geohash5` when `context.weather` is
+        on (geohash5 is only stored when `context.location` is on). Signals → fields: listening (seeks,
+        volumeChanges, repeatOfPrevious, addedFrom, sessionId, sessionPosition), output (output), device
+        (deviceKind, network, charging, batteryPct, screenOn), motion (motion, cadenceSpm), location (place,
+        geohash5), weather (weather), search (searchQuery), time (localHour, weekday, holiday), health
+        (heartRate, workout).
+      additionalProperties: false
       properties:
         seeks: { type: array, items: { type: object, properties: { fromMs: { type: integer }, toMs: { type: integer } } } }
         volumeChanges: { type: array, items: { type: object, properties: { atMs: { type: integer }, volume: { type: number } } } }
