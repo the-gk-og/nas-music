@@ -131,56 +131,12 @@ fun FoldersScreen(c: AppContainer, path: String) {
 
 // ---------- Albums ----------
 
-private suspend fun loadAllAlbums(c: AppContainer, sort: String, artistId: String? = null): List<Album> {
+internal suspend fun loadAllAlbums(c: AppContainer, sort: String, artistId: String? = null): List<Album> {
     val out = mutableListOf<Album>()
     while (true) {
         val page = c.api.albums(artistId = artistId, sort = sort, offset = out.size, limit = 1000)
         out += page
         if (page.size < 1000) return out
-    }
-}
-
-@Composable
-fun AlbumsScreen(c: AppContainer) {
-    val ui = LocalUi.current
-    var sort by rememberSaveable { mutableStateOf("name") }
-    var query by rememberSaveable { mutableStateOf("") }
-    var albums by remember { mutableStateOf<List<Album>?>(null) }
-    var error by remember { mutableStateOf(false) }
-    var sortMenu by remember { mutableStateOf(false) }
-    LaunchedEffect(sort) { albums = runCatching { loadAllAlbums(c, sort) }.onFailure { error = true }.getOrNull() }
-    val shown = albums?.let { all -> if (query.isBlank()) all else all.filter { it.title.contains(query, true) || it.artist.contains(query, true) } }
-
-    Column(Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 4.dp)) {
-            TextField(
-                query, { query = it },
-                placeholder = { Text("Search an album…") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                singleLine = true,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                ),
-                modifier = Modifier.weight(1f),
-            )
-            Column {
-                IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort") }
-                DropdownMenu(sortMenu, { sortMenu = false }) {
-                    listOf("name" to "Title", "year" to "Year", "added" to "Recently added").forEach { (k, label) ->
-                        DropdownMenuItem({ Text(if (sort == k) "✓ $label" else label) }, { sort = k; sortMenu = false })
-                    }
-                }
-            }
-            IconButton(onClick = { ui.go("settings") }) { Icon(Icons.Default.Settings, "Settings") }
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        when {
-            error -> Message("Albums need a connection to the server.")
-            shown == null -> Loading()
-            shown.isEmpty() -> Message("No albums.")
-            else -> AlbumGrid(shown) { ui.go("album/${it.id}") }
-        }
     }
 }
 
@@ -239,39 +195,6 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
 // ---------- Artists ----------
 
 @Composable
-fun ArtistsScreen(c: AppContainer) {
-    val ui = LocalUi.current
-    var artists by remember { mutableStateOf<List<Artist>?>(null) }
-    var error by remember { mutableStateOf(false) }
-    var query by rememberSaveable { mutableStateOf("") }
-    LaunchedEffect(Unit) { artists = runCatching { c.api.artists() }.onFailure { error = true }.getOrNull() }
-    Column(Modifier.fillMaxSize()) {
-        TextField(
-            query, { query = it }, placeholder = { Text("Search an artist…") }, leadingIcon = { Icon(Icons.Default.Search, null) },
-            singleLine = true, modifier = Modifier.fillMaxWidth(),
-            colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent),
-        )
-        val list = artists?.filter { query.isBlank() || it.name.contains(query, true) }
-        when {
-            error -> Message("Artists need a connection to the server.")
-            list == null -> Loading()
-            else -> LazyColumn(Modifier.fillMaxSize()) {
-                items(list, key = { it.id }) { a ->
-                    Row(Modifier.fillMaxWidth().clickable { ui.go("artist/${a.id}") }.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(16.dp))
-                        Column {
-                            Text(a.name)
-                            Text("${a.albumCount} albums", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun ArtistScreen(c: AppContainer, artistId: String) {
     val ui = LocalUi.current
     var artist by remember { mutableStateOf<ArtistDetail?>(null) }
@@ -281,32 +204,6 @@ fun ArtistScreen(c: AppContainer, artistId: String) {
 }
 
 // ---------- Genres ----------
-
-@Composable
-fun GenresScreen(c: AppContainer) {
-    val ui = LocalUi.current
-    var genres by remember { mutableStateOf<List<Genre>?>(null) }
-    var error by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { genres = runCatching { c.api.genres() }.onFailure { error = true }.getOrNull() }
-    Column(Modifier.fillMaxSize()) {
-        ScreenTitle("Genres")
-        val g = genres
-        when {
-            error -> Message("Genres need a connection to the server.")
-            g == null -> Loading()
-            else -> LazyColumn(Modifier.fillMaxSize()) {
-                items(g, key = { it.name }) { genre ->
-                    Row(Modifier.fillMaxWidth().clickable { ui.go("genre/${Uri.encode(genre.name)}") }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Sell, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(16.dp))
-                        Text(genre.name, Modifier.weight(1f))
-                        Text("${genre.trackCount}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun GenreScreen(c: AppContainer, name: String) {
@@ -320,9 +217,9 @@ fun GenreScreen(c: AppContainer, name: String) {
 
 // ---------- Playlists ----------
 
-private data class SmartList(val kind: String, val title: String, val icon: ImageVector)
+internal data class SmartList(val kind: String, val title: String, val icon: ImageVector)
 
-private val smartLists = listOf(
+internal val smartLists = listOf(
     SmartList("all", "All songs", Icons.Default.LibraryMusic),
     SmartList("favourites", "Favorites", Icons.Default.Favorite),
     SmartList("recently_added", "Recently added", Icons.Default.NewReleases),
@@ -445,44 +342,6 @@ fun PlaylistScreen(c: AppContainer, id: String) {
             confirmButton = { TextButton(onClick = { scope.launch { runCatching { c.api.renamePlaylist(id, NameBody(newName.trim())) }; renaming = false; reload() } }) { Text("Save") } },
             dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
         )
-    }
-}
-
-// ---------- Search ----------
-
-@Composable
-fun SearchScreen(c: AppContainer) {
-    val ui = LocalUi.current
-    var query by rememberSaveable { mutableStateOf("") }
-    var results by remember { mutableStateOf<SearchResult?>(null) }
-    LaunchedEffect(query) {
-        if (query.isBlank()) { results = null; return@LaunchedEffect }
-        delay(300)
-        results = runCatching { c.api.search(query) }.getOrNull()
-    }
-    Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            query, { query = it }, leadingIcon = { Icon(Icons.Default.Search, null) },
-            placeholder = { Text("Search songs, albums, artists") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-        )
-        val r = results ?: return@Column Message("Type to search your library.")
-        val q = query.trim()
-        LazyColumn(Modifier.fillMaxSize()) {
-            if (r.tracks.isNotEmpty()) item { Header("Songs") }
-            songItems(c, r.tracks, "Search: ${q.take(12)}", PlaySource.SEARCH, searchQuery = q)
-            if (r.albums.isNotEmpty()) item { Header("Albums") }
-            items(r.albums, key = { "al" + it.id }) { a ->
-                Row(Modifier.fillMaxWidth().clickable { ui.go("album/${a.id}") }.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    org.nasmusic.app.ui.AlbumArt(a.id, 52.dp)
-                    Column(Modifier.padding(start = 12.dp)) { Text(a.title); Text(a.artist, style = MaterialTheme.typography.bodySmall) }
-                }
-            }
-            if (r.artists.isNotEmpty()) item { Header("Artists") }
-            items(r.artists, key = { "ar" + it.id }) { a ->
-                Text(a.name, Modifier.fillMaxWidth().clickable { ui.go("artist/${a.id}") }.padding(horizontal = 16.dp, vertical = 14.dp))
-            }
-        }
     }
 }
 

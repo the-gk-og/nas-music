@@ -62,6 +62,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -95,8 +102,9 @@ import org.nasmusic.app.ui.formatDuration
  * seek bar, transport row; background tinted from the cover's dominant colour. Works as a remote
  * when another device is playing ("Playing on …").
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun NowPlayingScreen(c: AppContainer) {
+fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
     val ui = LocalUi.current
     val scope = rememberCoroutineScope()
     val s by c.player.state.collectAsStateWithLifecycle()
@@ -108,19 +116,31 @@ fun NowPlayingScreen(c: AppContainer) {
 
     var showLyrics by remember { mutableStateOf(false) }
     LaunchedEffect(ui.lyricsRequested) { if (ui.lyricsRequested) { showLyrics = true; ui.lyricsRequested = false } }
-    val flip by animateFloatAsState(if (showLyrics) 180f else 0f, tween(350), label = "flip")
+    val motion = org.nasmusic.app.ui.LocalMotion.current
+    val flip by animateFloatAsState(if (showLyrics) 180f else 0f, motion.spec(if (motion.expressive) 2f else 1.5f), label = "flip")
+    // Cover gestures (docs/v3-ux.md §3.5): drag offset follows the finger when animations are on.
+    var dragX by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var dragY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var starred by remember(trackId) { mutableStateOf(extras?.getBoolean(MediaItems.EXTRA_STARRED) ?: false) }
     var volumeOpen by remember { mutableStateOf(false) }
     var seeking by remember { mutableStateOf<Float?>(null) }
     val tint = rememberDominantColor(MediaItems.artUrl(track.albumId, 128))
 
-    Box(
-        Modifier.fillMaxSize().background(
-            Brush.verticalGradient(listOf(tint.copy(alpha = 0.55f), tint.copy(alpha = 0.25f), MaterialTheme.colorScheme.background)),
-        ),
-    ) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        // Dark, heavily blurred cover behind everything (blur needs Android 12+; older phones get
+        // the cover's dominant colour as a gradient), with a scrim so text stays readable (AA).
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            AsyncImage(
+                model = MediaItems.artUrl(track.albumId, 256), contentDescription = null, contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().blur(70.dp).graphicsLayer { alpha = 0.9f },
+            )
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Black.copy(alpha = 0.7f), Color.Black.copy(alpha = 0.9f)))))
+        } else {
+            Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(tint.copy(alpha = 0.55f), tint.copy(alpha = 0.25f), MaterialTheme.colorScheme.background))))
+        }
+        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (!compact) IconButton(onClick = { ui.nav.popBackStack() }) { Icon(Icons.Default.KeyboardArrowDown, "Minimise") }
                 s.remote?.let {
                     Text("Playing on ${it.deviceName}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f).padding(start = 8.dp))
                 } ?: Spacer(Modifier.weight(1f))
@@ -133,10 +153,32 @@ fun NowPlayingScreen(c: AppContainer) {
                 if (flip <= 90f) {
                     AsyncImage(
                         model = item.mediaMetadata.artworkUri?.toString(),
-                        contentDescription = "Album art — tap for lyrics",
+                        contentDescription = "Album art. Tap for lyrics, swipe to skip, long-press for the song menu",
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxWidth().aspectRatio(1f).graphicsLayer { rotationY = flip; cameraDistance = 12f * density }
-                            .clickable { showLyrics = true },
+                        modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                            .graphicsLayer {
+                                rotationY = flip; cameraDistance = 12f * density
+                                if (motion.enabled) { translationX = dragX; translationY = dragY.coerceAtLeast(0f) / 2 }
+                            }
+                            .pointerInput(trackId) {
+                                detectDragGestures(
+                                    onDragStart = { dragX = 0f; dragY = 0f },
+                                    onDragCancel = { dragX = 0f; dragY = 0f },
+                                    onDragEnd = {
+                                        when (CoverGesture.classify(dragX, dragY, size.width.toFloat())) {
+                                            CoverGesture.NEXT -> c.player.next()
+                                            CoverGesture.PREVIOUS -> c.player.previous()
+                                            CoverGesture.MINIMISE -> if (!compact) ui.nav.popBackStack()
+                                            CoverGesture.NONE -> Unit
+                                        }
+                                        dragX = 0f; dragY = 0f
+                                    },
+                                ) { change, amount -> change.consume(); dragX += amount.x; dragY += amount.y }
+                            }
+                            .combinedClickable(
+                                onClick = { showLyrics = true },
+                                onLongClick = { ui.songMenu = SongMenuTarget(track, isCurrent = true) },
+                            ),
                     )
                 } else {
                     Box(Modifier.fillMaxSize().graphicsLayer { rotationY = flip - 180f; cameraDistance = 12f * density }) {
@@ -182,7 +224,7 @@ fun NowPlayingScreen(c: AppContainer) {
                 )
                 Text(formatDuration(s.durationMs / 1000.0), style = MaterialTheme.typography.bodySmall)
             }
-            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { volumeOpen = true }) { Icon(Icons.AutoMirrored.Filled.VolumeUp, "Volume", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                 IconButton(onClick = c.player::previous, modifier = Modifier.size(56.dp)) { Icon(Icons.Default.SkipPrevious, "Previous", Modifier.size(40.dp)) }
                 IconButton(onClick = c.player::togglePlay, modifier = Modifier.size(72.dp)) {
@@ -190,6 +232,21 @@ fun NowPlayingScreen(c: AppContainer) {
                 }
                 IconButton(onClick = c.player::next, modifier = Modifier.size(56.dp)) { Icon(Icons.Default.SkipNext, "Next", Modifier.size(40.dp)) }
                 IconButton(onClick = { ui.go("equalizer") }) { Icon(Icons.Default.Equalizer, "Equalizer", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            // "Up next" peek; tap or swipe up → Queue.
+            s.queue.getOrNull(s.index + 1)?.let { next ->
+                var up by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures(onDragEnd = { if (up < -40) ui.go("queue"); up = 0f }) { ch, d -> ch.consume(); up += d }
+                        }
+                        .clickable { ui.go("queue") }.padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Text("Up next: ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${next.mediaMetadata.title} · ${next.mediaMetadata.artist}", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
     }
@@ -336,3 +393,20 @@ private fun androidx.compose.material3.Typography.scaled(f: Float) = copy(
     bodyLarge = bodyLarge.copy(fontSize = bodyLarge.fontSize * f, lineHeight = bodyLarge.lineHeight * f),
 )
 
+
+/** What a drag on the cover means (docs/v3-ux.md §3.5). Pure, for tests. */
+enum class CoverGesture {
+    NEXT, PREVIOUS, MINIMISE, NONE;
+
+    companion object {
+        fun classify(dx: Float, dy: Float, width: Float): CoverGesture {
+            val threshold = (width * 0.22f).coerceAtLeast(60f)
+            return when {
+                kotlin.math.abs(dx) > kotlin.math.abs(dy) && dx <= -threshold -> NEXT
+                kotlin.math.abs(dx) > kotlin.math.abs(dy) && dx >= threshold -> PREVIOUS
+                kotlin.math.abs(dy) > kotlin.math.abs(dx) && dy >= threshold -> MINIMISE
+                else -> NONE
+            }
+        }
+    }
+}

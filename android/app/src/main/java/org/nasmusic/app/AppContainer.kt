@@ -82,6 +82,7 @@ class AppContainer(val context: Context) {
     val abRepeat = AbRepeat()
     val eq = EqRepository(context)
     val contextCollector = ContextCollector(context, scope)
+    val feeds = org.nasmusic.app.data.FeedRepository(api)
 
     /** Keep both addresses (and, via the tunnel, the LAN pin) current from /server-info. */
     fun startServerInfoRefresh() = scope.launch {
