@@ -30,7 +30,7 @@ def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     h = hashlib.scrypt(password.encode(), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P,
                        maxmem=128 * 1024 * 1024, dklen=32)
-    b64 = lambda b: base64.b64encode(b).decode()  # noqa: E731
+    b64 = lambda b: base64.b64encode(b).decode()
     return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${b64(salt)}${b64(h)}"
 
 

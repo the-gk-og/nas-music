@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+{% if started %}<p class="ok">Started: {{ started }}. Reload to see the result.</p>{% endif %}
+
+<section class="card">
+  <h2>Run now</h2>
+  {% if can_run %}
+  <div class="actions">
+    {% for name, label in [("scan", "Scan library"), ("full_scan", "Full rescan (re-read all tags)"),
+                           ("analyse", "Analyse new tracks"), ("nightly", "Build today's mixes"),
+                           ("discovery", "Run discovery")] %}
+    <form class="inline" method="post" action="/admin/jobs/{{ name }}"><button class="secondary">{{ label }}</button></form>
+    {% endfor %}
+  </div>
+  {% else %}<p class="muted">Jobs are only available while the server runs with its scheduler.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Jobs</h2>
+  {% include "_jobs.html" %}
+</section>
+
+<section class="card">
+  <h2>Configuration</h2>
+  <p class="muted">Edit <code>config.toml</code> and restart the server to change these.</p>
+  <div class="scroll"><table>
+    {% for k, v in rows %}<tr><td>{{ k }}</td><td class="mono">{{ v }}</td></tr>{% endfor %}
+  </table></div>
+</section>
+{% endblock %}

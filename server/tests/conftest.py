@@ -95,3 +95,48 @@ def conn(cfg):
     c = open_db(cfg)
     yield c
     c.close()
+
+
+@pytest.fixture
+def scanned(cfg, conn):
+    from nasmusic.library import scanner
+
+    scanner.scan(cfg, conn)
+    return conn
+
+
+@pytest.fixture
+def app(cfg, scanned):
+    from nasmusic.app import create_app
+    from nasmusic.app.scheduler import Jobs
+
+    return create_app(cfg, jobs=Jobs(cfg))
+
+
+@pytest.fixture
+def anon(app):
+    from fastapi.testclient import TestClient
+
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture
+def client(app, conn):
+    """A TestClient authenticated as a freshly paired device."""
+    from fastapi.testclient import TestClient
+
+    from nasmusic import auth
+
+    code, _ = auth.create_pair_code(conn)
+    with TestClient(app) as c:
+        r = c.post("/api/v1/pair", json={"pairCode": code, "deviceName": "Test phone"})
+        assert r.status_code == 200, r.text
+        c.headers["Authorization"] = f"Bearer {r.json()['deviceToken']}"
+        c.device_id = r.json()["deviceId"]
+        yield c
+
+
+def track_ids(conn) -> dict[str, str]:
+    """title -> track id"""
+    return {r["title"]: r["id"] for r in conn.execute("SELECT id, title FROM tracks")}

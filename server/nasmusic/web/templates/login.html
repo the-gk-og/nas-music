@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block header %}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:380px;margin:12vh auto 0">
+  <h1>♫ {{ server_name }}</h1>
+  {% if configured %}
+  <form method="post" action="/admin/login">
+    <label for="pw">Admin password</label>
+    <input id="pw" type="password" name="password" autocomplete="current-password" autofocus required>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <button type="submit">Log in</button>
+  </form>
+  {% else %}
+  <p>No admin password is set yet.</p>
+  <p class="muted">Run <code>nasmusic hash-password</code>, put the output in <code>admin_password_hash</code>
+  in <code>config.toml</code>, and restart the server.</p>
+  {% endif %}
+</div>
+{% endblock %}

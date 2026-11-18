@@ -1,0 +1,133 @@
+"""Opus transcode cache.
+
+Files live at <data_dir>/opus/<trackId>_<kbps>_<mtime>.opus, so a re-tagged/replaced source gets a new
+entry. One lock per (track, bitrate) stops concurrent requests transcoding the same file twice.
+The cache is trimmed least-recently-used (file mtime is bumped on use) to `max_bytes`.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import subprocess
+import threading
+import time
+from pathlib import Path
+
+log = logging.getLogger(__name__)
+
+FFMPEG_TIMEOUT_S = 900
+TOUCH_RESOLUTION_S = 3600
+
+
+class TranscodeError(Exception):
+    pass
+
+
+class OpusCache:
+    def __init__(self, directory: Path, max_bytes: int, ffmpeg: str = "ffmpeg"):
+        self.dir = directory
+        self.max_bytes = max_bytes
+        self.ffmpeg = ffmpeg
+        self._guard = threading.Lock()
+        self._locks: dict[tuple[str, int], threading.Lock] = {}
+        self._evict_lock = threading.Lock()
+        self.transcodes = 0  # counter, for tests/metrics
+
+    def path_for(self, track_id: str, kbps: int, mtime: float) -> Path:
+        return self.dir / f"{track_id}_{kbps}_{int(mtime)}.opus"
+
+    def _lock_for(self, key: tuple[str, int]) -> threading.Lock:
+        with self._guard:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = self._locks[key] = threading.Lock()
+            return lock
+
+    def get(self, src: Path, track_id: str, kbps: int, mtime: float) -> Path:
+        """Return the cached Opus file for this source, transcoding it first if needed (blocking)."""
+        out = self.path_for(track_id, kbps, mtime)
+        if self._hit(out):
+            return out
+        with self._lock_for((track_id, kbps)):
+            if self._hit(out):
+                return out
+            self._transcode(src, out, kbps)
+            for old in self.dir.glob(f"{track_id}_{kbps}_*.opus"):
+                if old != out:
+                    old.unlink(missing_ok=True)
+        self.evict()
+        return out
+
+    def _hit(self, out: Path) -> bool:
+        try:
+            st = out.stat()
+        except OSError:
+            return False
+        now = time.time()
+        if now - st.st_mtime > TOUCH_RESOLUTION_S:
+            try:
+                os.utime(out, (now, now))
+            except OSError:
+                pass
+        return True
+
+    def _transcode(self, src: Path, out: Path, kbps: int) -> None:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_name(f".{out.name}.{threading.get_ident()}.tmp")
+        cmd = [
+            self.ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(src), "-map", "0:a:0", "-vn", "-ac", "2",
+            "-c:a", "libopus", "-b:a", f"{kbps}k", "-vbr", "on", "-application", "audio",
+            "-map_metadata", "0", "-f", "opus", str(tmp),
+        ]
+        t0 = time.monotonic()
+        try:
+            proc = subprocess.run(cmd, capture_output=True, timeout=FFMPEG_TIMEOUT_S)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            tmp.unlink(missing_ok=True)
+            raise TranscodeError(f"ffmpeg failed to run: {e}") from e
+        if proc.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
+            tmp.unlink(missing_ok=True)
+            raise TranscodeError(f"ffmpeg exited {proc.returncode}: {proc.stderr.decode(errors='replace')[-500:]}")
+        os.replace(tmp, out)
+        self.transcodes += 1
+        log.info("transcoded %s -> %s kbps in %.1fs", src.name, kbps, time.monotonic() - t0)
+
+    def evict(self) -> int:
+        """Delete least-recently-used files until the cache is under its limit. Returns files removed."""
+        if not self._evict_lock.acquire(blocking=False):
+            return 0
+        try:
+            entries = []
+            total = 0
+            try:
+                with os.scandir(self.dir) as it:
+                    for e in it:
+                        if e.is_file() and e.name.endswith(".opus") and not e.name.startswith("."):
+                            st = e.stat()
+                            entries.append((st.st_mtime, st.st_size, e.path))
+                            total += st.st_size
+            except FileNotFoundError:
+                return 0
+            if total <= self.max_bytes:
+                return 0
+            target = int(self.max_bytes * 0.9)
+            removed = 0
+            for _, size, path in sorted(entries):
+                if total <= target:
+                    break
+                try:
+                    os.unlink(path)
+                    total -= size
+                    removed += 1
+                except OSError:
+                    pass
+            return removed
+        finally:
+            self._evict_lock.release()
+
+    def size_bytes(self) -> int:
+        try:
+            return sum(e.stat().st_size for e in os.scandir(self.dir) if e.name.endswith(".opus"))
+        except FileNotFoundError:
+            return 0

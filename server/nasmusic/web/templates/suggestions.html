@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Suggestions{% endblock %}
+{% block content %}
+<h1>Album suggestions</h1>
+{% set labels = {"new": "new", "want": "want", "not_interested": "not interested", "have": "already have"} %}
+{% for s in suggestions %}
+<section class="card sugg" id="s-{{ s.id }}">
+  {% if s.coverUrl %}<img src="{{ s.coverUrl }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}
+  <div style="flex:1;min-width:0">
+    <h2>{{ s.album }}{% if s.year %} <span class="muted">({{ s.year }})</span>{% endif %}</h2>
+    <div>{{ s.artist }} <span class="pill">{{ labels[s.status] }}</span></div>
+    <p>{{ s.reason }}</p>
+    {% if s.previewUrl %}<audio controls preload="none" src="{{ s.previewUrl }}"></audio>{% endif %}
+    {% if s.buyLinks %}<p>{% for l in s.buyLinks %}<a href="{{ l.url }}" rel="noopener noreferrer" target="_blank">{{ l.name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+    <div class="actions">
+      {% for st, label in [("want", "Want"), ("not_interested", "Not interested"), ("have", "Already have")] %}
+      <form class="inline" method="post" action="/admin/suggestions/{{ s.id }}">
+        <input type="hidden" name="status" value="{{ st }}">
+        <button class="{{ '' if s.status == st else 'secondary' }}" type="submit">{{ label }}</button>
+      </form>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% else %}
+<section class="card"><p class="muted">No suggestions yet. Discovery runs every Sunday at 03:00.</p></section>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<section class="card">
+  <h2>Library</h2>
+  <div class="grid">
+    <div class="stat"><b>{{ stats.tracks }}</b><span>tracks</span></div>
+    <div class="stat"><b>{{ stats.albums }}</b><span>albums</span></div>
+    <div class="stat"><b>{{ stats.artists }}</b><span>artists</span></div>
+    <div class="stat"><b>{{ stats.hours }}</b><span>hours</span></div>
+    <div class="stat"><b>{{ stats.gb }}</b><span>GB</span></div>
+    <div class="stat"><b>{{ stats.starred }}</b><span>favourites</span></div>
+  </div>
+  {% if stats.missing %}<p class="warn">{{ stats.missing }} file(s) missing since they were last seen.</p>{% endif %}
+  <p class="muted">Opus cache: {{ cache_gb }} / {{ cache_limit }} GB</p>
+</section>
+
+<section class="card">
+  <h2>Audio analysis</h2>
+  <div class="bar"><i style="width: {{ analysis.pct }}%"></i></div>
+  <p>{{ analysis.analysed }} of {{ analysis.total }} tracks analysed ({{ analysis.pct }}%)
+    {% if analysis.failed %} · <span class="bad">{{ analysis.failed }} failed</span>{% endif %}
+    {% if analysis.pending %} · {{ analysis.pending }} queued{% endif %}</p>
+  <p class="muted">Model: {{ analysis.model }}</p>
+</section>
+
+<section class="card">
+  <h2>Jobs</h2>
+  {% include "_jobs.html" %}
+</section>
+
+<section class="card">
+  <h2>Today's mixes</h2>
+  {% if mixes %}
+  <ul>{% for m in mixes %}<li>{{ m.title }} <span class="pill">{{ m.kind }}</span></li>{% endfor %}</ul>
+  {% else %}<p class="muted">None yet. They're built by the nightly run at 02:00.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Devices</h2>
+  {% if devices %}
+  <div class="scroll"><table>
+    <tr><th>Name</th><th>Paired</th><th>Last seen</th><th></th></tr>
+    {% for d in devices %}
+    <tr>
+      <td>{{ d.name }}</td>
+      <td class="muted">{{ d.created_at[:10] }}</td>
+      <td class="muted">{{ d.last_seen or "never" }}</td>
+      <td>{% if d.revoked %}<span class="muted">revoked</span>{% else %}
+        <form class="inline" method="post" action="/admin/devices/{{ d.id }}/revoke">
+          <button class="danger" type="submit">Revoke</button></form>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">No devices yet. <a href="/admin/pair">Pair your phone.</a></p>{% endif %}
+</section>
+{% endblock %}
