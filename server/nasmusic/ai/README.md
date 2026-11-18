@@ -21,7 +21,7 @@ reads `tracks`, `artists`, `albums`, `events` and `settings`.
 | `model_version` | Needs | Embedding | Also gives |
 | --- | --- | --- | --- |
 | `effnet-discogs-1` (default) | `uv sync --extra analysis` (essentia-tensorflow) + model files | Discogs-EffNet, 1280-d, mean-pooled over patches | 400 Discogs styles (top 5 → `genre:` tags), 56 MTG-Jamendo moods/themes (top 3 → `theme:`), danceability, mood aggressive/happy/relaxed/sad/party/acoustic (`mood:`), voice/instrumental, BPM (Percival), key (KeyExtractor, `bgate` profile), energy |
-| `basic-1` (fallback) | ffmpeg only | 104-d numpy statistics: log-mel means, MFCC mean/std, chroma, spectral centroid/rolloff/flatness/flux, ZCR, loudness | BPM (flux autocorrelation), key (Krumhansl), energy, a beat-strength "danceability" |
+| `basic-1` (fallback) | ffmpeg only | 107-d numpy statistics: log-mel means, MFCC mean/std, chroma, spectral centroid/rolloff/flatness/flux, ZCR, loudness | BPM (flux autocorrelation), key (Krumhansl), energy, a beat-strength "danceability" |
 
 If `cfg.model_version` needs Essentia and it is not importable, or the model files can't be
 downloaded, the analyser logs a warning and writes `basic-1` features instead, so dev, tests and a
@@ -129,10 +129,14 @@ Signals per track, decayed with a half-life of `ai.rec.half_life_days`:
 | skip after 30 s | −0.6 (mild dislike) |
 | skip before `ai.rec.skip_early_s` (30 s) | −1.5 (strong) |
 | repeated skip within 30 days | ×1.5, ×2.0 … per earlier skip (capped at −3 per event) |
-| thumbs-up | +2.0 |
+| thumbs-up (latest thumb event) | +2.0 |
 | star (`tracks.starred_at`) | +3.0 (strong like) |
 | rating r (`tracks.rating`) | r − 3 (1 star = −2 … 5 stars = +2) |
-| thumbs-down event or `tracks.blocked` | never in a mix |
+| thumbs-down (latest thumb event) | never in a mix |
+
+For thumbs, the **latest** `thumb_up` / `thumb_down` / `thumb_clear` event per track wins, and
+`thumb_clear` cancels the earlier thumb. That state overrides `tracks.blocked`, which may lag behind
+the events. Tracks with no thumb events fall back to `tracks.blocked`.
 
 * **Cold start.** Taste is a weighted spherical k-means over the embeddings of positively weighted
   tracks (up to `ai.rec.taste_clusters` centres, about one per 6 liked tracks), so liking metal and
@@ -171,7 +175,9 @@ times", "Not played yet, but sounds like *X* by *Y*", "Rarely played, close to y
 favourites", "Something different: Baroque you haven't explored much", "Never played; sounds like
 …", or "Sounds like *seed* by *artist*".
 
-The nightly run deactivates every active nightly mix and any `more_like` mix older than a day.
+The nightly run deactivates every active nightly mix **and every `more_like` mix**. The sync manifest
+includes all active mixes, so on-demand mixes must not pile up. Building a new `more_like` mix also
+deactivates those older than 24 h and keeps at most 3 active (`mixes.MORE_LIKE_MAX_ACTIVE`).
 Inactive mixes older than `ai.mix.keep_days` are deleted.
 
 ## Discovery (weekly)
@@ -203,6 +209,35 @@ Inactive mixes older than `ai.mix.keep_days` are deleted.
 HTTP is polite: User-Agent `nas-music/0.1 (open-source self-hosted music server)` with no contact
 details, MusicBrainz at most 1 request/s, other hosts spaced 0.15–0.3 s, and one retry with back-off
 on 429/503.
+
+## Status key for the dashboard: `ai.status.model_version`
+
+`settings['ai.status.model_version']` is a JSON object the engine keeps current. It is not a tunable,
+and it is not seeded with the defaults.
+
+```json
+{"requested": "effnet-discogs-1",      // cfg.model_version
+ "analysing": "basic-1",               // version analyse_pending is actually writing to `features`
+ "fallback_reason": "Essentia is not importable",   // null when analysing == requested
+ "mixes": "basic-1",                   // version the last nightly run built mixes from (see 80 % rule)
+ "updated_at": "2026-11-18T03:00:00Z"}
+```
+
+Analysis progress = `features` rows with `model_version = analysing` vs non-missing tracks.
+`analyse_pending` writes `requested` / `analysing` / `fallback_reason` on every call, and `run_nightly`
+writes `mixes`.
+
+## Concurrency
+
+Server core may run `analyse_pending` (after a scan) and `run_nightly` (02:00) at the same time, each
+on its own connection. Every write is a short `BEGIN IMMEDIATE` transaction:
+* one per analysed track, plus one to queue the batch;
+* one per mix, with reasons computed before the transaction opens;
+* one for the snapshot and one for the status key.
+
+Model training, scoring and audio decoding hold no lock (WAL readers don't block writers).
+`tests/ai/test_concurrency.py` runs both together on one DB file, alongside a third writer, and checks
+that it never waits more than 2 s for the lock.
 
 ## Settings
 
