@@ -247,7 +247,7 @@ CREATE INDEX IF NOT EXISTS taste_snapshots_user ON taste_snapshots(user_id, crea
 CREATE TABLE IF NOT EXISTS mixes (
     id          TEXT PRIMARY KEY,
     user_id     TEXT NOT NULL REFERENCES users(id),
-    kind        TEXT NOT NULL CHECK (kind IN ('daily','morning','evening','deep_cuts','more_like')),
+    kind        TEXT NOT NULL CHECK (kind IN ('daily','morning','evening','deep_cuts','more_like','context')),
     title       TEXT NOT NULL,
     for_date    TEXT NOT NULL,         -- local date YYYY-MM-DD the mix is for
     created_at  TEXT NOT NULL,

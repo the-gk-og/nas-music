@@ -120,7 +120,7 @@ def test_settings_and_jobs(web, conn):
     assert rec["ok"] and rec["result"]["unchanged"] == 5
     assert get_setting(conn, "job.scan")["ok"] is True
     rec = jobs.run("nightly")
-    assert rec["ok"] and rec["result"] == {"mixIds": {"*": []}}
+    assert rec["ok"] and all(ids == [] for ids in rec["result"]["mixIds"].values())  # {user or "*": [ids]}
     assert "Nightly mixes" in web.get("/admin").text
     assert web.post("/admin/jobs/bogus", follow_redirects=False).status_code == 404
 

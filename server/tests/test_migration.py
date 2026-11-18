@@ -89,6 +89,8 @@ def test_v1_to_v2_keeps_everything(tmp_path, old_check):
     # thumb_clear is now accepted; foreign keys are intact.
     conn.execute("INSERT INTO events (id, user_id, type, track_id, at, received_at) "
                  "VALUES ('e9', ?, 'thumb_clear', ?, 'x', 'x')", (uid, T2))
+    conn.execute("INSERT INTO mixes (id, user_id, kind, title, for_date, created_at) "
+                 "VALUES ('mc', ?, 'context', 'Gym', 'd', 'x')", (uid,))  # v2 context mixes
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     # New indexes exist on the rebuilt tables.
