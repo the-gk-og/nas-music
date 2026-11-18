@@ -5,12 +5,12 @@ from itertools import pairwise
 
 import numpy as np
 import pytest
-from tests.ai.conftest import NOW, build_library, mix_rows
 
 from nasmusic.ai import api
 from nasmusic.ai.common import ensure_default_settings
 from nasmusic.ai.mixes import MixBuilder, energy_target
 from nasmusic.ai.recommender import Recommender
+from tests.ai.conftest import NOW, build_library, mix_rows
 
 
 def _history(synth):
@@ -161,3 +161,18 @@ def test_nightly_never_raises(conn, cfg, synth, monkeypatch):
         raise RuntimeError("boom")
     monkeypatch.setattr(recommender.Recommender, "train", boom)
     assert api.run_nightly(conn, cfg) == []
+
+
+def test_more_like_mixes_do_not_pile_up(conn, cfg, synth):
+    from nasmusic.ai.common import iso
+    seeds = [synth.by_cluster(c)[0]["id"] for c in range(5)]
+    old = api.more_like(conn, cfg, seeds[0])
+    conn.execute("UPDATE mixes SET created_at = ? WHERE id = ?", (iso(NOW - timedelta(hours=25)), old))
+    ids = [api.more_like(conn, cfg, s) for s in seeds[1:]]
+    active = [r[0] for r in conn.execute(
+        "SELECT id FROM mixes WHERE kind = 'more_like' AND active = 1 ORDER BY created_at, rowid")]
+    assert old not in active                       # older than 24 h
+    assert active == ids[-3:]                      # at most 3, newest kept
+    # the nightly run retires every on-demand mix
+    api.run_nightly(conn, cfg)
+    assert conn.execute("SELECT COUNT(*) FROM mixes WHERE kind = 'more_like' AND active = 1").fetchone()[0] == 0
