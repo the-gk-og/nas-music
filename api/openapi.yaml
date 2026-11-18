@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,6 +10,10 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    v3 (docs/v3-ux.md phase 1): Home / For You shelf feeds, pins, global search incl. an online catalogue,
+    To get list, radio. `artUrl` fields in shelves/catalogue are relative to the API base (/api/v1/).
+    GET /stream and GET /art also accept `?token=<deviceToken>` (for <audio>/<img> in cross-origin clients);
+    the server redacts it from its access log.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
     Times are ISO-8601 UTC strings. IDs are opaque strings.
 servers:
@@ -142,6 +146,7 @@ paths:
         - { name: trackId, in: path, required: true, schema: { type: string } }
         - { name: format, in: query, schema: { type: string, enum: [opus, flac], default: opus } }
         - { name: bitrate, in: query, schema: { type: integer, default: 160, description: kbps, opus only } }
+        - { name: token, in: query, schema: { type: string }, description: 'device token, for <audio> elements that cannot send headers' }
       responses:
         '200': { description: full body (audio/ogg for opus, audio/flac for flac); Content-Length set }
         '206': { description: partial content }
@@ -151,6 +156,7 @@ paths:
       parameters:
         - { name: albumId, in: path, required: true, schema: { type: string } }
         - { name: size, in: query, schema: { type: integer, default: 512 } }
+        - { name: token, in: query, schema: { type: string }, description: device token (for <img>) }
       responses:
         '200': { description: image/jpeg }
         '404': { description: no art }
@@ -442,6 +448,11 @@ paths:
         Known keys: `offline.favourites` (bool) and the §10 data switches `context.listening`, `context.output`,
         `context.device`, `context.motion`, `context.location`, `context.weather`, `context.search`, `context.time`,
         `context.health` (bool, default false). A per-device override is stored as `device.<deviceId>.<key>`.
+        v3 appearance keys (docs/v3-ux.md §7; validated on PUT): `appearance.animations` off|quick|expressive
+        (default quick), `appearance.defaultView` grid|list, `appearance.albumPage` big|simple,
+        `appearance.accent` green|blue|purple|pink|orange|red|teal or "#rrggbb", `home.shelves` / `foryou.shelves`
+        (array of shelf ids, display order), `home.hidden` / `foryou.hidden` (array of shelf ids),
+        `library.view.<chip>` grid|list (usually per device: `device.<id>.library.view.albums`).
       responses:
         '200':
           description: settings
@@ -678,6 +689,7 @@ paths:
                 name: { type: string, minLength: 1, maxLength: 200 }
                 trackIds: { type: array, items: { type: string }, maxItems: 10000 }
                 startIndex: { type: integer, default: 0 }
+                source: { $ref: '#/components/schemas/QueueSource' }
       responses:
         '200':
           description: created
@@ -708,6 +720,23 @@ paths:
     delete:
       responses: { '204': { description: deleted } }
   /queues/{queueId}/tracks:
+    put:
+      summary: Replace all tracks (sort, clear, shuffle-in-place). currentIndex defaults to the current track's new index, else 0.
+      parameters: [ { name: queueId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackIds]
+              properties:
+                trackIds: { type: array, items: { type: string }, maxItems: 10000 }
+                currentIndex: { type: [integer, 'null'], minimum: 0 }
+      responses:
+        '200':
+          description: queue after the change
+          content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
     post:
       parameters: [ { name: queueId, in: path, required: true, schema: { type: string } } ]
       requestBody:
@@ -834,10 +863,294 @@ paths:
         required: true
         content: { application/json: { schema: { type: object, required: [new], properties: { new: { type: string, minLength: 8 } } } } }
       responses: { '204': { description: reset }, '404': { description: not found } }
+  /home:
+    get:
+      summary: |
+        Home (docs/v3-ux.md §3.1): typed shelves in the user's order (settings `home.shelves`, hidden ones in
+        `home.hidden`). Empty shelves are omitted, except `start_radio`, which always has one item.
+        Shelf kinds here: start_radio, devices, recently_played, continue_listening, pinned.
+      responses:
+        '200':
+          description: shelves
+          content: { application/json: { schema: { $ref: '#/components/schemas/ShelfFeed' } } }
+  /foryou:
+    get:
+      summary: |
+        For You (docs/v3-ux.md §3.2): typed shelves. Kinds: mixes, radio, because_you_played (1–3 shelves),
+        suggestions, to_get. Phase-2 kinds (release_radar, blends, wrapped) are reserved and not returned yet.
+        Order and hiding follow settings `foryou.shelves` / `foryou.hidden`. Empty shelves are omitted.
+      responses:
+        '200':
+          description: shelves
+          content: { application/json: { schema: { $ref: '#/components/schemas/ShelfFeed' } } }
+  /pins:
+    get:
+      summary: The user's "Pinned" items, in order (also shown on Home).
+      responses:
+        '200':
+          description: pinned items, resolved
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ShelfItem' } } } }
+    post:
+      summary: Pin an item to Home ("Pin to Home"). Idempotent; re-pinning moves it to `position`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, id]
+              properties:
+                type: { $ref: '#/components/schemas/PinType' }
+                id: { type: string }
+                position: { type: [integer, 'null'], description: 0 = first; omitted/null = last }
+      responses:
+        '200':
+          description: all pins after the change
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ShelfItem' } } } }
+        '404': { description: the item doesn't exist (or isn't yours) }
+  /pins/{type}/{id}:
+    delete:
+      parameters:
+        - { name: type, in: path, required: true, schema: { $ref: '#/components/schemas/PinType' } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '204': { description: unpinned (also when it wasn't pinned) } }
+  /search:
+    get:
+      summary: |
+        Global search (docs/v3-ux.md §4) across the library, the user's playlists and queues, and — with scope
+        all|catalog — an online catalogue (Deezer public search + MusicBrainz) for "Not in your library".
+        Catalogue results are cached server-side and rate-limited; if the catalogue is unreachable the library
+        results still come back and `catalogError` says why.
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } }
+        - { name: scope, in: query, schema: { type: string, enum: [all, library, catalog], default: all } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 }, description: per group }
+      responses:
+        '200':
+          description: grouped results
+          content: { application/json: { schema: { $ref: '#/components/schemas/SearchResults' } } }
+  /catalog/{catalogId}/preview:
+    get:
+      summary: 30-second sample of a catalogue item (album = its first track), proxied, fresh link each time, never stored.
+      parameters:
+        - { name: catalogId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: audio/mpeg (Range passed through; 206 when the upstream honours it) }
+        '404': { description: unknown id or no sample }
+        '502': { description: upstream unavailable }
+  /catalog/{catalogId}/cover:
+    get:
+      parameters:
+        - { name: catalogId, in: path, required: true, schema: { type: string } }
+        - { name: size, in: query, schema: { type: integer, default: 512 } }
+      responses:
+        '200': { description: image/jpeg (resized, cached on disk) }
+        '404': { description: unknown id or no cover }
+        '502': { description: upstream unavailable }
+  /toget:
+    get:
+      summary: The user's "To get" list (music to acquire), newest first.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [want, got, dismissed, all], default: want } }
+      responses:
+        '200':
+          description: items
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ToGetItem' } } } }
+    post:
+      summary: |
+        Add an album or song. Either `catalogId` (from search) or `type` + `title` + `artist`. Adding something
+        already on the list returns the existing item (status reset to `want` if it was dismissed). Items the
+        library already has are created as `got`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                catalogId: { type: string }
+                type: { type: string, enum: [album, track] }
+                title: { type: string, maxLength: 300 }
+                artist: { type: string, maxLength: 300 }
+                year: { type: [integer, 'null'] }
+                mbid: { type: [string, 'null'], description: MusicBrainz release-group (album) or recording (track) id }
+                note: { type: [string, 'null'], maxLength: 1000 }
+      responses:
+        '200':
+          description: the item
+          content: { application/json: { schema: { $ref: '#/components/schemas/ToGetItem' } } }
+        '404': { description: unknown catalogId }
+        '422': { description: neither catalogId nor type+title+artist }
+  /toget/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    patch:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [want, got, dismissed] }
+                note: { type: [string, 'null'], maxLength: 1000 }
+      responses:
+        '200':
+          description: updated
+          content: { application/json: { schema: { $ref: '#/components/schemas/ToGetItem' } } }
+        '404': { description: not found (or not yours) }
+    delete:
+      responses: { '204': { description: deleted }, '404': { description: not found } }
+  /radio:
+    post:
+      summary: |
+        Start a radio (docs/v3-ux.md §5): the AI picks ~25 tracks and the server stores them as a queue named
+        "<seed> radio" (radio != null on the queue). Ask for more with POST /radio/{queueId}/more when ~5 remain.
+        Queue changes are pushed over Connect as usual.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [seed], properties: { seed: { $ref: '#/components/schemas/RadioSeed' } } } } }
+      responses:
+        '200':
+          description: the new radio queue
+          content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
+        '404': { description: seed item not found, or nothing analysed to build a radio from }
+        '503': { description: AI engine without radio support yet }
+  /radio/{queueId}/more:
+    post:
+      parameters: [ { name: queueId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { count: { type: integer, default: 25, minimum: 1, maximum: 100 } } } } }
+      responses:
+        '200':
+          description: the queue with new tracks appended (no repeats within the queue)
+          content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
+        '404': { description: not a radio queue of yours }
+        '503': { description: AI engine without radio support yet }
 components:
   securitySchemes:
     device: { type: http, scheme: bearer }
   schemas:
+    ShelfFeed:
+      type: object
+      required: [shelves]
+      properties:
+        shelves: { type: array, items: { $ref: '#/components/schemas/Shelf' } }
+    Shelf:
+      type: object
+      description: A typed, generically renderable row of items. Unknown kinds/types must be skipped by clients.
+      required: [id, kind, title, items]
+      properties:
+        id: { type: string, description: 'stable id for ordering/hiding (e.g. "recently_played", "byp:album:<id>")' }
+        kind: { type: string, enum: [start_radio, devices, recently_played, continue_listening, pinned, mixes, radio, because_you_played, release_radar, suggestions, to_get, blends, wrapped] }
+        title: { type: string }
+        subtitle: { type: [string, 'null'] }
+        layout: { type: string, enum: [button, row, grid2], description: 'hint: grid2 = 2-row quick-pick grid (Recently played)' }
+        items: { type: array, items: { $ref: '#/components/schemas/ShelfItem' } }
+    ShelfItem:
+      type: object
+      description: |
+        Generic card. `type` says what tapping it does; the matching optional object carries the details.
+        `artUrl` is RELATIVE TO THE API BASE (/api/v1/), e.g. "art/<albumId>" or "catalog/<id>/cover"; null = no art.
+      required: [type, id, title]
+      properties:
+        type: { type: string, enum: [track, album, artist, playlist, mix, radio, queue, device, catalog, suggestion, toget, smart_list, genre, folder] }
+        id: { type: string }
+        title: { type: string }
+        subtitle: { type: [string, 'null'] }
+        artUrl: { type: [string, 'null'] }
+        track: { $ref: '#/components/schemas/Track' }
+        album: { $ref: '#/components/schemas/Album' }
+        artist: { $ref: '#/components/schemas/Artist' }
+        playlist: { $ref: '#/components/schemas/Playlist' }
+        queue: { $ref: '#/components/schemas/Queue' }
+        mix: { type: object, properties: { kind: { type: string }, trackCount: { type: integer }, durationS: { type: number } } }
+        seed: { $ref: '#/components/schemas/RadioSeed' }
+        device:
+          type: object
+          properties:
+            kind: { $ref: '#/components/schemas/DeviceKind' }
+            canPlay: { type: boolean }
+            isActive: { type: boolean }
+            playing: { type: boolean }
+            nowPlaying: { oneOf: [ { $ref: '#/components/schemas/Track' }, { type: 'null' } ] }
+        progress:
+          type: object
+          description: continue_listening — where you left off
+          properties:
+            index: { type: integer }
+            count: { type: integer }
+            positionMs: { type: integer }
+            queueId: { type: [string, 'null'] }
+        catalog: { $ref: '#/components/schemas/CatalogItem' }
+        suggestion: { $ref: '#/components/schemas/Suggestion' }
+        toget: { $ref: '#/components/schemas/ToGetItem' }
+        playedAt: { type: [string, 'null'], format: date-time }
+    PinType:
+      type: string
+      enum: [album, artist, playlist, mix, queue, smart_list, genre, folder]
+    RadioSeed:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [random, track, artist, album, playlist] }
+        id: { type: [string, 'null'], description: required unless type=random }
+        title: { type: [string, 'null'], description: set by the server in responses }
+    SearchResults:
+      type: object
+      required: [query, top, tracks, albums, artists, playlists, queues, catalog]
+      properties:
+        query: { type: string }
+        top: { oneOf: [ { $ref: '#/components/schemas/ShelfItem' }, { type: 'null' } ], description: best single match (library first, else catalogue) }
+        tracks: { type: array, items: { $ref: '#/components/schemas/Track' } }
+        albums: { type: array, items: { $ref: '#/components/schemas/Album' } }
+        artists: { type: array, items: { $ref: '#/components/schemas/Artist' } }
+        playlists: { type: array, items: { $ref: '#/components/schemas/Playlist' } }
+        queues: { type: array, items: { $ref: '#/components/schemas/Queue' } }
+        catalog: { type: array, items: { $ref: '#/components/schemas/CatalogItem' }, description: '"Not in your library" — owned items are filtered out unless scope=catalog' }
+        catalogError: { type: [string, 'null'] }
+    CatalogItem:
+      type: object
+      description: |
+        Music from the online catalogue. `id` is opaque (e.g. "dz:album:302127", "dz:track:3135556",
+        "dz:artist:27", "mb:rg:<mbid>"). `owned` = matched to the library by MBID, else by normalised names.
+      required: [id, type, title, owned, hasPreview, links]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [album, track, artist] }
+        title: { type: string }
+        artist: { type: [string, 'null'] }
+        album: { type: [string, 'null'], description: for tracks }
+        year: { type: [integer, 'null'] }
+        durationS: { type: [number, 'null'] }
+        mbid: { type: [string, 'null'] }
+        artUrl: { type: [string, 'null'], description: 'relative to the API base, "catalog/<id>/cover"' }
+        hasPreview: { type: boolean, description: 'GET catalog/<id>/preview plays a 30 s sample' }
+        owned: { type: boolean }
+        ownedId: { type: [string, 'null'], description: the library album/track/artist id when owned }
+        toGet: { oneOf: [ { type: object, properties: { id: { type: string }, status: { type: string } } }, { type: 'null' } ] }
+        links: { type: array, items: { type: object, properties: { name: { type: string }, url: { type: string } } }, description: buy/search links (Bandcamp, Qobuz) }
+    ToGetItem:
+      type: object
+      required: [id, type, title, artist, status, createdAt, links]
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [album, track] }
+        title: { type: string }
+        artist: { type: string }
+        year: { type: [integer, 'null'] }
+        mbid: { type: [string, 'null'] }
+        catalogId: { type: [string, 'null'] }
+        artUrl: { type: [string, 'null'] }
+        hasPreview: { type: boolean }
+        note: { type: [string, 'null'] }
+        status: { type: string, enum: [want, got, dismissed] }
+        source: { type: string, enum: [search, suggestion, manual] }
+        suggestionId: { type: [string, 'null'] }
+        ownedId: { type: [string, 'null'], description: library album/track id once got by a scan }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        gotAt: { type: [string, 'null'], format: date-time }
+        links: { type: array, items: { type: object, properties: { name: { type: string }, url: { type: string } } } }
     DeviceKind:
       type: string
       enum: [android, web, desktop, watch, other]
@@ -953,6 +1266,15 @@ components:
         durationS: { type: number }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+        source: { oneOf: [ { $ref: '#/components/schemas/QueueSource' }, { type: 'null' } ] }
+        radio: { oneOf: [ { $ref: '#/components/schemas/RadioSeed' }, { type: 'null' } ], description: 'set on radio queues (POST /radio)' }
+    QueueSource:
+      type: object
+      description: What a queue was started from; drives Home's Recently played / Continue listening.
+      required: [type]
+      properties:
+        type: { type: string, enum: [album, artist, playlist, mix, radio, genre, folder, smart_list, search, other] }
+        id: { type: [string, 'null'] }
     QueueDetail:
       allOf:
         - $ref: '#/components/schemas/Queue'
