@@ -14,8 +14,10 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
+from . import context as cx
 from .common import iso, local_tz, new_id, top_tag, transaction
 from .recommender import Recommender
+from .store import Store
 
 log = logging.getLogger("nasmusic.ai.mixes")
 
@@ -41,6 +43,16 @@ SPECS = {
 }
 
 
+CONTEXT_CURVES = {"workout": "high", "drive": "arc", "late_night": "fall"}
+CONTEXT_HOURS = {"workout": 18, "drive": 17, "late_night": 23}
+
+
+def context_spec(key: str) -> MixSpec:
+    """A context mix ('workout', 'drive', 'late_night', 'place:<name>'), stored with kind='context'."""
+    return MixSpec("context", cx.mix_title(key), "ai.mix.context.minutes", CONTEXT_HOURS.get(key, 14), key,
+                   CONTEXT_CURVES.get(key, "arc"))
+
+
 def _short(s: str, n: int = 40) -> str:
     return s if len(s) <= n else s[: n - 1].rstrip() + "…"
 
@@ -51,6 +63,8 @@ def energy_target(curve: str, t: float, start: float = 0.5) -> float:
         return 0.15 + 0.75 * t
     if curve == "fall":
         return 0.85 - 0.75 * t
+    if curve == "high":  # workout: start lively, stay high
+        return 0.55 + 0.35 * min(t / 0.2, 1.0)
     if curve == "arc":  # warm up, peak around 60 %, ease off
         return 0.25 + 0.6 * math.sin(math.pi * min(t / 1.2, 1.0) ** 0.9)
     return start  # 'flat': stay near the seed
@@ -101,6 +115,22 @@ class MixBuilder:
         jitter = self.rng.gumbel(size=idx.size) * noise
         return idx[np.argsort(-(score[idx] + jitter))]
 
+    def _diverse_rank(self, idx: np.ndarray, score: np.ndarray, noise: float = 0.05) -> np.ndarray:
+        """New users: alternate between the library-wide taste centres, so a cold-start mix samples the
+        whole range of sounds instead of the single most popular corner."""
+        ranked = self._noisy_rank(idx, score, noise)
+        m = self.rec.load_or_train()
+        if ranked.size == 0 or m.centroids.shape[0] < 2:
+            return ranked
+        groups = np.argmax(self.lib.emb[ranked] @ m.centroids.T, axis=1)
+        queues = [list(ranked[groups == g]) for g in range(m.centroids.shape[0])]
+        out = []
+        while any(queues):
+            for q in queues:
+                if q:
+                    out.append(q.pop(0))
+        return np.array(out, dtype=ranked.dtype)
+
     def select(self, spec: MixSpec, used: set[int]) -> tuple[list[int], dict[int, str]]:
         seconds = self.s.num(spec.minutes_key) * 60
         avg = float(np.median(self.lib.duration)) if len(self.lib) else 240.0
@@ -125,7 +155,8 @@ class MixBuilder:
             secs = until - float(sum(max(dur[i], 30.0) for i in chosen))
             if secs <= 30:
                 return 0.0
-            got = self._take(self._noisy_rank(np.where(mask)[0], rank_by, noise), secs, chosen, counts, cap)
+            rank = self._diverse_rank if self.rec.is_new_user else self._noisy_rank
+            got = self._take(rank(np.where(mask)[0], rank_by, noise), secs, chosen, counts, cap)
             for i in chosen[before:]:
                 bucket[i] = name
             return got
@@ -134,7 +165,9 @@ class MixBuilder:
             mask = pool & (plays <= self.s.num("ai.mix.deep_cuts.max_plays")) & (self.sig.weight < 1.0)
             take(mask, sound, seconds, "deep")
         else:
-            known = pool & ((self.sig.weight >= 0.75) | self.lib.starred | (self.lib.rating >= 4))
+            known = pool & ((self.sig.weight >= 0.75) | self.sig.starred | (self.sig.rating >= 4))
+            if spec.kind == "context":  # what you actually play in this context counts as "known"
+                known &= self.sig.ctx_weight.get(spec.tod, np.zeros(len(self.lib))) > 0.25
             rare = pool & ~known & (plays <= self.s.num("ai.mix.rare_max_plays"))
             kp, rp = self.s.num("ai.mix.known_pct"), self.s.num("ai.mix.rare_pct")
             ep = self.s.num("ai.mix.explore_pct")
@@ -216,14 +249,14 @@ class MixBuilder:
         if bucket == "more_like" and seed is not None:
             return f"Sounds like {_short(lib.title[seed])} by {_short(lib.artist_name[seed], 30)}"
         if bucket == "known":
-            if spec and spec.tod and sig.tod_weight[spec.tod][i] > 0.5:
-                return f"You often play this in the {spec.tod}"
-            if lib.starred[i]:
+            if spec and spec.tod and sig.ctx_weight.get(spec.tod, np.zeros(len(lib)))[i] > 0.5:
+                return cx.reason_phrase(spec.tod)
+            if sig.starred[i]:
                 if np.isfinite(days) and days >= 14:
                     return f"A favourite you haven't heard in {int(days // 7)} weeks"
                 return "One of your favourites"
-            if lib.rating[i] >= 4:
-                return f"You rated this {int(lib.rating[i])} stars"
+            if sig.rating[i] >= 4:
+                return f"You rated this {int(sig.rating[i])} stars"
             if plays >= 2:
                 return f"You've played this through {plays} times"
             if plays == 1:
@@ -245,6 +278,14 @@ class MixBuilder:
         if like:
             return f"{head}, but {like}"
         model = self.rec.load_or_train()
+        if self.rec.is_new_user:  # library-wide cold start: say which library-wide signal picked it
+            if self.rec.popularity[i] >= 3:
+                return "Popular with listeners on this server"
+            if lib.added_days[i] <= 30:
+                return "Recently added to the library"
+            j, _ = model.nearest_centroid(lib.emb[i])
+            label = model.centroid_labels[j] if j >= 0 else None
+            return f"A taste of the library's {_short(label, 30)}" if label else "A taste of the library"
         j, sim = model.nearest_centroid(lib.emb[i])
         if j >= 0 and sim > 0.2:
             return f"{head}, close to your {_short(model.centroid_labels[j], 30)} favourites"
@@ -258,61 +299,81 @@ class MixBuilder:
         # everything is computed before the write transaction, which then only holds the lock for inserts
         rows = [(mid, pos, self.lib.ids[i], float(score[i]) if np.isfinite(score[i]) else None,
                  self.reason(i, bucket.get(i, "rare"), spec, seed)) for pos, i in enumerate(ordered)]
+        store, uid = self.rec.store, self.rec.user_id
+        cols, marks, vals = store.owner(uid)
         with transaction(self.rec.conn) as c:
             if kind == "more_like":
-                retire_more_like(c, self.rec.now, keep_active=MORE_LIKE_MAX_ACTIVE - 1)
-            c.execute("INSERT INTO mixes (id, kind, title, for_date, created_at, seed_track, active) "
-                      "VALUES (?,?,?,?,?,?,1)",
+                retire_more_like(c, self.rec.now, keep_active=MORE_LIKE_MAX_ACTIVE - 1, store=store, user_id=uid)
+            c.execute(f"INSERT INTO mixes (id, kind, title, for_date, created_at, seed_track, active{cols}) "
+                      f"VALUES (?,?,?,?,?,?,1{marks})",
                       (mid, kind, title, self.today, iso(self.rec.now),
-                       self.lib.ids[seed] if seed is not None else None))
+                       self.lib.ids[seed] if seed is not None else None, *vals))
             c.executemany("INSERT INTO mix_tracks (mix_id, position, track_id, score, reason) VALUES (?,?,?,?,?)",
                           rows)
         return mid
 
 
-def retire_more_like(conn: sqlite3.Connection, now: datetime, keep_active: int = MORE_LIKE_MAX_ACTIVE) -> None:
+def retire_more_like(conn: sqlite3.Connection, now: datetime, keep_active: int = MORE_LIKE_MAX_ACTIVE,
+                     store: Store | None = None, user_id: str | None = None) -> None:
     """On-demand mixes go into the phone's sync manifest while active, so they must not pile up:
-    deactivate those older than 24 h and all but the newest `keep_active`."""
-    conn.execute("UPDATE mixes SET active = 0 WHERE active = 1 AND kind = 'more_like' AND created_at < ?",
-                 (iso(now - timedelta(days=1)),))
+    deactivate the user's ones older than 24 h and all but the newest `keep_active`."""
+    where, w = (store or Store(conn)).where_owner(user_id)
+    conn.execute(f"UPDATE mixes SET active = 0 WHERE active = 1 AND kind = 'more_like'{where} AND created_at < ?",
+                 (*w, iso(now - timedelta(days=1))))
     conn.execute(
-        "UPDATE mixes SET active = 0 WHERE active = 1 AND kind = 'more_like' AND id NOT IN ("
-        "SELECT id FROM mixes WHERE active = 1 AND kind = 'more_like' "
-        "ORDER BY created_at DESC, rowid DESC LIMIT ?)", (max(keep_active, 0),))
+        f"UPDATE mixes SET active = 0 WHERE active = 1 AND kind = 'more_like'{where} AND id NOT IN ("
+        f"SELECT id FROM mixes WHERE active = 1 AND kind = 'more_like'{where} "
+        "ORDER BY created_at DESC, rowid DESC LIMIT ?)", (*w, *w, max(keep_active, 0)))
 
 
-def deactivate_old(conn: sqlite3.Connection, now: datetime, keep_days: float) -> None:
-    """Nightly: yesterday's mixes and every on-demand mix go inactive."""
+def deactivate_old(conn: sqlite3.Connection, now: datetime, keep_days: float, store: Store | None = None,
+                   user_id: str | None = None) -> None:
+    """Nightly, per user: yesterday's mixes (nightly and context) and every on-demand mix go inactive."""
+    where, w = (store or Store(conn)).where_owner(user_id)
     with transaction(conn):
-        marks = ",".join("?" * len(NIGHTLY_KINDS))
-        conn.execute(f"UPDATE mixes SET active = 0 WHERE active = 1 AND kind IN ({marks})", NIGHTLY_KINDS)
-        conn.execute("UPDATE mixes SET active = 0 WHERE active = 1 AND kind = 'more_like'")
-        conn.execute("DELETE FROM mixes WHERE active = 0 AND created_at < ?",
-                     (iso(now - timedelta(days=keep_days)),))
+        conn.execute(f"UPDATE mixes SET active = 0 WHERE active = 1{where}", w)
+        conn.execute(f"DELETE FROM mixes WHERE active = 0{where} AND created_at < ?",
+                     (*w, iso(now - timedelta(days=keep_days))))
+
+
+def context_mix_keys(rec: Recommender) -> list[str]:
+    """Contexts with enough plays for their own mix, most played first."""
+    need = rec.settings.num("ai.mix.context.min_plays")
+    keys = [k for k, n in rec.sig.ctx_plays.items() if k not in ("morning", "evening") and n >= need]
+    keys.sort(key=lambda k: (-rec.sig.ctx_plays[k], k))
+    return keys[: max(rec.settings.int("ai.mix.context.max"), 0)]
 
 
 def build_nightly(rec: Recommender) -> list[str]:
-    deactivate_old(rec.conn, rec.now, rec.settings.num("ai.mix.keep_days"))
+    deactivate_old(rec.conn, rec.now, rec.settings.num("ai.mix.keep_days"), rec.store, rec.user_id)
     if len(rec.lib) == 0:
         log.info("no analysed tracks yet; no mixes built")
         return []
     b = MixBuilder(rec)
     used: set[int] = set()
     ids = []
-    for kind in NIGHTLY_KINDS:
-        spec = SPECS[kind]
+    specs = [SPECS[k] for k in NIGHTLY_KINDS] + [context_spec(k) for k in context_mix_keys(rec)]
+    for spec in specs:
         try:
-            chosen, bucket = b.select(spec, used)
+            # context mixes may share tracks with the time-of-day mixes: they're for a different moment
+            chosen, bucket = b.select(spec, set() if spec.kind == "context" else used)
             ordered = b.order(chosen, spec.curve)
             if not ordered:
-                log.info("%s: nothing eligible", kind)
+                log.info("%s: nothing eligible", spec.title)
                 continue
             score = rec.scores(hour=spec.hour, tod=spec.tod)
-            ids.append(b.write(kind, spec.title, ordered, bucket, score, spec))
-            used.update(ordered)
-            log.info("%s: %d tracks, %.0f min", kind, len(ordered), rec.lib.duration[ordered].sum() / 60)
+            try:
+                ids.append(b.write(spec.kind, spec.title, ordered, bucket, score, spec))
+            except sqlite3.IntegrityError as e:
+                if spec.kind != "context":
+                    raise
+                log.warning("cannot store context mix %r (does mixes.kind allow 'context'?): %s", spec.title, e)
+                continue
+            if spec.kind != "context":
+                used.update(ordered)
+            log.info("%s: %d tracks, %.0f min", spec.title, len(ordered), rec.lib.duration[ordered].sum() / 60)
         except Exception:
-            log.exception("building %s mix failed", kind)
+            log.exception("building %s mix failed", spec.title)
     return ids
 
 

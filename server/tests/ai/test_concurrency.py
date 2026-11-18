@@ -13,6 +13,7 @@ from nasmusic.ai import api
 from nasmusic.ai.common import ensure_default_settings, read_status
 from nasmusic.ai.recommender import Recommender
 from tests.ai.conftest import build_library, ffmpeg_ok, write_tone
+from tests.ai.schema_v2 import add_user, init_v2
 from tests.ai.test_analyser import add_track
 
 pytestmark = pytest.mark.skipif(not ffmpeg_ok(), reason="ffmpeg not installed")
@@ -21,7 +22,9 @@ pytestmark = pytest.mark.skipif(not ffmpeg_ok(), reason="ffmpeg not installed")
 def test_nightly_and_analysis_concurrently(tmp_path, cfg, caplog):
     path = tmp_path / "shared.db"
     setup = db.connect(path)
-    db.init(setup)
+    init_v2(setup)
+    add_user(setup, "alice")
+    add_user(setup, "bob")
     ensure_default_settings(setup)
     setup.execute("UPDATE settings SET value = '1' WHERE key = 'ai.analysis.workers'")
     # analysed synthetic library, same dims as basic-1 so new tracks join it
@@ -79,11 +82,12 @@ def test_nightly_and_analysis_concurrently(tmp_path, cfg, caplog):
     assert not bad, [r.getMessage() for r in bad]
 
     assert results["analysed"] == [n_new]
-    assert len(results["nightly"]) >= 2 and all(len(ids) == 4 for ids in results["nightly"])
+    assert len(results["nightly"]) >= 2
+    assert all(set(r) == {"alice", "bob"} and all(len(ids) == 4 for ids in r.values()) for r in results["nightly"])
     assert max(results["lock_waits"]) < 2.0, max(results["lock_waits"])
 
     conn = db.connect(path)
     assert conn.execute("SELECT COUNT(*) FROM analysis_jobs WHERE status != 'done'").fetchone()[0] == 0
-    assert conn.execute("SELECT COUNT(*) FROM mixes WHERE active = 1 AND kind = 'daily'").fetchone()[0] == 1
-    assert len(Recommender(conn, cfg).lib) == 4 * 6 * 6 + n_new
+    assert conn.execute("SELECT COUNT(*) FROM mixes WHERE active = 1 AND kind = 'daily'").fetchone()[0] == 2
+    assert len(Recommender(conn, cfg, "alice").lib) == 4 * 6 * 6 + n_new
     assert read_status(conn)["analysing"] == "basic-1"

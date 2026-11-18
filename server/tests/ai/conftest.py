@@ -13,8 +13,10 @@ import pytest
 from nasmusic import db
 from nasmusic.ai.api import AIConfig
 from nasmusic.ai.common import iso, to_blob
+from tests.ai.schema_v2 import add_user, init_v2
 
 NOW = datetime.now(UTC).replace(microsecond=0)
+USER = "u1"
 GENRES = ["Rock---Indie Rock", "Jazz---Hard Bop", "Electronic---Techno", "Folk---Folk Rock",
           "Hip Hop---Boom Bap", "Classical---Baroque"]
 
@@ -30,24 +32,46 @@ class SynthLib:
     centres: np.ndarray
     tracks: list[dict] = field(default_factory=list)
     n_events: int = 0
+    user: str = USER     # default user for events / user_tracks helpers
 
     def by_cluster(self, c: int) -> list[dict]:
         return [t for t in self.tracks if t["cluster"] == c]
 
     def event(self, track_id: str, etype: str, at: datetime, position_s: float | None = None,
-              duration_s: float | None = None, rating: int | None = None) -> None:
+              duration_s: float | None = None, rating: int | None = None, context: dict | None = None,
+              user: str | None = None) -> None:
+        """Insert an event and keep user_tracks counters in step, as server core does."""
         self.n_events += 1
+        uid = user or self.user
         self.conn.execute(
-            "INSERT INTO events (id, device_id, type, track_id, at, position_s, duration_s, source, mix_id, "
-            "rating, offline, received_at) VALUES (?, NULL, ?, ?, ?, ?, ?, 'library', NULL, ?, 0, ?)",
-            (f"ev{self.n_events}", etype, track_id, iso(at), position_s, duration_s, rating, iso(at)))
+            "INSERT INTO events (id, user_id, device_id, type, track_id, at, position_s, duration_s, source, "
+            "mix_id, rating, offline, received_at, context) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'library', NULL, ?, 0, ?, ?)",
+            (f"ev{self.n_events}", uid, etype, track_id, iso(at), position_s, duration_s, rating, iso(at),
+             json.dumps(context) if context is not None else None))
+        if etype in ("play", "skip"):
+            col = "play_count" if etype == "play" else "skip_count"
+            self.conn.execute(
+                f"INSERT INTO user_tracks (user_id, track_id, {col}, last_played) VALUES (?, ?, 1, ?) "
+                f"ON CONFLICT(user_id, track_id) DO UPDATE SET {col} = {col} + 1, "
+                "last_played = MAX(COALESCE(last_played, ''), excluded.last_played)", (uid, track_id, iso(at)))
 
-    def play(self, t: dict, at: datetime, full: bool = True) -> None:
+    def user_track(self, track_id: str, user: str | None = None, **cols) -> None:
+        """Set per-user state, e.g. user_track(tid, starred_at='2026-01-01T00:00:00Z', rating=5, blocked=1)."""
+        uid = user or self.user
+        self.conn.execute("INSERT OR IGNORE INTO user_tracks (user_id, track_id) VALUES (?, ?)", (uid, track_id))
+        for col, v in cols.items():
+            assert col in ("starred_at", "rating", "blocked", "play_count", "skip_count", "last_played")
+            self.conn.execute(f"UPDATE user_tracks SET {col} = ? WHERE user_id = ? AND track_id = ?",
+                              (v, uid, track_id))
+
+    def play(self, t: dict, at: datetime, full: bool = True, context: dict | None = None,
+             user: str | None = None) -> None:
         d = t["duration"]
-        self.event(t["id"], "play", at, d if full else d * 0.3, d)
+        self.event(t["id"], "play", at, d if full else d * 0.3, d, context=context, user=user)
 
-    def skip(self, t: dict, at: datetime, pos: float = 10.0) -> None:
-        self.event(t["id"], "skip", at, pos, t["duration"])
+    def skip(self, t: dict, at: datetime, pos: float = 10.0, context: dict | None = None,
+             user: str | None = None) -> None:
+        self.event(t["id"], "skip", at, pos, t["duration"], context=context, user=user)
 
 
 def build_library(conn, cfg: AIConfig, n_clusters: int = 6, artists_per_cluster: int = 8,
@@ -87,7 +111,8 @@ def build_library(conn, cfg: AIConfig, n_clusters: int = 6, artists_per_cluster:
 @pytest.fixture
 def conn(tmp_path):
     c = db.connect(tmp_path / "t.db")
-    db.init(c)
+    init_v2(c)
+    add_user(c, USER)
     yield c
     c.close()
 
@@ -108,7 +133,7 @@ def synth(conn, cfg) -> SynthLib:
 
 def mix_rows(conn, mix_id: str) -> list[tuple]:
     return conn.execute(
-        "SELECT mt.position, mt.track_id, t.artist_id, mt.reason, t.duration_s, t.blocked FROM mix_tracks mt "
+        "SELECT mt.position, mt.track_id, t.artist_id, mt.reason, t.duration_s FROM mix_tracks mt "
         "JOIN tracks t ON t.id = mt.track_id WHERE mt.mix_id = ? ORDER BY mt.position", (mix_id,)).fetchall()
 
 
