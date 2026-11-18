@@ -9,6 +9,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -132,6 +140,10 @@ fun SettingsScreen(c: AppContainer) {
         OutlinedButton(enabled = settings.offlineFavourites, onClick = { SyncScheduler.syncNow(c.context) }) { Text("Sync now") }
 
         HorizontalDivider()
+        Section("Appearance")
+        AppearanceSettings(c, settings)
+
+        HorizontalDivider()
         Section("Data & recommendations")
         OutlinedButton(onClick = { ui.go("data") }) { Text("Choose what to collect") }
 
@@ -156,3 +168,49 @@ fun SettingsScreen(c: AppContainer) {
 
 @Composable
 private fun Section(title: String) = Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+
+@Composable
+private fun AppearanceSettings(c: AppContainer, settings: org.nasmusic.app.data.prefs.AppSettings) {
+    val scope = rememberCoroutineScope()
+    @Composable
+    fun Choice(label: String, options: List<Pair<String, String>>, value: String, set: suspend (String) -> Unit) {
+        Text(label)
+        SingleChoiceSegmentedButtonRow {
+            options.forEachIndexed { i, (k, l) ->
+                SegmentedButton(selected = value == k, onClick = { scope.launch { set(k) } }, shape = SegmentedButtonDefaults.itemShape(i, options.size)) { Text(l) }
+            }
+        }
+    }
+    Choice("Animations", org.nasmusic.app.ui.MotionLevel.entries.map { it.key to it.label }, settings.animations) { c.settings.setAnimations(it) }
+    Text("Turning off animations in Android's accessibility settings also turns them off here.", style = MaterialTheme.typography.bodySmall)
+    Choice("Default view", listOf("grid" to "Grid", "list" to "List"), settings.defaultView) { c.settings.setDefaultView(it) }
+    Choice("Album & artist pages", listOf("big" to "Big header", "simple" to "Simple list"), settings.pageStyle) { c.settings.setPageStyle(it) }
+    Text("Accent colour")
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        org.nasmusic.app.data.prefs.AppSettings.ACCENTS.forEach { argb ->
+            val selected = settings.accent == argb
+            androidx.compose.foundation.layout.Box(
+                Modifier.size(if (selected) 40.dp else 32.dp)
+                    .background(androidx.compose.ui.graphics.Color(argb), androidx.compose.foundation.shape.CircleShape)
+                    .clickable { scope.launch { c.settings.setAccent(argb) } },
+            )
+        }
+    }
+    Text("Home shelves")
+    val names = mapOf("start_radio" to "Start radio", "devices" to "Your devices", "recent" to "Recently played", "continue" to "Continue listening", "pinned" to "Pinned")
+    val order = settings.homeShelves
+    order.forEachIndexed { i, entry ->
+        val id = entry.removePrefix("-")
+        val visible = !entry.startsWith("-")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(names[id] ?: id, Modifier.weight(1f))
+            IconButton(enabled = i > 0, onClick = { scope.launch { c.settings.setHomeShelves(order.toMutableList().apply { add(i - 1, removeAt(i)) }) } }) {
+                Icon(Icons.Default.KeyboardArrowUp, "Move up")
+            }
+            IconButton(enabled = i < order.lastIndex, onClick = { scope.launch { c.settings.setHomeShelves(order.toMutableList().apply { add(i + 1, removeAt(i)) }) } }) {
+                Icon(Icons.Default.KeyboardArrowDown, "Move down")
+            }
+            Switch(visible, { on -> scope.launch { c.settings.setHomeShelves(order.toMutableList().apply { this[i] = if (on) id else "-$id" }) } })
+        }
+    }
+}

@@ -29,6 +29,9 @@ data class ArtistDetail(
     val albumCount: Int,
     val mbid: String? = null,
     val albums: List<Album> = emptyList(),
+    /** v3 (optional until the server sends them): the user's most played tracks by this artist, similar artists. */
+    val topTracks: List<Track> = emptyList(),
+    val similar: List<Artist> = emptyList(),
 )
 
 @Serializable

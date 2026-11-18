@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Settings
@@ -167,41 +168,7 @@ fun AlbumGrid(albums: List<Album>, header: (@Composable () -> Unit)? = null, onC
     }
 }
 
-@Composable
-fun AlbumScreen(c: AppContainer, albumId: String) {
-    val ui = LocalUi.current
-    var album by remember { mutableStateOf<AlbumDetail?>(null) }
-    LaunchedEffect(albumId) { album = runCatching { c.api.album(albumId) }.getOrNull() }
-    val a = album ?: return Loading()
-    LazyColumn(Modifier.fillMaxSize()) {
-        item {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                org.nasmusic.app.ui.AlbumArt(a.id, 120.dp)
-                Column(Modifier.weight(1f)) {
-                    Text(a.title, style = MaterialTheme.typography.titleLarge)
-                    Text(a.artist, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { ui.go("artist/${a.artistId}") })
-                    Text(listOfNotNull(a.year?.toString(), "${a.tracks.size} songs").joinToString(" · "), style = MaterialTheme.typography.bodySmall)
-                    Row {
-                        IconButton(onClick = { c.player.play(a.tracks, 0, PlaySource.LIBRARY, "Album: ${a.title}") }) { Icon(Icons.Default.PlayArrow, "Play") }
-                        IconButton(onClick = { c.player.play(a.tracks.shuffled(), 0, PlaySource.LIBRARY, "Album: ${a.title}") }) { Icon(Icons.Default.Shuffle, "Shuffle") }
-                    }
-                }
-            }
-        }
-        songItems(c, a.tracks, "Album: ${a.title}", PlaySource.LIBRARY)
-    }
-}
-
-// ---------- Artists ----------
-
-@Composable
-fun ArtistScreen(c: AppContainer, artistId: String) {
-    val ui = LocalUi.current
-    var artist by remember { mutableStateOf<ArtistDetail?>(null) }
-    LaunchedEffect(artistId) { artist = runCatching { c.api.artist(artistId) }.getOrNull() }
-    val a = artist ?: return Loading()
-    AlbumGrid(a.albums, header = { Text(a.name, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(8.dp)) }) { ui.go("album/${it.id}") }
-}
+// Album/artist pages live in Pages.kt (v3 Big header / Simple list).
 
 // ---------- Genres ----------
 
@@ -312,10 +279,14 @@ fun PlaylistScreen(c: AppContainer, id: String) {
     Column(Modifier.fillMaxSize()) {
         ScreenTitle(pl.name) {
             IconButton(onClick = { c.player.play(pl.tracks, 0, PlaySource.LIBRARY, "Playlist: ${pl.name}") }) { Icon(Icons.Default.PlayArrow, "Play") }
+            IconButton(onClick = {
+                scope.launch { if (c.player.startRadio(org.nasmusic.app.data.api.RadioSeed("playlist", id))) ui.go("now") else ui.toast = "Couldn't start the radio" }
+            }) { Icon(Icons.Default.Radio, "Playlist radio") }
             Column {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
                 DropdownMenu(menu, { menu = false }) {
                     DropdownMenuItem({ Text("Rename") }, { menu = false; newName = pl.name; renaming = true })
+                    DropdownMenuItem({ Text("Pin to Home") }, { menu = false; scope.launch { runCatching { c.api.pin(org.nasmusic.app.data.api.NewPin("playlist", id)) }; ui.toast = "Pinned to Home" } })
                     DropdownMenuItem({ Text("Delete playlist") }, {
                         menu = false
                         scope.launch { runCatching { c.api.deletePlaylist(id) }; ui.nav.popBackStack() }

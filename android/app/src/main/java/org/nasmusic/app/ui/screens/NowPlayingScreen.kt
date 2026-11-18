@@ -263,7 +263,7 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
 
 /** Dominant colour of the cover via Palette (falls back to a dark grey). */
 @Composable
-private fun rememberDominantColor(url: String): Color {
+fun rememberDominantColor(url: String): Color {
     val ctx = LocalContext.current
     var color by remember(url) { mutableStateOf(Color(0xFF2A2522)) }
     LaunchedEffect(url) {
