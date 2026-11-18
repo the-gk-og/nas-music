@@ -17,6 +17,8 @@ data class EventEntity(
     val rating: Int? = null,
     val offline: Boolean = false,
     val createdAtMs: Long = System.currentTimeMillis(),
+    /** v2 opt-in context (JSON object), only enabled signals. */
+    val context: String? = null,
 )
 
 /** A track held offline in app-private storage. */

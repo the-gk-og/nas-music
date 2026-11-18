@@ -22,6 +22,7 @@ class EventRecorder(
         source: String? = null,
         mixId: String? = null,
         rating: Int? = null,
+        context: kotlinx.serialization.json.JsonObject? = null,
     ) {
         val online = isOnline()
         val e = EventEntity(
@@ -35,6 +36,7 @@ class EventRecorder(
             mixId = mixId,
             rating = rating,
             offline = !online,
+            context = context?.toString(),
         )
         scope.launch {
             store.insert(e)

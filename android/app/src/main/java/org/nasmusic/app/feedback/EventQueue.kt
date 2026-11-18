@@ -15,6 +15,7 @@ interface EventQueueStore {
 fun EventEntity.toDto() = EventDto(
     id = id, type = type, trackId = trackId, at = at, positionS = positionS, durationS = durationS,
     source = source, mixId = mixId, rating = rating, offline = offline,
+    context = context?.let { runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) as? kotlinx.serialization.json.JsonObject }.getOrNull() },
 )
 
 /**
