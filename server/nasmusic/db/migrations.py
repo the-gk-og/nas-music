@@ -185,10 +185,62 @@ def _migrate(conn: sqlite3.Connection, stmts: list[str], admin_username: str, ad
     for t in REBUILT:
         conn.execute(f"DROP TABLE {t}")
         conn.execute(f"ALTER TABLE {t}__v2 RENAME TO {t}")
+    _create_indexes(conn, stmts)
+    return admin_id
+
+
+_INDEX_TABLE = re.compile(r"\bON\s+(\w+)\s*\(", re.IGNORECASE)
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone() is not None
+
+
+def _create_indexes(conn: sqlite3.Connection, stmts: list[str]) -> None:
+    """Create the schema's indexes for tables that exist at this migration step."""
     for s in stmts:
         if s.upper().startswith("CREATE INDEX"):
-            conn.execute(s)
-    return admin_id
+            m = _INDEX_TABLE.search(s)
+            if m and _table_exists(conn, m.group(1)):
+                conn.execute(s)
+
+
+# ---------- v2 -> v3 (docs/v3-ux.md phase 1): additive only ----------
+
+V3_TABLES = ("pins", "toget", "catalog_items")
+V3_QUEUE_COLUMNS = (("source_type", "TEXT"), ("source_id", "TEXT"), ("radio_seed", "TEXT"))
+
+
+def migrate_v2_to_v3(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """New tables + nullable queue columns. No data is rewritten. Returns True if it migrated."""
+    if current_version(conn) != 2:
+        return False
+    if make_backup:
+        dest = backup(conn, "v2-backup")
+        if dest:
+            log.warning("schema v2 -> v3: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 2:
+            conn.execute("ROLLBACK")
+            return False
+        for t in V3_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        have = {r[1] for r in conn.execute("PRAGMA table_info(queues)")}
+        for col, typ in V3_QUEUE_COLUMNS:
+            if col not in have:
+                conn.execute(f"ALTER TABLE queues ADD COLUMN {col} {typ}")
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (3)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v2 -> v3 done")
+    return True
 
 
 def _folder(path: str) -> str:

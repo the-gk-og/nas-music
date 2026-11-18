@@ -57,7 +57,7 @@ def test_v1_to_v2_keeps_everything(tmp_path, old_check):
     conn = db.connect(path)
     db.init(conn, admin_username="owner", admin_password_hash="scrypt$x")
 
-    assert migrations.current_version(conn) == 2
+    assert migrations.current_version(conn) == 3
     admin = conn.execute("SELECT * FROM users").fetchall()
     assert len(admin) == 1 and admin[0]["username"] == "owner" and admin[0]["is_admin"] == 1
     assert admin[0]["password_hash"] == "scrypt$x"
@@ -140,14 +140,14 @@ def test_failed_migration_leaves_v1_untouched(tmp_path, monkeypatch):
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     monkeypatch.setattr(migrations, "_migrate", real)
     db.init(conn)  # and a retry works
-    assert migrations.current_version(conn) == 2
+    assert migrations.current_version(conn) == 3
 
 
 def test_fresh_database_is_v2(tmp_path):
     conn = db.connect(tmp_path / "new.db")
     db.init(conn)
     db.init(conn)
-    assert migrations.current_version(conn) == 2
+    assert migrations.current_version(conn) == 3
     assert conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0  # app creates the admin
     assert list(tmp_path.glob("*.v1-backup-*")) == []
 

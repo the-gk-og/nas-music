@@ -1,6 +1,7 @@
--- nas-music shared schema v2 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v3 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
--- listening is per user. Existing v1 databases are upgraded by nasmusic.db.migrations.
+-- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
+-- columns. Existing v1/v2 databases are upgraded by nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -183,6 +184,9 @@ CREATE TABLE IF NOT EXISTS queues (
     position_ms   INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL,
+    source_type   TEXT,                -- v3: what it was started from (album, playlist, mix, radio, ...)
+    source_id     TEXT,
+    radio_seed    TEXT,                -- v3: JSON RadioSeed for radio queues, else NULL
     UNIQUE (user_id, slot)
 );
 
@@ -207,6 +211,54 @@ CREATE TABLE IF NOT EXISTS playback_state (
     user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     state      TEXT NOT NULL,          -- JSON PlaybackState
     updated_at TEXT NOT NULL
+);
+
+-- ---------- v3: Home pins, To get list, online catalogue cache ----------
+
+CREATE TABLE IF NOT EXISTS pins (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type       TEXT NOT NULL,          -- album, artist, playlist, mix, queue, smart_list, genre, folder
+    item_id    TEXT NOT NULL,
+    position   INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, type, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS toget (
+    id            TEXT PRIMARY KEY,
+    user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type          TEXT NOT NULL CHECK (type IN ('album','track')),
+    title         TEXT NOT NULL,
+    artist        TEXT NOT NULL,
+    year          INTEGER,
+    mbid          TEXT,                -- release group (album) or recording (track)
+    catalog_id    TEXT,                -- catalog_items.id when added from search
+    note          TEXT,
+    status        TEXT NOT NULL DEFAULT 'want' CHECK (status IN ('want','got','dismissed')),
+    source        TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('search','suggestion','manual')),
+    suggestion_id TEXT,
+    match_key     TEXT NOT NULL,       -- normalised "artist|title", for de-duplication and library matching
+    owned_id      TEXT,                -- library album/track id once found by a scan
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    got_at        TEXT,
+    UNIQUE (user_id, type, match_key)
+);
+CREATE INDEX IF NOT EXISTS toget_user ON toget(user_id, status);
+
+-- Cache of online-catalogue items seen in search results (shared; no user data).
+CREATE TABLE IF NOT EXISTS catalog_items (
+    id          TEXT PRIMARY KEY,      -- dz:album:N, dz:track:N, dz:artist:N, mb:rg:<mbid>
+    type        TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    artist      TEXT,
+    album       TEXT,
+    year        INTEGER,
+    duration_s  REAL,
+    mbid        TEXT,
+    cover_url   TEXT,
+    preview_ref TEXT,                  -- Deezer API URL resolved to a fresh preview link on demand
+    fetched_at  TEXT NOT NULL
 );
 
 -- ---------- AI-owned tables ----------
