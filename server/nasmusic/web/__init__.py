@@ -6,7 +6,9 @@ import hmac
 import sqlite3
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -23,6 +25,20 @@ from nasmusic.library import queries
 
 HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(HERE / "templates"))
+
+
+def _localtime(value: str | None, tz: str = "UTC", fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """Render a stored ISO-8601 UTC timestamp in the server's configured timezone."""
+    if not value:
+        return ""
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return dt.astimezone(ZoneInfo(tz)).strftime(fmt)
+    except (ValueError, KeyError):
+        return value
+
+
+templates.env.filters["localtime"] = _localtime
 router = APIRouter()
 
 COOKIE = "nm_admin"
@@ -91,7 +107,7 @@ def _client_ip(request: Request) -> str:
 
 def render(request: Request, name: str, **kw) -> HTMLResponse:
     c: AppContext = request.app.state.ctx
-    return templates.TemplateResponse(request, name, {"server_name": c.cfg.server_name, **kw})
+    return templates.TemplateResponse(request, name, {"server_name": c.cfg.server_name, "tz": c.cfg.timezone, **kw})
 
 
 # ---------- routes ----------

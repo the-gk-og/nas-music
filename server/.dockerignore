@@ -1,0 +1,14 @@
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+tests
+data
+config.toml
+*.db
+*.db-wal
+*.db-shm
+models
+Dockerfile
+.dockerignore

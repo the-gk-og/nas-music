@@ -122,7 +122,7 @@ class Jobs:
             return {}
         out = {}
         for job in self.scheduler.get_jobs():
-            out[job.id] = job.next_run_time.isoformat(timespec="minutes") if job.next_run_time else None
+            out[job.id] = job.next_run_time.strftime("%Y-%m-%d %H:%M") if job.next_run_time else None
         return out
 
     def shutdown(self):

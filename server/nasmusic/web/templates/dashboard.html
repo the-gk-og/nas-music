@@ -46,8 +46,8 @@
     {% for d in devices %}
     <tr>
       <td>{{ d.name }}</td>
-      <td class="muted">{{ d.created_at[:10] }}</td>
-      <td class="muted">{{ d.last_seen or "never" }}</td>
+      <td class="muted">{{ d.created_at|localtime(tz, '%Y-%m-%d') }}</td>
+      <td class="muted">{{ d.last_seen|localtime(tz) or "never" }}</td>
       <td>{% if d.revoked %}<span class="muted">revoked</span>{% else %}
         <form class="inline" method="post" action="/admin/devices/{{ d.id }}/revoke">
           <button class="danger" type="submit">Revoke</button></form>{% endif %}</td>

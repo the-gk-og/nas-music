@@ -5,7 +5,7 @@
   {% for j in jobs %}
   <tr>
     <td>{{ labels[j.name] }}{% if j.running %} <span class="pill">running</span>{% endif %}</td>
-    <td>{% if j.rec %}{{ j.rec.finishedAt }}<br><span class="muted">{{ j.rec.durationS }} s</span>{% else %}<span class="muted">never</span>{% endif %}</td>
+    <td>{% if j.rec %}{{ j.rec.finishedAt|localtime(tz) }}<br><span class="muted">{{ j.rec.durationS }} s</span>{% else %}<span class="muted">never</span>{% endif %}</td>
     <td>{% if j.rec %}
       {% if j.rec.ok %}<span class="ok">ok</span>
         {% if j.rec.result %}<br><span class="muted mono">{% for k, v in j.rec.result.items() if k != 'error_paths' %}{{ k }}={{ v if v is not iterable or v is string else v|length }} {% endfor %}</span>{% endif %}
