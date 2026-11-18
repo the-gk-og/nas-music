@@ -16,16 +16,14 @@ object RadioLogic {
     fun needsMore(count: Int, currentIndex: Int): Boolean = count > 0 && remaining(count, currentIndex) <= REMAINING_THRESHOLD
 
     /**
-     * New tracks from a `/radio/{id}/more` answer. Accepts `{added:[Track]}` / `{tracks:[Track]}` with
-     * only the new ones, or the whole queue (`{id, tracks}`) in which case tracks we already hold
-     * (same prefix) are skipped.
+     * New tracks from a `/radio/{id}/more` answer. The contract returns the whole queue (`{id, tracks}`)
+     * with new tracks appended, so everything past what we hold is new. `{added:[…]}` or a bare
+     * `{tracks:[…]}` without an id are taken as only-new for robustness.
      */
     fun newTracks(response: JsonObject, localIds: List<String>, json: Json): List<Track> {
         val ser = ListSerializer(Track.serializer())
         (response["added"] as? JsonArray)?.let { return json.decodeFromJsonElement(ser, it) }
         val tracks = (response["tracks"] as? JsonArray)?.let { json.decodeFromJsonElement(ser, it) } ?: return emptyList()
-        val isWholeQueue = "id" in response && tracks.size >= localIds.size &&
-            tracks.take(localIds.size).map { it.id } == localIds
-        return if (isWholeQueue) tracks.drop(localIds.size) else tracks
+        return if ("id" in response) tracks.drop(localIds.size) else tracks
     }
 }

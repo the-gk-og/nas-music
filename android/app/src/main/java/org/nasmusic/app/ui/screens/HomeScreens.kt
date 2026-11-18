@@ -57,7 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalTime
 import kotlinx.coroutines.launch
 import org.nasmusic.app.AppContainer
-import org.nasmusic.app.data.api.Feed
+import org.nasmusic.app.data.api.ShelfFeed
 import org.nasmusic.app.data.api.RadioSeed
 import org.nasmusic.app.data.api.Shelf
 import org.nasmusic.app.data.api.ToGetItem
@@ -95,6 +95,12 @@ fun TopBar(c: AppContainer, title: String) {
     }
 }
 
+/** Shelf kinds this app knows how to draw; others are skipped (contract rule). */
+private val KNOWN_KINDS = setOf(
+    "start_radio", "devices", "recently_played", "continue_listening", "pinned", "mixes", "radio", "because_you_played",
+    "release_radar", "suggestions", "to_get", "blends", "wrapped",
+)
+
 private fun greeting(): String = when (LocalTime.now().hour) {
     in 5..11 -> "Good morning"
     in 12..17 -> "Good afternoon"
@@ -112,11 +118,12 @@ fun HomeScreen(c: AppContainer) {
     val devices by c.connect.devices.collectAsStateWithLifecycle()
     val state by c.connect.state.collectAsStateWithLifecycle()
     val me by c.connect.myDeviceId.collectAsStateWithLifecycle()
-    var feed by remember { mutableStateOf<Feed?>(null) }
+    var feed by remember { mutableStateOf<ShelfFeed?>(null) }
     var failed by remember { mutableStateOf(false) }
     var reload by remember { mutableStateOf(0) }
     LaunchedEffect(reload) { feed = runCatching { c.feeds.home() }.onFailure { failed = true }.getOrNull() }
-    val byId = feed?.shelves.orEmpty().associateBy { it.id }
+    // Start radio and devices are drawn locally (devices are live over Connect); the rest by kind.
+    val byKind = feed?.shelves.orEmpty().filter { it.kind != "start_radio" && it.kind != "devices" }.associateBy { it.kind }
 
     LazyColumn(Modifier.fillMaxSize()) {
         item { TopBar(c, "${greeting()}${cfg?.username?.let { ", $it" } ?: ""}") }
@@ -153,11 +160,11 @@ fun HomeScreen(c: AppContainer) {
                         }
                     }
                 }
-                else -> byId[id]?.takeIf { it.items.isNotEmpty() }?.let { shelf -> item(key = id) { HomeShelf(c, shelf) { reload++ } } }
+                else -> byKind[id]?.takeIf { it.items.isNotEmpty() }?.let { shelf -> item(key = id) { HomeShelf(c, shelf) { reload++ } } }
             }
         }
         // Shelves the server adds that the app doesn't know yet still show, after the known ones.
-        feed?.shelves.orEmpty().filter { s -> settings.homeShelves.none { it.removePrefix("-") == s.id } && s.items.isNotEmpty() }
+        feed?.shelves.orEmpty().filter { s -> settings.homeShelves.none { it.removePrefix("-") == s.kind } && s.items.isNotEmpty() && s.kind in KNOWN_KINDS }
             .forEach { s -> item(key = "x:" + s.id) { HomeShelf(c, s) { reload++ } } }
         if (feed == null && !failed) item { Box(Modifier.height(200.dp)) { Loading() } }
         if (failed) item { Message("Couldn't reach the server. Your queues and downloaded favourites still work.") }
@@ -170,8 +177,8 @@ private fun HomeShelf(c: AppContainer, shelf: Shelf, onChanged: () -> Unit) {
     val scope = rememberCoroutineScope()
     ShelfHeader(shelf.title)
     when {
-        shelf.layout == "grid2" || shelf.id == "recent" -> QuickPicks(c, shelf.items)
-        shelf.id == "pinned" -> ShelfRow(c, shelf.items, onUnpin = { item ->
+        shelf.layout == "grid2" || shelf.kind == "recently_played" -> QuickPicks(c, shelf.items)
+        shelf.kind == "pinned" -> ShelfRow(c, shelf.items, onUnpin = { item ->
             scope.launch { runCatching { c.api.unpin(item.type, item.id) }; onChanged() }
         })
         else -> ShelfRow(c, shelf.items)
@@ -183,21 +190,22 @@ private fun HomeShelf(c: AppContainer, shelf: Shelf, onChanged: () -> Unit) {
 @Composable
 fun ForYouScreen(c: AppContainer) {
     val ui = LocalUi.current
-    var feed by remember { mutableStateOf<Feed?>(null) }
+    var feed by remember { mutableStateOf<ShelfFeed?>(null) }
     var failed by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { feed = runCatching { c.feeds.forYou() }.onFailure { failed = true }.getOrNull() }
     LazyColumn(Modifier.fillMaxSize()) {
         item { TopBar(c, "For You") }
-        feed?.shelves.orEmpty().filter { it.items.isNotEmpty() }.forEach { shelf ->
+        feed?.shelves.orEmpty().filter { it.items.isNotEmpty() && it.kind in KNOWN_KINDS }.forEach { shelf ->
             item(key = shelf.id) {
                 ShelfHeader(shelf.title) {
-                    when (shelf.id) {
-                        "toget" -> TextButton(onClick = { ui.go("toget") }) { Text("See all") }
+                    when (shelf.kind) {
+                        "to_get" -> TextButton(onClick = { ui.go("toget") }) { Text("See all") }
                         "suggestions" -> TextButton(onClick = { ui.go("discover") }) { Text("See all") }
                         "mixes" -> TextButton(onClick = { ui.go("mixes") }) { Text("See all") }
                     }
                 }
-                ShelfRow(c, shelf.items, cardWidth = if (shelf.id == "mixes") 160.dp else 140.dp)
+                shelf.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 16.dp, bottom = 6.dp)) }
+                if (shelf.layout == "grid2") QuickPicks(c, shelf.items) else ShelfRow(c, shelf.items, cardWidth = if (shelf.kind == "mixes") 160.dp else 140.dp)
             }
         }
         if (feed == null && !failed) item { Box(Modifier.height(200.dp)) { Loading() } }
@@ -214,7 +222,7 @@ fun ToGetScreen(c: AppContainer) {
     val scope = rememberCoroutineScope()
     var list by remember { mutableStateOf<List<ToGetItem>?>(null) }
     var filter by rememberSaveable { mutableStateOf("want") }
-    suspend fun reload() { list = runCatching { c.api.toGet() }.getOrElse { ui.toast = "Couldn't load To get"; emptyList() } }
+    suspend fun reload() { list = runCatching { c.api.toGet(status = "all") }.getOrElse { ui.toast = "Couldn't load To get"; emptyList() } }
     LaunchedEffect(Unit) { reload() }
     fun patch(t: ToGetItem, status: String) = scope.launch { runCatching { c.api.patchToGet(t.id, ToGetPatch(status = status)) }; reload() }
 
@@ -232,10 +240,10 @@ fun ToGetScreen(c: AppContainer) {
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 items(shown, key = { it.id }) { t ->
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ShelfArt(org.nasmusic.app.data.api.ShelfItem("toget", t.id, t.title, artPath = t.catalogId?.takeIf { t.hasCover }?.let { "catalog/$it/cover?size=128" }), 56.dp)
+                        ShelfArt(org.nasmusic.app.data.api.ShelfItem("toget", t.id, t.title, artUrl = t.artUrl), 56.dp)
                         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                             Text(t.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(listOfNotNull(t.artist, t.kind).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(listOfNotNull(t.artist, t.type, t.year?.toString()).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             t.note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                             Row {
                                 t.links.forEach { l ->

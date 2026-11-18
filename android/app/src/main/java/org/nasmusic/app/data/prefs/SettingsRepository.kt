@@ -42,8 +42,15 @@ data class AppSettings(
     fun viewFor(chip: String) = libraryViews[chip] ?: defaultView
     companion object {
         const val SYNC_WINDOW_HOURS = 2
-        val DEFAULT_HOME_SHELVES = listOf("start_radio", "devices", "recent", "continue", "pinned")
-        val ACCENTS = listOf(0xFF4ADE80, 0xFF60A5FA, 0xFFF472B6, 0xFFFBBF24, 0xFFA78BFA, 0xFFF87171)
+        /** Shelf ids as in the contract (`home.shelves`). */
+        val DEFAULT_HOME_SHELVES = listOf("start_radio", "devices", "recently_played", "continue_listening", "pinned")
+        private val RENAMED = mapOf("recent" to "recently_played", "continue" to "continue_listening")
+        fun migrateShelfId(entry: String): String {
+            val hidden = entry.startsWith("-")
+            val id = entry.removePrefix("-").let { RENAMED[it] ?: it }
+            return if (hidden) "-$id" else id
+        }
+        val ACCENTS get() = AppearanceSync.ACCENT_NAMES.values.toList()
     }
 }
 
@@ -76,7 +83,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             defaultView = p[defaultViewKey] ?: "grid",
             pageStyle = p[pageStyleKey] ?: "big",
             accent = p[accentKey] ?: 0xFF4ADE80,
-            homeShelves = p[homeShelvesKey]?.split(',')?.filter { it.isNotBlank() }?.let(::withNewShelves) ?: AppSettings.DEFAULT_HOME_SHELVES,
+            homeShelves = p[homeShelvesKey]?.split(',')?.filter { it.isNotBlank() }?.map(AppSettings::migrateShelfId)?.let(::withNewShelves) ?: AppSettings.DEFAULT_HOME_SHELVES,
             libraryViews = p[libraryViewsKey]?.split(',')?.mapNotNull { e -> e.split('=').takeIf { it.size == 2 }?.let { it[0] to it[1] } }?.toMap().orEmpty(),
         )
 
@@ -95,14 +102,22 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     suspend fun setStorageLimitMb(mb: Int) = context.dataStore.edit { it[limit] = mb.coerceAtLeast(256) }
     suspend fun setSyncHour(h: Int) = context.dataStore.edit { it[hour] = h.mod(24) }
     suspend fun setAllowTunnelSync(on: Boolean) = context.dataStore.edit { it[tunnelSync] = on }
-    suspend fun setAnimations(v: String) = context.dataStore.edit { it[animationsKey] = v }
-    suspend fun setDefaultView(v: String) = context.dataStore.edit { it[defaultViewKey] = v }
-    suspend fun setPageStyle(v: String) = context.dataStore.edit { it[pageStyleKey] = v }
-    suspend fun setAccent(v: Long) = context.dataStore.edit { it[accentKey] = v }
-    suspend fun setHomeShelves(v: List<String>) = context.dataStore.edit { it[homeShelvesKey] = v.joinToString(",") }
+    suspend fun setAnimations(v: String) { context.dataStore.edit { it[animationsKey] = v }; onAppearanceChanged(current()) }
+    suspend fun setDefaultView(v: String) { context.dataStore.edit { it[defaultViewKey] = v }; onAppearanceChanged(current()) }
+    suspend fun setPageStyle(v: String) { context.dataStore.edit { it[pageStyleKey] = v }; onAppearanceChanged(current()) }
+    suspend fun setAccent(v: Long) { context.dataStore.edit { it[accentKey] = v }; onAppearanceChanged(current()) }
+    suspend fun setHomeShelves(v: List<String>) { context.dataStore.edit { it[homeShelvesKey] = v.joinToString(",") }; onAppearanceChanged(current()) }
     suspend fun setLibraryView(chip: String, view: String) = context.dataStore.edit { p ->
         val cur = p[libraryViewsKey]?.split(',')?.mapNotNull { e -> e.split('=').takeIf { it.size == 2 }?.let { it[0] to it[1] } }?.toMap().orEmpty()
         p[libraryViewsKey] = (cur + (chip to view)).entries.joinToString(",") { "${it.key}=${it.value}" }
+    }
+    /** Set by the container: pushes appearance to /me/settings after a change made on this device. */
+    var onAppearanceChanged: suspend (AppSettings) -> Unit = {}
+
+    /** Apply appearance values synced from another device (doesn't push back). */
+    suspend fun applyAppearance(s: AppSettings) = context.dataStore.edit {
+        it[animationsKey] = s.animations; it[defaultViewKey] = s.defaultView; it[pageStyleKey] = s.pageStyle
+        it[accentKey] = s.accent; it[homeShelvesKey] = s.homeShelves.joinToString(",")
     }
     suspend fun setOfflineFavourites(on: Boolean) = context.dataStore.edit { it[offline] = on }
     suspend fun setLyricsScale(s: Float) = context.dataStore.edit { it[lyricsScaleKey] = s.coerceIn(0.7f, 2f) }

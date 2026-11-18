@@ -91,6 +91,23 @@ class AppContainer(val context: Context) {
             runCatching { api.serverInfo() }.onSuccess { auth.applyServerInfo(it, r) }
             queueSync.refresh()
             contextCollector.syncFrom(api)
+            pullAppearance()
+        }
+    }
+
+    /** Appearance follows the user across devices via /me/settings (docs/v3-ux.md §7). */
+    private suspend fun pullAppearance() {
+        val remote = runCatching { api.mySettings().settings }.getOrNull() ?: return
+        val cur = settings.current()
+        val next = org.nasmusic.app.data.prefs.AppearanceSync.fromRemote(remote, cur)
+        if (next != cur) settings.applyAppearance(next)
+    }
+
+    fun startAppearancePush() {
+        settings.onAppearanceChanged = { s ->
+            if (secureStore.config.value?.isPaired == true) {
+                runCatching { api.putMySettings(org.nasmusic.app.data.api.UserSettings(org.nasmusic.app.data.prefs.AppearanceSync.toRemote(s))) }
+            }
         }
     }
 }

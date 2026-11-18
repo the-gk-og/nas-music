@@ -169,7 +169,7 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
         album = runCatching { c.api.album(albumId) }.getOrNull()
         album?.let { a ->
             more = runCatching { c.api.artist(a.artistId).albums }.getOrDefault(emptyList())
-                .filter { it.id != a.id }.map { ShelfItem("album", it.id, it.title, it.year?.toString(), albumId = it.id) }
+                .filter { it.id != a.id }.map { ShelfItem("album", it.id, it.title, it.year?.toString(), artUrl = org.nasmusic.app.data.FeedRepository.art(it.id)) }
         }
     }
     val a = album ?: return Loading()
@@ -229,11 +229,11 @@ fun ArtistScreen(c: AppContainer, artistId: String) {
         }
         item {
             ShelfHeader("Albums")
-            ShelfRow(c, a.albums.sortedByDescending { it.year ?: 0 }.map { ShelfItem("album", it.id, it.title, it.year?.toString(), albumId = it.id) })
+            ShelfRow(c, a.albums.sortedByDescending { it.year ?: 0 }.map { ShelfItem("album", it.id, it.title, it.year?.toString(), artUrl = org.nasmusic.app.data.FeedRepository.art(it.id)) })
         }
         item {
             ShelfHeader("Artist radio")
-            ShelfRow(c, listOf(ShelfItem("radio", "artist:${a.id}", "${a.name} radio", "Similar sound from your library", albumId = coverAlbum, seed = RadioSeed("artist", a.id))))
+            ShelfRow(c, listOf(ShelfItem("radio", "artist:${a.id}", "${a.name} radio", "Similar sound from your library", artUrl = org.nasmusic.app.data.FeedRepository.art(coverAlbum), seed = RadioSeed("artist", a.id))))
         }
         if (a.similar.isNotEmpty()) item {
             ShelfHeader("Similar artists")

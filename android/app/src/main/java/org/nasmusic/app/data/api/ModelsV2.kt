@@ -136,11 +136,13 @@ data class Queue(
     val trackCount: Int = 0,
     val updatedAt: String? = null,
     val tracks: List<Track> = emptyList(),
-    /** v3: endless radio queue (the client asks /radio/{id}/more when 5 tracks remain). */
-    val radio: Boolean = false,
+    /** v3: set (the seed) on radio queues; the client asks /radio/{id}/more when 5 tracks remain. */
+    val radio: RadioSeed? = null,
+    /** v3 QueueSource: what the queue was made from ({type, id, …}). */
+    val source: kotlinx.serialization.json.JsonObject? = null,
     val kind: String? = null,
 ) {
-    val isRadio: Boolean get() = radio || kind == "radio"
+    val isRadio: Boolean get() = radio != null || kind == "radio"
 }
 
 @Serializable

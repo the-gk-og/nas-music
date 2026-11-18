@@ -44,10 +44,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.nasmusic.app.AppContainer
 import org.nasmusic.app.data.api.CatalogItem
-import org.nasmusic.app.data.api.GlobalSearch
+import org.nasmusic.app.data.api.SearchResults
 import org.nasmusic.app.data.api.NewToGet
 import org.nasmusic.app.data.api.ShelfItem
-import org.nasmusic.app.data.api.SearchTop
 import org.nasmusic.app.net.RoutedCallFactory
 import org.nasmusic.app.playback.PlaySource
 import org.nasmusic.app.ui.LocalUi
@@ -59,7 +58,6 @@ import org.nasmusic.app.ui.songItems
 import retrofit2.HttpException
 
 object CatalogUrls {
-    fun cover(id: String, size: Int = 256) = "catalog/${android.net.Uri.encode(id)}/cover?size=$size"
     fun preview(id: String) = RoutedCallFactory.virtual("catalog/${android.net.Uri.encode(id)}/preview")
 }
 
@@ -69,14 +67,14 @@ fun GlobalSearchScreen(c: AppContainer) {
     val ui = LocalUi.current
     val scope = rememberCoroutineScope()
     var query by rememberSaveable { mutableStateOf("") }
-    var result by remember { mutableStateOf<GlobalSearch?>(null) }
+    var result by remember { mutableStateOf<SearchResults?>(null) }
     var previewing by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(query) {
         if (query.isBlank()) { result = null; return@LaunchedEffect }
         delay(300)
         result = runCatching { c.api.globalSearch(query.trim()) }.recoverCatching { e ->
             // Server without /search yet: library-only search.
-            if (e is HttpException && e.code() == 404) c.api.search(query.trim()).let { GlobalSearch(tracks = it.tracks, albums = it.albums, artists = it.artists) } else throw e
+            if (e is HttpException && e.code() == 404) c.api.search(query.trim()).let { SearchResults(tracks = it.tracks, albums = it.albums, artists = it.artists) } else throw e
         }.getOrNull()
     }
     // 30 s samples play on their own player (proxied by the server, never stored), leaving the queue alone.
@@ -90,7 +88,7 @@ fun GlobalSearchScreen(c: AppContainer) {
         previewing = item.id
     }
     fun addToGet(item: CatalogItem) = scope.launch {
-        val ok = runCatching { c.api.addToGet(NewToGet(item.id, item.kind, item.title, item.artist, item.album)) }.isSuccess
+        val ok = runCatching { c.api.addToGet(NewToGet(catalogId = item.id)) }.isSuccess
         ui.toast = if (ok) "Added to To get" else "Couldn't add"
     }
 
@@ -109,7 +107,7 @@ fun GlobalSearchScreen(c: AppContainer) {
             songItems(c, r.tracks.take(8), "Search: ${q.take(12)}", PlaySource.SEARCH, searchQuery = q)
             if (r.albums.isNotEmpty()) item(key = "albums") {
                 ShelfHeader("Albums")
-                ShelfRow(c, r.albums.map { ShelfItem("album", it.id, it.title, it.artist, albumId = it.id) })
+                ShelfRow(c, r.albums.map { ShelfItem("album", it.id, it.title, it.artist, artUrl = org.nasmusic.app.data.FeedRepository.art(it.id)) })
             }
             if (r.artists.isNotEmpty()) item(key = "artists") {
                 ShelfHeader("Artists")
@@ -122,37 +120,29 @@ fun GlobalSearchScreen(c: AppContainer) {
             val notOwned = r.catalog.filterNot { it.owned }
             if (notOwned.isNotEmpty()) item(key = "h-cat") { ShelfHeader("Not in your library") }
             items(notOwned, key = { "cat:" + it.id }) { item ->
-                CatalogRow(item, previewing == item.id, onSample = { toggleSample(item) }, onAdd = { addToGet(item) }, onSimilar = { query = item.artist })
+                CatalogRow(item, previewing == item.id, onSample = { toggleSample(item) }, onAdd = { addToGet(item) }, onSimilar = { item.artist?.let { query = it } })
             }
+            r.catalogError?.let { err -> item(key = "caterr") { Text("Online catalogue unavailable: $err", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp)) } }
             if (r.tracks.isEmpty() && r.albums.isEmpty() && r.artists.isEmpty() && r.catalog.isEmpty()) item { Message("No results.") }
         }
     }
 }
 
+/** Top result is a generic ShelfItem (library first, else catalogue). */
 @Composable
-private fun TopResult(c: AppContainer, top: SearchTop, onSample: (CatalogItem) -> Unit, previewing: String?) {
+private fun TopResult(c: AppContainer, top: ShelfItem, onSample: (CatalogItem) -> Unit, previewing: String?) {
     val ui = LocalUi.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            val (item, open) = when {
-                top.album != null -> ShelfItem("album", top.album.id, top.album.title, top.album.artist, albumId = top.album.id) to { ui.go("album/${top.album.id}") }
-                top.artist != null -> ShelfItem("artist", top.artist.id, top.artist.name, "Artist") to { ui.go("artist/${top.artist.id}") }
-                top.playlist != null -> ShelfItem("playlist", top.playlist.id, top.playlist.name, "Playlist") to { ui.go("playlist/${top.playlist.id}") }
-                top.track != null -> ShelfItem("track", top.track.id, top.track.title, top.track.artist, albumId = top.track.albumId) to {
-                    c.player.play(listOf(top.track), 0, PlaySource.SEARCH, "Search: ${top.track.title.take(12)}")
-                }
-                top.catalog != null -> ShelfItem("toget", top.catalog.id, top.catalog.title, top.catalog.artist,
-                    artPath = if (top.catalog.hasCover) CatalogUrls.cover(top.catalog.id) else null) to { onSample(top.catalog) }
-                else -> return@Row
+            ShelfArt(top, 96.dp, round = top.type == "artist")
+            Column(Modifier.weight(1f).padding(horizontal = 16.dp).clickable { org.nasmusic.app.ui.openShelfItem(c, ui, scope, top) }) {
+                Text(top.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(listOfNotNull(top.type.replaceFirstChar { it.uppercase() }, top.subtitle).joinToString(" · "), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            ShelfArt(item, 96.dp, round = item.type == "artist")
-            Column(Modifier.weight(1f).padding(horizontal = 16.dp).clickable(onClick = open)) {
-                Text(item.title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                item.subtitle?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-            if (top.track != null) IconButton(onClick = open) { Icon(Icons.Default.PlayArrow, "Play") }
-            if (top.catalog?.hasPreview == true) IconButton(onClick = { onSample(top.catalog) }) {
-                Icon(if (previewing == top.catalog.id) Icons.Default.Stop else Icons.Default.PlayArrow, "Play sample")
+            if (top.type == "track") IconButton(onClick = { org.nasmusic.app.ui.openShelfItem(c, ui, scope, top) }) { Icon(Icons.Default.PlayArrow, "Play") }
+            top.catalog?.takeIf { it.hasPreview }?.let { cat ->
+                IconButton(onClick = { onSample(cat) }) { Icon(if (previewing == cat.id) Icons.Default.Stop else Icons.Default.PlayArrow, "Play sample") }
             }
         }
     }
@@ -161,15 +151,15 @@ private fun TopResult(c: AppContainer, top: SearchTop, onSample: (CatalogItem) -
 @Composable
 private fun CatalogRow(item: CatalogItem, playing: Boolean, onSample: () -> Unit, onAdd: () -> Unit, onSimilar: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ShelfArt(ShelfItem("toget", item.id, item.title, artPath = if (item.hasCover) CatalogUrls.cover(item.id, 128) else null), 52.dp)
+        ShelfArt(ShelfItem("catalog", item.id, item.title, artUrl = item.artUrl), 52.dp)
         Column(Modifier.weight(1f)) {
             Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(item.artist, item.kind, item.year?.toString()).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+            Text(listOfNotNull(item.artist, item.type, item.year?.toString(), item.toGet?.let { "on your To get list" }).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (item.hasPreview) IconButton(onClick = onSample) { Icon(if (playing) Icons.Default.Stop else Icons.Default.PlayArrow, "Play 30-second sample") }
         IconButton(onClick = onAdd) { Icon(Icons.Default.AddShoppingCart, "Add to To get") }
-        IconButton(onClick = onSimilar) { Icon(Icons.Default.TravelExplore, "Find similar in my library") }
+        IconButton(onClick = onSimilar, enabled = item.artist != null) { Icon(Icons.Default.TravelExplore, "Find similar in my library") }
     }
 }
 

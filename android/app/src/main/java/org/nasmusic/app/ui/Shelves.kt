@@ -27,6 +27,9 @@ import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Sell
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -62,13 +65,17 @@ import org.nasmusic.app.playback.PlaySource
 @Composable
 fun ShelfArt(item: ShelfItem, size: Dp, round: Boolean = false) {
     val shape = if (round) CircleShape else RoundedCornerShape(8.dp)
-    val model = item.albumId?.let { MediaItems.artUrl(it, if (size > 100.dp) 512 else 256) }
-        ?: item.track?.albumId?.let { MediaItems.artUrl(it, 256) }
-        ?: item.artPath?.let { RoutedCallFactory.virtual(it) }
+    val px = if (size > 100.dp) 512 else 256
+    val model = artModel(item.artUrl, px) ?: item.track?.albumId?.let { MediaItems.artUrl(it, px) }
     Box(Modifier.size(size).clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
         Icon(iconFor(item.type), null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(size / 3))
         if (model != null) AsyncImage(model, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
+}
+
+/** `artUrl` is relative to the API base; add a size hint unless one is there. */
+fun artModel(artUrl: String?, px: Int): String? = artUrl?.takeIf { it.isNotBlank() }?.let {
+    RoutedCallFactory.virtual(if ('?' in it) it else "$it?size=$px")
 }
 
 fun iconFor(type: String): ImageVector = when (type) {
@@ -77,7 +84,10 @@ fun iconFor(type: String): ImageVector = when (type) {
     "radio" -> Icons.Default.Radio
     "mix" -> Icons.Default.AutoAwesome
     "queue" -> Icons.AutoMirrored.Filled.QueueMusic
-    "toget", "suggestion" -> Icons.Default.ShoppingBag
+    "toget", "suggestion", "catalog" -> Icons.Default.ShoppingBag
+    "device" -> Icons.Default.Devices
+    "genre" -> Icons.Default.Sell
+    "folder" -> Icons.Default.Folder
     "playlist", "smart_list" -> Icons.AutoMirrored.Filled.List
     else -> Icons.Default.MusicNote
 }
@@ -89,9 +99,16 @@ fun openShelfItem(c: AppContainer, ui: UiController, scope: CoroutineScope, item
         "artist" -> ui.go("artist/${item.id}")
         "playlist" -> ui.go("playlist/${item.id}")
         "smart_list" -> ui.go("list/${item.id}")
+        "genre" -> ui.go("genre/${android.net.Uri.encode(item.id)}")
+        "folder" -> ui.go("folder/${android.net.Uri.encode(item.id)}")
         "toget" -> ui.go("toget")
         "suggestion" -> ui.go("discover")
-        "queue" -> scope.launch { c.queueSync.load(item.id)?.let { c.player.playQueue(it) }; ui.go("now") }
+        "catalog" -> item.catalog?.ownedId?.takeIf { item.catalog.owned }?.let { ui.go("${if (item.catalog.type == "artist") "artist" else "album"}/$it") } ?: ui.go("search")
+        "device" -> c.player.transferHere()
+        "queue" -> scope.launch {
+            val id = item.progress?.queueId ?: item.queue?.id ?: item.id
+            c.queueSync.load(id)?.let { c.player.playQueue(it) }; ui.go("now")
+        }
         "mix" -> scope.launch {
             runCatching { c.api.mix(item.id) }.onSuccess { m ->
                 c.player.play(m.tracks.map { it.track }, 0, PlaySource.MIX, m.title, m.id, m.tracks.map { it.reason })
@@ -109,7 +126,8 @@ fun openShelfItem(c: AppContainer, ui: UiController, scope: CoroutineScope, item
     }
 }
 
-private val PINNABLE = setOf("album", "playlist", "artist", "mix", "queue", "smart_list")
+/** PinType in the contract. */
+private val PINNABLE = setOf("album", "artist", "playlist", "mix", "queue", "smart_list", "genre", "folder")
 
 /** A YouTube-Music-style card: art + title + subtitle. Long-press → Pin to Home / Start radio. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -123,7 +141,7 @@ fun ShelfCard(c: AppContainer, item: ShelfItem, width: Dp = 140.dp, siblings: Li
             Modifier.width(width).combinedClickable(onClick = { openShelfItem(c, ui, scope, item, siblings) }, onLongClick = { menu = true }),
         ) {
             ShelfArt(item, width, round = item.type == "artist")
-            item.progress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) }
+            item.progress?.let { p -> LinearProgressIndicator(progress = { p.fraction }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) }
             Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
             item.subtitle?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
@@ -132,7 +150,7 @@ fun ShelfCard(c: AppContainer, item: ShelfItem, width: Dp = 140.dp, siblings: Li
                 if (onUnpin != null) DropdownMenuItem({ Text("Unpin from Home") }, { menu = false; onUnpin() })
                 else DropdownMenuItem({ Text("Pin to Home") }, {
                     menu = false
-                    scope.launch { ui.toast = if (runCatching { c.api.pin(NewPin(item.type, item.id)).isSuccessful }.getOrDefault(false)) "Pinned to Home" else "Couldn't pin" }
+                    scope.launch { ui.toast = if (runCatching { c.api.pin(NewPin(item.type, item.id)) }.isSuccess) "Pinned to Home" else "Couldn't pin" }
                 })
             }
             radioSeedFor(item)?.let { seed ->
