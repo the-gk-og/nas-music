@@ -23,29 +23,7 @@ class AuthRepository(
     private val store: SecureStore,
     private val baseClient: OkHttpClient,
 ) {
-    /**
-     * The config to talk to the server we probed, before any token exists. The entered address
-     * becomes LAN (pinned, self-signed) or tunnel (CA-trusted); the other address comes from
-     * /server-info.
-     */
-    fun draftConfig(p: ProbeOutcome): Pair<ServerConfig, Route> {
-        val entered = ServerAddress.origin(p.url)
-        return if (p.caTrusted) {
-            ServerConfig(
-                name = p.info.name, serverId = p.info.serverId,
-                lanUrl = p.info.lanUrl?.trimEnd('/').orEmpty(),
-                tunnelUrl = entered,
-                certSha256 = p.info.certSha256.orEmpty(),
-            ) to Route.TUNNEL
-        } else {
-            ServerConfig(
-                name = p.info.name, serverId = p.info.serverId,
-                lanUrl = entered,
-                tunnelUrl = p.info.tunnelUrl?.trimEnd('/')?.takeIf { it.isNotBlank() },
-                certSha256 = p.fingerprint,
-            ) to Route.LAN
-        }
-    }
+    fun draftConfig(p: ProbeOutcome): Pair<ServerConfig, Route> = Companion.draftConfig(p)
 
     suspend fun login(p: ProbeOutcome, username: String, password: String): ServerConfig =
         signIn(p) { api -> api.login(LoginRequest(username.trim(), password, deviceName())) }
@@ -113,6 +91,30 @@ class AuthRepository(
     }
 
     companion object {
+        /**
+         * The config to talk to the server we probed, before any token exists. The entered address
+         * becomes LAN (pinned, self-signed) or tunnel (CA-trusted); the other address comes from
+         * /server-info.
+         */
+        fun draftConfig(p: ProbeOutcome): Pair<ServerConfig, Route> {
+            val entered = ServerAddress.origin(p.url)
+            return if (p.caTrusted) {
+                ServerConfig(
+                    name = p.info.name, serverId = p.info.serverId,
+                    lanUrl = p.info.lanUrl?.trimEnd('/').orEmpty(),
+                    tunnelUrl = entered,
+                    certSha256 = p.info.certSha256.orEmpty(),
+                ) to Route.TUNNEL
+            } else {
+                ServerConfig(
+                    name = p.info.name, serverId = p.info.serverId,
+                    lanUrl = entered,
+                    tunnelUrl = p.info.tunnelUrl?.trimEnd('/')?.takeIf { it.isNotBlank() },
+                    certSha256 = p.fingerprint,
+                ) to Route.LAN
+            }
+        }
+
         fun deviceName(): String =
             listOfNotNull(Build.MANUFACTURER, Build.MODEL).joinToString(" ").ifBlank { "Android" }
 
