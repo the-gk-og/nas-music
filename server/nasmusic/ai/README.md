@@ -268,6 +268,68 @@ includes all active mixes, so on-demand mixes must not pile up. Building a new `
 deactivates those older than 24 h and keeps at most 3 active (`mixes.MORE_LIKE_MAX_ACTIVE`).
 Inactive mixes older than `ai.mix.keep_days` are deleted.
 
+## Radio and "Because you played" (v3, docs/v3-ux.md §3.2, §5)
+
+```python
+radio_start(conn, cfg, user_id, seed) -> (radio_id, [~25 track ids])   # seed {"type": random|track|artist|album|playlist, "id"?}
+radio_more(conn, cfg, user_id, radio_id, exclude_ids, n=25) -> [track ids]
+because_you_played(conn, cfg, user_id, limit_shelves=3) -> [{seed_track_id, title, track_ids}]
+```
+
+* **Fast path, no training.** Each call uses the in-process library cache (`common.load_library`), the
+  user's signals and the latest taste snapshot. With no snapshot it builds the cheap cold-start
+  centres, never LightGBM. Measured on 5,000 tracks × 1,280-d with 3,000 events, pinned to 4 CPUs:
+  about 0.1 s per call once cached. A cold cache adds one library load.
+* **Seeds.**
+  * Track: the track itself first.
+  * Artist / album / playlist: the mean sound of their analysed tracks. Playlists must belong to the
+    user.
+  * Random: one of the user's taste centres, picked by how much they like it and jittered, so
+    every random radio is different. A new user's centres span the whole library.
+  * The seed is stored as up to 40 anchor track ids.
+  * Errors: `KeyError` for an unknown user, seed or radio (or another user's radio), or nothing
+    analysed; `ValueError` for a malformed seed.
+* **Picking.**
+  * Score: `0.75·closeness to the seed + 0.2·the user's own taste score` (random radio:
+    0.65 / 0.3), with a little noise.
+  * Blocked tracks are never picked.
+  * At most 2 tracks per artist per batch (6 for the seed's own artists), and no artist within 3
+    tracks.
+  * Each next track is the best mix of score and closeness to the previous one.
+* **Endless.**
+  * Every served track is stored, so nothing repeats within a session. The client's `exclude_ids`
+    are also honoured.
+  * Each batch drifts further toward what the session recently played, up to half way by the 4th
+    batch.
+  * Skips during the session (normal `skip` events on the radio's tracks) push that sound down,
+    and push those artists down harder.
+  * A small library eventually returns fewer tracks, then `[]`.
+* **Because you played.**
+  * Seeds: the user's most recent plays (last 30 days) of favourites, meaning starred, rated 4+, or
+    well liked; one seed per artist.
+  * Each shelf holds 10–15 similar library tracks, excluding the seed's album, with at most 2 per
+    artist and no track on two shelves.
+  * Only the user's own events are read. A user with no history gets `[]`.
+* **State table** (AI-owned; created if missing, and belongs in server core's schema and migration):
+
+```sql
+CREATE TABLE IF NOT EXISTS radio_sessions (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    seed_type   TEXT NOT NULL,          -- random | track | artist | album | playlist
+    seed_id     TEXT,                   -- NULL for random
+    title       TEXT NOT NULL,          -- "<seed> radio", for the queue name
+    anchors     TEXT NOT NULL,          -- JSON [track id]: the seed's sound
+    served      TEXT NOT NULL,          -- JSON [track id]: everything handed out, in order
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS radio_sessions_user ON radio_sessions(user_id, updated_at);
+```
+
+Sessions not touched for 30 days are deleted when a new radio starts. `DELETE /me/data?signal=all`
+should delete the user's `radio_sessions` too (they hold listening history).
+
 ## Discovery (weekly)
 
 1. **Seeds.** Your top `ai.discovery.seed_artists` artists by positive feedback and plays (or by

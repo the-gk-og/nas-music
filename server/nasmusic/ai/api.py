@@ -177,3 +177,42 @@ def run_weekly_discovery(conn: sqlite3.Connection, cfg: AIConfig) -> dict[str, i
             log.exception("weekly discovery failed for user %s", uid)
             out[uid] = 0
     return out
+
+
+# ---------------------------------------------------------------- v3: radio and shelves (docs/v3-ux.md §3.2, §5)
+
+def radio_start(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, seed: dict) -> tuple[str, list[str]]:
+    """Start a radio for the user. `seed` = {"type": "random"|"track"|"artist"|"album"|"playlist", "id"?}.
+    Returns (radio_id, ~25 track ids, ready to queue). The title ("<seed> radio") is in
+    radio_sessions.title. Raises KeyError for an unknown user / seed or nothing analysed, ValueError for a
+    malformed seed. No model training: uses the cached library and the latest taste snapshot."""
+    from . import radio
+    from .store import Store
+
+    if not Store(conn).user_exists(user_id):
+        raise KeyError(f"unknown user {user_id}")
+    return radio.start(conn, cfg, user_id, seed or {"type": "random"})
+
+
+def radio_more(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, radio_id: str, exclude_ids: list[str],
+               n: int = 25) -> list[str]:
+    """Next `n` tracks for an endless radio: no repeats within the session, drifting gradually from the seed,
+    steering away from what the user skipped during the session (reported as normal events).
+    Raises KeyError if the radio doesn't exist or belongs to another user. May return fewer (or none) once
+    a small library is exhausted."""
+    from . import radio
+
+    return radio.more(conn, cfg, user_id, radio_id, exclude_ids, max(1, min(int(n), 100)))
+
+
+def because_you_played(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, limit_shelves: int = 3
+                       ) -> list[dict]:
+    """Up to `limit_shelves` shelves [{seed_track_id, title, track_ids}] of similar library tracks for the
+    user's recent favourite plays. Only that user's own history. Never raises (returns [])."""
+    from . import radio
+
+    try:
+        return radio.because_you_played(conn, cfg, user_id, max(0, min(int(limit_shelves), 10)))
+    except Exception:
+        log.exception("because_you_played failed for user %s", user_id)
+        return []
