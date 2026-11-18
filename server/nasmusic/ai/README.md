@@ -1,0 +1,255 @@
+# nasmusic.ai — the AI engine
+
+Analyser, recommender, mix builder and album discovery. Server core calls only the functions in
+[`api.py`](api.py) and shares data through the AI-owned tables in `db/schema.sql`
+(`features`, `analysis_jobs`, `taste_snapshots`, `mixes`, `mix_tracks`, `suggestions`). The engine
+reads `tracks`, `artists`, `albums`, `events` and `settings`.
+
+| Module | What it does |
+| --- | --- |
+| `api.py` | The contract. `analyse_pending`, `run_nightly`, `run_weekly_discovery` never raise; `more_like` raises `KeyError` for an unknown or not-yet-analysed track |
+| `extractors.py` | Audio → features, one class per `model_version` |
+| `models.py` | Downloads and SHA-256-verifies Essentia model files into `data_dir/models/<version>/` |
+| `analyser.py` | Resumable process-pool analysis; `benchmark()` |
+| `recommender.py` | Feedback signals, cold-start taste centres, LightGBM play-through model, scoring |
+| `mixes.py` | Daily / Morning / Evening / Deep Cuts / More-like, ordering and reasons |
+| `discovery.py` | Weekly album suggestions (ListenBrainz, MusicBrainz, Last.fm, Deezer previews) |
+| `__main__.py` | Maintenance CLI: `python -m nasmusic.ai --help` |
+
+## Models and `model_version`
+
+| `model_version` | Needs | Embedding | Also gives |
+| --- | --- | --- | --- |
+| `effnet-discogs-1` (default) | `uv sync --extra analysis` (essentia-tensorflow) + model files | Discogs-EffNet, 1280-d, mean-pooled over patches | 400 Discogs styles (top 5 → `genre:` tags), 56 MTG-Jamendo moods/themes (top 3 → `theme:`), danceability, mood aggressive/happy/relaxed/sad/party/acoustic (`mood:`), voice/instrumental, BPM (Percival), key (KeyExtractor, `bgate` profile), energy |
+| `basic-1` (fallback) | ffmpeg only | 104-d numpy statistics: log-mel means, MFCC mean/std, chroma, spectral centroid/rolloff/flatness/flux, ZCR, loudness | BPM (flux autocorrelation), key (Krumhansl), energy, a beat-strength "danceability" |
+
+If `cfg.model_version` needs Essentia and it is not importable, or the model files can't be
+downloaded, the analyser logs a warning and writes `basic-1` features instead, so dev, tests and a
+half-installed server still produce mixes.
+
+The **energy** value is 0..1: for EffNet `0.5·loudness + 0.2·aggressive + 0.2·party + 0.1·(1 − relaxed)`;
+for basic-1 `0.6·loudness + 0.25·brightness + 0.15·onset density`. Mixes use its percentile rank
+within the library, so the two scales never mix.
+
+**EffNet excerpts.** EffNet costs about 1 s of CPU per 120 s of audio, so by default it analyses three
+40 s excerpts (at 20 %, 50 % and 80 % of the track) instead of the whole track. That keeps per-track time
+roughly constant. Set `ai.analysis.excerpts` to `0` to analyse whole tracks (centre-cropped to
+`ai.analysis.max_seconds`). The new setting applies to tracks analysed from then on.
+
+### Model files and licence
+
+The Essentia models are **CC BY-NC-SA 4.0** (non-commercial). They are downloaded at install time,
+never committed. Every file is pinned by SHA-256 in `models.py`; a mismatch deletes the download.
+
+```bash
+uv run python -m nasmusic.ai download-models --data-dir /data          # ~30 MB
+```
+
+`analyse_pending` also downloads them on first use (once, in the parent process).
+
+### Switching `model_version` after a hardware upgrade
+
+1. Add the new model to `extractors.py` (an extractor class with `extract_file` / `extract_audio`)
+   and, if it needs files, to `MODEL_SETS` in `models.py`. Give it a new version string, for example
+   `clap-1`.
+2. Set `model_version` in `config.toml` and restart.
+3. The next `analyse_pending` run (nightly or after a scan) analyses every track for the new version.
+   The old version's rows stay in `features`.
+4. Until the new version covers **80 %** of the library, the recommender keeps using the version with
+   the best coverage, so mixes keep working during the re-analysis (`common.active_version`).
+5. Taste snapshots are per version; the first nightly run on the new version trains a fresh one from
+   the same events. Nothing else changes.
+
+To free space afterwards: `DELETE FROM features WHERE model_version = 'old-version'`.
+
+## Analyser
+
+* Picks tracks with no `features` row for the version, or whose file `mtime` is newer than
+  `analysed_at`.
+* Marks them `pending` in `analysis_jobs`. Each `features` row and its `done` mark are written together
+  in one transaction by the parent process (the only DB writer). An interrupted run just leaves
+  `pending` rows, and the next run picks them up. Safe to kill at any time.
+* Failures are stored as `failed` with the error and retried after `ai.analysis.retry_failed_days`,
+  or as soon as the file changes.
+* Extraction runs in a **spawn** process pool (`ai.analysis.workers`, default 2) at `nice 10`. Spawn is
+  used because the server has threads and TensorFlow does not survive `fork`.
+* The library is only ever read (ffmpeg decodes to a pipe).
+
+### Benchmark
+
+```bash
+uv run python -m nasmusic.ai benchmark --db /data/nasmusic.db --library /music --data-dir /data -n 30
+```
+
+This times `n` random tracks with the real pool settings (nothing is written) and prints
+`seconds_per_track`, `realtime_factor` and `est_full_library_h` / `est_pending_h`. Run it on the NAS
+before the first full analysis. In code: `analyser.benchmark(conn, cfg, n)`.
+
+Measured during development (Intel Core Ultra 7 165H laptop, 24 real FLACs averaging 4 min,
+Python 3.12, essentia-tensorflow 2.1b6.dev1389):
+
+| Setup | s/track | 5,000 tracks |
+| --- | --- | --- |
+| `basic-1`, 2 workers, all cores | 0.43 | ~0.6 h |
+| EffNet, whole track (≤ 480 s), 2 workers, all cores | 2.71 | ~3.8 h |
+| EffNet, 3 × 40 s excerpts, 2 workers, all cores | 1.15 | ~1.6 h |
+| EffNet, 3 × 40 s excerpts, 2 workers, **pinned to 4 CPUs** (`taskset -c 0-3`) | 1.78 | ~2.5 h |
+| EffNet, 3 × 40 s excerpts, 1 worker, pinned to 4 CPUs | 2.47 | ~3.4 h |
+
+The i5-3470 has 4 cores at roughly half this laptop's per-core speed, and no AVX2/FMA, so expect
+about 2–3× the 4-CPU figure: **roughly 5–8 hours** for the first full analysis of 5,000 tracks.
+After that, nightly analysis only covers new files. Measure it with `benchmark` on the NAS.
+
+### AVX without AVX2 (i5-3470)
+
+The `essentia-tensorflow` wheel (2.1b6.dev1389) installs from PyPI on Python 3.12 and runs here. Its
+bundled `libtensorflow` 2.5.0 looks AVX-baseline in a static scan: its 2,152 AVX2/FMA instructions
+are all in runtime-dispatched code (oneDNN JIT, BoringSSL `*_avx2`, libjpeg-turbo SIMD), and Essentia's
+own module has only FFmpeg's dispatched `*_fma3`/`*_avx2` routines. TensorFlow's startup message lists
+AVX2/FMA as what oneDNN may use, not what it requires. This has **not** been run on a real
+AVX-only CPU yet. To check on the NAS:
+
+```bash
+grep -o -w -e avx -e avx2 /proc/cpuinfo | sort | uniq -c      # expect avx only
+uv run python -m nasmusic.ai selftest --data-dir /data         # in the container
+```
+
+`selftest` prints the CPU flags, verifies the model files and runs EffNet on a generated tone in a
+child process. If the CPU is missing an instruction, it reports `SIGILL` instead of crashing. If that
+happens, set `model_version = "basic-1"` until the hardware upgrade (everything else works the same),
+or build essentia-tensorflow from source with `-mavx`.
+
+## Recommender
+
+Signals per track, decayed with a half-life of `ai.rec.half_life_days`:
+
+| Signal | Weight |
+| --- | --- |
+| play ≥ 80 % (full play) | +1.0 (mild like); 50–80 % = +0.5; less = +0.1 |
+| skip after 30 s | −0.6 (mild dislike) |
+| skip before `ai.rec.skip_early_s` (30 s) | −1.5 (strong) |
+| repeated skip within 30 days | ×1.5, ×2.0 … per earlier skip (capped at −3 per event) |
+| thumbs-up | +2.0 |
+| star (`tracks.starred_at`) | +3.0 (strong like) |
+| rating r (`tracks.rating`) | r − 3 (1 star = −2 … 5 stars = +2) |
+| thumbs-down event or `tracks.blocked` | never in a mix |
+
+* **Cold start.** Taste is a weighted spherical k-means over the embeddings of positively weighted
+  tracks (up to `ai.rec.taste_clusters` centres, about one per 6 liked tracks), so liking metal and
+  jazz doesn't average out to mush. Negatives are centres of disliked tracks.
+  `sound = max cos(track, centre) − 0.5·max(0, max cos(track, negative))`.
+* **Learned model.** After `ai.rec.learned_min_events` feedback events (500), a LightGBM
+  play-through classifier is trained nightly on play/skip events. Features are 16 embedding PCA
+  components, the 24 most common tags, energy/BPM/danceability, star and rating, hour of day
+  (raw + sin/cos), weekday, days since last play, and play/skip counts (all as they were *before*
+  each event). It switches on only if a chronological 80/20 validation AUC is ≥ 0.55; otherwise it
+  stays on cold start and says why in the snapshot notes. Its probability is blended with the
+  cold-start score (`ai.rec.learned_blend`).
+* **Freshness.** A track played d days ago loses `0.3·(1 − d/ai.rec.recent_penalty_days)`. A
+  never-played track gains `ai.rec.never_played_boost`.
+* Each nightly run stores a `taste_snapshots` row: zlib-compressed JSON with the centres, PCA, the
+  LightGBM model text, and `notes` such as `{"mode": "learned", "validation_auc": 0.81, ...}`. The
+  last 30 per version are kept. `more_like` and `explain` load the latest one instead of retraining.
+
+## Mixes
+
+Nightly, in this order (no track repeats across them unless the library is too small): **Daily**
+(`known_pct` known likes / `rare_pct` rarely played taste matches / `explore_pct` exploration),
+**Morning** and **Evening** (same split; tracks you play in that time window get a boost, and the
+learned model scores at 8:00 and 20:00), and **Deep Cuts** (≤ `deep_cuts.max_plays` plays, ranked
+purely by sound match). `more_like` is on demand: 75 % similarity to the seed, 25 % taste.
+
+Rules: no artist twice within `ai.mix.artist_gap` tracks, nothing played (or skipped) in the last
+`ai.mix.recent_days` days, no blocked tracks, at most about 1 track per artist per 12 in a mix.
+The order is a nearest-neighbour walk in embedding space. Each step minimises
+`(1 − cos) + 1.5·|energy − target| + 0.5·|energy jump|`. The energy target follows a curve: Daily
+and Deep Cuts warm up, peak around 60 % and ease off; Morning rises; Evening falls; More-like stays
+near the seed. Tracks that can't be placed without breaking the artist rule are dropped.
+
+Every track gets a reason, for example "One of your favourites", "You've played this through 4
+times", "Not played yet, but sounds like *X* by *Y*", "Rarely played, close to your Hard Bop
+favourites", "Something different: Baroque you haven't explored much", "Never played; sounds like
+…", or "Sounds like *seed* by *artist*".
+
+The nightly run deactivates every active nightly mix and any `more_like` mix older than a day.
+Inactive mixes older than `ai.mix.keep_days` are deleted.
+
+## Discovery (weekly)
+
+1. **Seeds.** Your top `ai.discovery.seed_artists` artists by positive feedback and plays (or by
+   how much you own, before any feedback).
+2. **Name matching.** The library has no MBIDs yet, so artists are resolved through a MusicBrainz
+   search with an exact match on normalised names (case, accents, "The", `&`/"and", punctuation, and
+   "(Deluxe Edition)"-style suffixes for albums). Results are cached in
+   `data_dir/cache/discovery.json`. `artists.mbid` is used when present.
+3. **Candidates.** ListenBrainz similar artists (plus Last.fm `artist.getSimilar` when
+   `lastfm_api_key` is set), and albums you don't own by your top artists. Each artist's album is
+   the most popular release group on ListenBrainz not owned or answered before, falling back to
+   MusicBrainz's newest studio album.
+4. **Sound check.** For the top `ai.discovery.preview_candidates`, two Deezer 30-second previews are
+   fetched into memory, decoded through an ffmpeg pipe, embedded with the same model, and
+   discarded. Nothing touches the disk. The score is the percentile of the preview's taste match
+   within your own library.
+5. **Score.** `0.55·artist link + 0.45·sound − 0.6·"not interested" closeness`. An artist you
+   answered "Not interested" is penalised, and so are its ListenBrainz neighbours. At most
+   `ai.discovery.max_per_cluster` (2) per seed-artist cluster, `ai.discovery.per_week` (10) in total,
+   one album per artist. Albums already owned (normalised name or release-group MBID) or ever
+   suggested are skipped.
+6. **Links.** Bandcamp and Qobuz search URLs (`ai.discovery.qobuz_locale`), a Cover Art Archive cover
+   (Deezer's as a fallback), and `preview_url` = `https://api.deezer.com/track/<id>`. Deezer's signed
+   MP3 links expire within minutes, so the API URL is stored instead; GET it to get a fresh
+   `preview`.
+
+HTTP is polite: User-Agent `nas-music/0.1 (open-source self-hosted music server)` with no contact
+details, MusicBrainz at most 1 request/s, other hosts spaced 0.15–0.3 s, and one retry with back-off
+on 429/503.
+
+## Settings
+
+All tunables live in the `settings` table as JSON under `ai.*`. Missing keys are written with
+defaults on the first `run_nightly` / `analyse_pending`, so the web UI can list them.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `ai.analysis.workers` | 2 | analyser processes |
+| `ai.analysis.max_seconds` | 480 | whole-track analysis: centre crop length |
+| `ai.analysis.excerpts` | 3 | EffNet: excerpts per track (0 = whole track) |
+| `ai.analysis.excerpt_seconds` | 40 | excerpt length |
+| `ai.analysis.retry_failed_days` | 7 | retry failed tracks after this many days |
+| `ai.rec.learned_min_events` | 500 | feedback events before the learned model |
+| `ai.rec.learned_blend` | 0.6 | learned share of the final score |
+| `ai.rec.taste_clusters` | 6 | max taste centres |
+| `ai.rec.half_life_days` | 120 | feedback decay |
+| `ai.rec.recent_penalty_days` | 14 | freshness penalty window |
+| `ai.rec.never_played_boost` | 0.05 | boost for never-played tracks |
+| `ai.rec.skip_early_s` | 30 | a skip before this is a strong dislike |
+| `ai.mix.daily.minutes` | 240 | Daily Mix length |
+| `ai.mix.morning.minutes` / `ai.mix.evening.minutes` | 90 | Morning / Evening length |
+| `ai.mix.deep_cuts.minutes` | 90 | Deep Cuts length |
+| `ai.mix.known_pct` / `ai.mix.rare_pct` / `ai.mix.explore_pct` | 0.6 / 0.3 / 0.1 | Daily-style split |
+| `ai.mix.rare_max_plays` | 2 | "rarely played" means at most this many plays |
+| `ai.mix.deep_cuts.max_plays` | 1 | Deep Cuts play-count ceiling |
+| `ai.mix.artist_gap` | 5 | no artist twice within this many tracks |
+| `ai.mix.recent_days` | 3 | nothing played in the last N days |
+| `ai.mix.morning.hours` / `ai.mix.evening.hours` | [5, 11] / [17, 24] | local-time windows |
+| `ai.mix.keep_days` | 60 | delete inactive mixes older than this |
+| `ai.discovery.per_week` | 10 | suggestions per run |
+| `ai.discovery.max_per_cluster` | 2 | per artist cluster |
+| `ai.discovery.seed_artists` | 15 | top artists to expand from |
+| `ai.discovery.preview_candidates` | 25 | candidates that get a sound check |
+| `ai.discovery.qobuz_locale` | "gb-en" | Qobuz store in the buy link |
+
+## CLI
+
+```bash
+python -m nasmusic.ai selftest        --data-dir D [--model-version V]
+python -m nasmusic.ai download-models --data-dir D
+python -m nasmusic.ai benchmark       --db F --library L --data-dir D [-n 20] [--workers 2]
+python -m nasmusic.ai analyse | nightly | discovery --db F --library L --data-dir D
+```
+
+## Tests
+
+`uv run pytest tests/ai`. They use synthetic embeddings and events, mock all HTTP with
+`httpx.MockTransport`, and run the analyser on FLACs generated by ffmpeg with the `basic-1`
+extractor. Essentia is not needed.
