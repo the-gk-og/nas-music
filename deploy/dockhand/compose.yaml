@@ -1,12 +1,27 @@
 # nas-music for a Docker host managed with Dockhand (or any Compose UI) where cloudflared already
 # runs on host networking with a remotely managed tunnel.
 #
-# - Config is inlined below (Compose `configs.content`), so no files need creating on the NAS.
+# - Config lives in the data volume at /data/config.toml (see "First install" below), NOT in a Compose
+#   `configs:` block: inline configs are copied into the container only when Compose creates it, so a
+#   container-level update/recreate (Dockhand's per-container update, Watchtower, ...) silently drops it.
 # - Data lives in a named volume; Docker seeds it from the image, so it is owned by uid 568.
 # - Tunnel: add a public hostname in Cloudflare -> service http://localhost:8080 (bound to 127.0.0.1 only).
 #
-# Replace: ADMIN_PASSWORD_HASH (from `nasmusic hash-password`). Music path, LAN IP and tunnel URL are
-# this install's values; change them for another NAS.
+# First install (once): deploy the stack, then open a shell in the container and create the config as
+# the app user, e.g.
+#   setpriv --reuid 568 --regid 568 --groups 568 sh -c 'umask 077; cat > /data/config.toml' <<'EOF'
+#   library_root = "/music"
+#   data_dir = "/data"
+#   lan_host = "192.168.68.2"
+#   https_port = 8443
+#   http_port = 8080
+#   server_name = "Home NAS"
+#   tunnel_url = "https://music.example.com"
+#   admin_password_hash = "<output of: nasmusic hash-password>"
+#   timezone = "Europe/London"
+#   opus_cache_gb = 10
+#   EOF
+# then restart the container. Music path, LAN IP and tunnel URL above are examples; change them.
 
 services:
   nasmusic:
@@ -20,29 +35,10 @@ services:
       - "8443:8443"              # LAN HTTPS for the app (self-signed cert, pinned at pairing)
       - "127.0.0.1:8080:8080"    # plain HTTP for the host-network cloudflared only
     environment:
-      NASMUSIC_CONFIG: /etc/nasmusic/config.toml
-    configs:
-      - source: nasmusic_config
-        target: /etc/nasmusic/config.toml
+      NASMUSIC_CONFIG: /data/config.toml
     volumes:
       - /mnt/NAS/Shared/music:/music:ro
       - nasmusic-data:/data
-
-configs:
-  nasmusic_config:
-    content: |
-      library_root = "/music"
-      data_dir = "/data"
-      lan_host = "192.168.68.2"
-      https_port = 8443
-      http_port = 8080
-      server_name = "Home NAS"
-      tunnel_url = "https://music.whoactuallyneeds.men"
-      cf_access_client_id = ""
-      cf_access_client_secret = ""
-      admin_password_hash = "ADMIN_PASSWORD_HASH"
-      timezone = "Europe/London"
-      opus_cache_gb = 10
 
 volumes:
   nasmusic-data:
