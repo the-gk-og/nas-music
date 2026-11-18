@@ -83,8 +83,16 @@ If you make the repository public, the package can be made public too, and the l
 
 ## Getting the APK
 
-Every push to `main` that changes `android/` builds a debug APK. Download it from GitHub:
-**Actions → android → the latest run → Artifacts → nas-music-debug-apk** (a zip containing `app-debug.apk`).
-Pushing a tag such as `v0.1.0` also attaches the APK to a GitHub Release.
+Every push to `main` that changes `android/` publishes a GitHub Release (`v0.1.<build number>`) with a
+signed APK attached: **github.com/the-gk-og/nas-music → Releases → latest → `nas-music-v0.1.N.apk`**.
+Open that page on the phone (signed in to GitHub, since the repo is private) and tap the APK.
 
-To install it, allow "Install unknown apps" for your browser or file manager on the phone.
+All releases are signed with the same permanent key, so a new release installs as an update over the
+old one: pairing, settings and offline music are kept. The first release replaces the earlier
+debug builds, which were signed differently; uninstall the debug build once before installing it.
+
+The signing key lives outside the repo (`~/Android/nas-music-release.jks` + `.password` on the dev
+machine, and as GitHub Actions secrets). Back it up: without it, future builds can't update the
+installed app.
+
+To install, allow "Install unknown apps" for your browser or file manager on the phone.

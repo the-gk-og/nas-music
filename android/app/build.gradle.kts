@@ -23,14 +23,30 @@ android {
         applicationId = "org.nasmusic.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI sets VERSION_CODE to the workflow run number so every build installs as an update.
+        val buildNumber = (System.getenv("VERSION_CODE") ?: "1").toInt()
+        versionCode = buildNumber
+        versionName = "0.1.$buildNumber"
+    }
+
+    // Release signing comes only from the environment (GitHub Actions secrets); never from the repo.
+    val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+    signingConfigs {
+        if (keystorePath != null) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // No R8 shrinking: keeps reflection/serialization behaviour identical to the tested debug build.
+            isMinifyEnabled = false
+            signingConfig = if (keystorePath != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
     compileOptions {
