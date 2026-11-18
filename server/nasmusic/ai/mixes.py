@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import math
 import sqlite3
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -79,7 +80,8 @@ class MixBuilder:
         tz = local_tz(rec.cfg.timezone)
         self.local_now = rec.now.astimezone(tz)
         self.today = today or self.local_now.date().isoformat()
-        self.rng = np.random.default_rng(abs(hash(self.today)) % (2**32))
+        # stable across processes (str hash() is salted): same user + day -> same mixes
+        self.rng = np.random.default_rng(zlib.crc32(f"{self.today}:{rec.user_id}".encode()))
         self.gap = max(self.s.int("ai.mix.artist_gap"), 1)
         recent = self.s.num("ai.mix.recent_days")
         self.eligible = (~self.sig.blocked) & ~(self.sig.last_played_days < recent)
@@ -184,8 +186,39 @@ class MixBuilder:
         # backfill (e.g. cold start: no known likes yet)
         rest = pool.copy()
         rest[chosen] = False
-        take(rest, score, seconds, "rare" if spec.kind != "deep_cuts" else "deep")
+        fill_name = "rare" if spec.kind != "deep_cuts" else "deep"
+        take(rest, score, seconds, fill_name)
+        # spares for top_up(), in case ordering has to drop tracks to keep the artist rule
+        rest[chosen] = False
+        if spec.kind == "deep_cuts":
+            rest &= plays <= self.s.num("ai.mix.deep_cuts.max_plays")
+        self._spares = (list(self._noisy_rank(np.where(rest)[0], score)), fill_name, seconds, cap)
         return chosen, bucket
+
+    def top_up(self, ordered: list[int], bucket: dict[int, str]) -> list[int]:
+        """Refill a mix that ordering left short, appending spares that keep the artist rule."""
+        spares, name, seconds, cap = self._spares
+        dur = self.lib.duration
+        total = float(sum(max(dur[i], 30.0) for i in ordered))
+        counts: dict[str, int] = {}
+        for i in ordered:
+            counts[self.lib.artist[i]] = counts.get(self.lib.artist[i], 0) + 1
+        taken = set(ordered)
+        for i in spares:
+            if total >= seconds - 30:
+                break
+            a = self.lib.artist[i]
+            d = max(dur[i], 30.0)
+            if i in taken or counts.get(a, 0) >= cap or total + d > seconds + 60:
+                continue
+            if a in {self.lib.artist[j] for j in ordered[-self.gap:]}:
+                continue
+            ordered.append(i)
+            taken.add(i)
+            bucket.setdefault(i, name)
+            counts[a] = counts.get(a, 0) + 1
+            total += d
+        return ordered
 
     # ------------------------------------------------------------ ordering
 
@@ -220,7 +253,10 @@ class MixBuilder:
                 break
             cand = np.array(allowed)
             tgt = target(len(out))
-            cost = (1 - emb[cand] @ emb[prev]) + 1.5 * np.abs(e[cand] - tgt) + 0.5 * np.abs(e[cand] - e[prev])
+            # prefer artists with more tracks still to place, so none are stranded at the end
+            left = np.array([sum(self.lib.artist[j] == self.lib.artist[i] for j in remaining) for i in allowed])
+            cost = (1 - emb[cand] @ emb[prev]) + 1.5 * np.abs(e[cand] - tgt) + 0.5 * np.abs(e[cand] - e[prev]) \
+                - 0.25 * (left - 1)
             nxt = int(cand[int(np.argmin(cost))])
             out.append(nxt)
             remaining.remove(nxt)
@@ -357,7 +393,7 @@ def build_nightly(rec: Recommender) -> list[str]:
         try:
             # context mixes may share tracks with the time-of-day mixes: they're for a different moment
             chosen, bucket = b.select(spec, set() if spec.kind == "context" else used)
-            ordered = b.order(chosen, spec.curve)
+            ordered = b.top_up(b.order(chosen, spec.curve), bucket)
             if not ordered:
                 log.info("%s: nothing eligible", spec.title)
                 continue
