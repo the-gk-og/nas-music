@@ -71,4 +71,5 @@ def ai_config(cfg: Config) -> AIConfig:
         data_dir=cfg.data_dir,
         timezone=cfg.timezone,
         lastfm_api_key=cfg.lastfm_api_key,
+        model_version=cfg.model_version,
     )

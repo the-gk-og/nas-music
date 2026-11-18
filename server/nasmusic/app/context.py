@@ -24,6 +24,7 @@ class AppContext:
     version: str
     web_secret: bytes = field(repr=False, default=b"")
     jobs: Jobs | None = None
+    http_transport: object | None = None   # httpx transport override for upstream calls (tests)
 
     @property
     def data_dir(self) -> Path:

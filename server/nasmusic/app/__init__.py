@@ -43,7 +43,7 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
         cfg=cfg,
         server_id=sid,
         cert_sha256=tls.fingerprint(files.cert),
-        opus=OpusCache(cfg.data_dir / "opus", int(cfg.opus_cache_gb * 1024**3)),
+        opus=jobs.opus if jobs else OpusCache(cfg.data_dir / "opus", int(cfg.opus_cache_gb * 1024**3)),
         version=VERSION,
         web_secret=secret,
         jobs=jobs,
@@ -73,8 +73,8 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
             resp.headers.setdefault("Referrer-Policy", "no-referrer")
             resp.headers.setdefault(
                 "Content-Security-Policy",
-                "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data: https:; "
-                "media-src https:; form-action 'self'; frame-ancestors 'none'",
+                "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
+                "media-src 'self'; form-action 'self'; frame-ancestors 'none'",
             )
         return resp
 

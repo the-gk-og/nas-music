@@ -16,15 +16,18 @@ from zoneinfo import ZoneInfo
 from nasmusic.ai import api as ai
 from nasmusic.config import Config
 from nasmusic.core import ai_config, get_setting, now_iso, open_db, set_setting
+from nasmusic.stream.transcode import OpusCache
 
 log = logging.getLogger(__name__)
 
-JOB_NAMES = ("scan", "full_scan", "analyse", "nightly", "discovery")
+JOB_NAMES = ("scan", "full_scan", "analyse", "nightly", "pretranscode", "discovery")
 
 
 class Jobs:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, opus: OpusCache | None = None):
         self.cfg = cfg
+        # Shared with the API so on-demand and background transcodes use the same per-track locks.
+        self.opus = opus or OpusCache(cfg.data_dir / "opus", int(cfg.opus_cache_gb * 1024**3))
         self._locks = {n: threading.Lock() for n in JOB_NAMES}
         self._locks["full_scan"] = self._locks["scan"]  # never scan twice at once
         self.scheduler = None
@@ -43,6 +46,25 @@ class Jobs:
     def _nightly(self, conn):
         return {"mixIds": ai.run_nightly(conn, ai_config(self.cfg))}
 
+    def _pretranscode(self, conn):
+        """Transcode every manifest track to Opus at the sync bitrate, one ffmpeg at a time at nice 19,
+        so the manifest reports exact sizes by the time the phone syncs."""
+        from nasmusic.stream.transcode import TranscodeError
+        from nasmusic.sync import SYNC_KBPS, sync_tracks
+
+        done = cached = failed = 0
+        for r in sync_tracks(conn):
+            if self.opus.path_for(r["id"], SYNC_KBPS, r["mtime"]).exists():
+                cached += 1
+                continue
+            try:
+                self.opus.get(self.cfg.library_root / r["path"], r["id"], SYNC_KBPS, r["mtime"], low_priority=True)
+                done += 1
+            except TranscodeError as e:
+                failed += 1
+                log.warning("pre-transcode failed for %s: %s", r["id"], e)
+        return {"transcoded": done, "alreadyCached": cached, "failed": failed}
+
     def _discovery(self, conn):
         return {"newSuggestions": ai.run_weekly_discovery(conn, ai_config(self.cfg))}
 
@@ -52,6 +74,7 @@ class Jobs:
             "full_scan": lambda conn: self._scan(conn, full=True),
             "analyse": self._analyse,
             "nightly": self._nightly,
+            "pretranscode": self._pretranscode,
             "discovery": self._discovery,
         }[name]
 
@@ -88,6 +111,8 @@ class Jobs:
                 lock.release()
         if name in ("scan", "full_scan") and rec["ok"]:
             self.trigger("analyse")
+        if name == "nightly" and rec["ok"]:
+            self.trigger("pretranscode")
         return rec
 
     def trigger(self, name: str) -> bool:

@@ -12,7 +12,7 @@ from nasmusic.core import iso, now_iso
 
 log = logging.getLogger(__name__)
 
-EventType = Literal["play", "skip", "star", "unstar", "rate", "thumb_up", "thumb_down"]
+EventType = Literal["play", "skip", "star", "unstar", "rate", "thumb_up", "thumb_down", "thumb_clear"]
 Source = Literal["mix", "library", "favourites", "more_like", "search"]
 
 
@@ -54,7 +54,7 @@ def _apply(conn: sqlite3.Connection, e: Event, at: str) -> None:
         conn.execute("UPDATE tracks SET rating = ? WHERE id = ?", (e.rating, e.trackId))
     elif e.type == "thumb_down":
         conn.execute("UPDATE tracks SET blocked = 1 WHERE id = ?", (e.trackId,))
-    elif e.type == "thumb_up":
+    elif e.type in ("thumb_up", "thumb_clear"):
         conn.execute("UPDATE tracks SET blocked = 0 WHERE id = ?", (e.trackId,))
 
 

@@ -23,7 +23,8 @@
   <p>{{ analysis.analysed }} of {{ analysis.total }} tracks analysed ({{ analysis.pct }}%)
     {% if analysis.failed %} · <span class="bad">{{ analysis.failed }} failed</span>{% endif %}
     {% if analysis.pending %} · {{ analysis.pending }} queued{% endif %}</p>
-  <p class="muted">Model: {{ analysis.model }}</p>
+  <p class="muted">Model: {{ analysis.model }}{% if analysis.model != analysis.configured %}
+    <span class="warn">(fallback; configured: {{ analysis.configured }})</span>{% endif %}</p>
 </section>
 
 <section class="card">

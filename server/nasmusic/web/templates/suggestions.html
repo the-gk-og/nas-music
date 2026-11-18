@@ -5,12 +5,12 @@
 {% set labels = {"new": "new", "want": "want", "not_interested": "not interested", "have": "already have"} %}
 {% for s in suggestions %}
 <section class="card sugg" id="s-{{ s.id }}">
-  {% if s.coverUrl %}<img src="{{ s.coverUrl }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% endif %}
+  {% if s.hasCover %}<img src="/admin/suggestions/{{ s.id }}/cover?size=256" alt="" loading="lazy">{% endif %}
   <div style="flex:1;min-width:0">
     <h2>{{ s.album }}{% if s.year %} <span class="muted">({{ s.year }})</span>{% endif %}</h2>
     <div>{{ s.artist }} <span class="pill">{{ labels[s.status] }}</span></div>
     <p>{{ s.reason }}</p>
-    {% if s.previewUrl %}<audio controls preload="none" src="{{ s.previewUrl }}"></audio>{% endif %}
+    {% if s.hasPreview %}<audio controls preload="none" src="/admin/suggestions/{{ s.id }}/preview"></audio>{% endif %}
     {% if s.buyLinks %}<p>{% for l in s.buyLinks %}<a href="{{ l.url }}" rel="noopener noreferrer" target="_blank">{{ l.name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
     <div class="actions">
       {% for st, label in [("want", "Want"), ("not_interested", "Not interested"), ("have", "Already have")] %}

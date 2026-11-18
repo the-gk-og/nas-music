@@ -9,7 +9,7 @@
   {% if can_run %}
   <div class="actions">
     {% for name, label in [("scan", "Scan library"), ("full_scan", "Full rescan (re-read all tags)"),
-                           ("analyse", "Analyse new tracks"), ("nightly", "Build today's mixes"),
+                           ("analyse", "Analyse new tracks"), ("nightly", "Build today's mixes"), ("pretranscode", "Pre-transcode sync tracks"),
                            ("discovery", "Run discovery")] %}
     <form class="inline" method="post" action="/admin/jobs/{{ name }}"><button class="secondary">{{ label }}</button></form>
     {% endfor %}

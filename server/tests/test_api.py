@@ -177,8 +177,8 @@ def test_manifest(client, conn):
     assert m["generatedAt"].endswith("Z")
     items = {i["trackId"]: i for i in m["items"]}
     assert set(items) == {ids["Song 1"], ids["Song 2"], ids["Opening"]}
-    assert items[ids["Opening"]] == {"trackId": ids["Opening"], "format": "opus", "why": "mix",
-                                     "mixIds": ["m1", "m2"]}
+    assert items[ids["Opening"]].items() >= {"trackId": ids["Opening"], "format": "opus", "why": "mix",
+                                             "mixIds": ["m1", "m2"]}.items()
     assert items[ids["Song 1"]]["why"] == "favourite" and items[ids["Song 1"]]["format"] == "opus"
     assert items[ids["Song 2"]]["why"] == "favourite" and items[ids["Song 2"]]["mixIds"] == ["m1"]
 

@@ -1,21 +1,20 @@
 """HTTP API under /api/v1 — implements api/openapi.yaml."""
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from nasmusic import auth
 from nasmusic.ai import api as ai
 from nasmusic.app import events as events_mod
-from nasmusic.app import mixes
+from nasmusic.app import mixes, suggestions
 from nasmusic.app.context import AppContext, ctx, db, device
-from nasmusic.core import ai_config, now_iso
+from nasmusic.core import ai_config
 from nasmusic.library import art, queries
 from nasmusic.stream import clamp_bitrate, media_type
 from nasmusic.stream.transcode import TranscodeError
@@ -182,7 +181,16 @@ def more_like(track_id: str, minutes: int = Query(40, ge=10, le=240), conn: Conn
         mix_id = ai.more_like(conn, ai_config(c.cfg), track_id, minutes)
     except NotImplementedError as e:
         raise HTTPException(503, "recommender not available yet") from e
-    return mixes.get(conn, mix_id) or _404("mix not created")
+    except KeyError as e:  # the AI's signal for "unknown or not analysed yet"
+        raise HTTPException(404, "track not analysed yet") from e
+    except Exception as e:
+        log.exception("more_like failed for %s", track_id)
+        raise HTTPException(500, "could not build mix") from e
+    mix = mixes.get(conn, mix_id)
+    if mix is None:
+        log.error("more_like returned %r but no such mix exists", mix_id)
+        raise HTTPException(500, "could not build mix")
+    return mix
 
 
 @router.get("/tracks/{track_id}/why")
@@ -193,6 +201,9 @@ def why(track_id: str, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
         reason, similar_ids = ai.explain(conn, ai_config(c.cfg), track_id)
     except NotImplementedError as e:
         raise HTTPException(503, "recommender not available yet") from e
+    except Exception as e:
+        log.exception("explain failed for %s", track_id)
+        raise HTTPException(500, "could not explain track") from e
     similar = queries.tracks_by_ids(conn, list(similar_ids)[:3])
     return {"reason": reason, "similarTo": [similar[i] for i in similar_ids[:3] if i in similar]}
 
@@ -201,8 +212,9 @@ def why(track_id: str, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
 
 
 @router.get("/sync/manifest")
-def sync_manifest(favouritesFormat: Literal["opus", "flac"] = "opus", conn: Conn = Depends(db)):
-    return build_manifest(conn, favouritesFormat)
+def sync_manifest(favouritesFormat: Literal["opus", "flac"] = "opus", conn: Conn = Depends(db),
+                  c: AppContext = Depends(ctx)):
+    return build_manifest(conn, favouritesFormat, opus=c.opus)
 
 
 @router.post("/events")
@@ -212,38 +224,10 @@ def post_events(batch: events_mod.EventBatch, conn: Conn = Depends(db), dev: aut
 
 # ---------- suggestions ----------
 
-SUGGESTION_ORDER = (
-    "ORDER BY CASE status WHEN 'new' THEN 0 WHEN 'want' THEN 1 WHEN 'have' THEN 2 ELSE 3 END, "
-    "score DESC NULLS LAST, created_at DESC"
-)
-
-
-def suggestion_dict(r: sqlite3.Row) -> dict:
-    try:
-        links = json.loads(r["buy_links"]) if r["buy_links"] else []
-    except ValueError:
-        links = []
-    return {
-        "id": r["id"], "artist": r["artist"], "album": r["album"], "year": r["year"],
-        "artistMbid": r["artist_mbid"], "releaseGroupMbid": r["release_group_mbid"], "coverUrl": r["cover_url"],
-        "previewUrl": r["preview_url"], "buyLinks": links, "reason": r["reason"], "status": r["status"],
-        "createdAt": r["created_at"],
-    }
-
-
-def list_suggestions(conn: Conn) -> list[dict]:
-    return [suggestion_dict(r) for r in conn.execute(f"SELECT * FROM suggestions {SUGGESTION_ORDER}")]
-
-
-def answer_suggestion(conn: Conn, suggestion_id: str, status: str) -> bool:
-    return conn.execute(
-        "UPDATE suggestions SET status = ?, answered_at = ? WHERE id = ?", (status, now_iso(), suggestion_id)
-    ).rowcount == 1
-
 
 @router.get("/suggestions")
-def suggestions(conn: Conn = Depends(db)):
-    return list_suggestions(conn)
+def list_suggestions(conn: Conn = Depends(db)):
+    return suggestions.list_all(conn)
 
 
 class SuggestionAnswer(BaseModel):
@@ -252,6 +236,19 @@ class SuggestionAnswer(BaseModel):
 
 @router.post("/suggestions/{suggestion_id}", status_code=204)
 def post_suggestion(suggestion_id: str, body: SuggestionAnswer, conn: Conn = Depends(db)):
-    if not answer_suggestion(conn, suggestion_id, body.status):
+    if not suggestions.answer(conn, suggestion_id, body.status):
         _404()
     return Response(status_code=204)
+
+
+@router.get("/suggestions/{suggestion_id}/preview")
+async def suggestion_preview(suggestion_id: str, request: Request, conn: Conn = Depends(db),
+                             c: AppContext = Depends(ctx)):
+    return await suggestions.preview(c, conn, suggestion_id, request.headers.get("range"))
+
+
+@router.get("/suggestions/{suggestion_id}/cover")
+def suggestion_cover(suggestion_id: str, size: int = Query(512, ge=16, le=4096), conn: Conn = Depends(db),
+                     c: AppContext = Depends(ctx)):
+    out = suggestions.cover(c, conn, suggestion_id, size)
+    return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})

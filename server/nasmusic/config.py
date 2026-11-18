@@ -29,6 +29,7 @@ class Config:
     timezone: str = "Europe/London"
     opus_cache_gb: float = 20.0
     lastfm_api_key: str | None = None
+    model_version: str = "effnet-discogs-1"   # audio-analysis model (see nasmusic/ai/README.md)
     scan_interval_minutes: int = 5
     source_path: Path | None = field(default=None, compare=False)
 

@@ -19,6 +19,10 @@ FFMPEG_TIMEOUT_S = 900
 TOUCH_RESOLUTION_S = 3600
 
 
+def _lower_priority() -> None:  # runs in the forked child before exec
+    os.nice(19)
+
+
 class TranscodeError(Exception):
     pass
 
@@ -43,15 +47,16 @@ class OpusCache:
                 lock = self._locks[key] = threading.Lock()
             return lock
 
-    def get(self, src: Path, track_id: str, kbps: int, mtime: float) -> Path:
-        """Return the cached Opus file for this source, transcoding it first if needed (blocking)."""
+    def get(self, src: Path, track_id: str, kbps: int, mtime: float, low_priority: bool = False) -> Path:
+        """Return the cached Opus file for this source, transcoding it first if needed (blocking).
+        `low_priority` runs ffmpeg at nice 19 (background pre-transcoding)."""
         out = self.path_for(track_id, kbps, mtime)
         if self._hit(out):
             return out
         with self._lock_for((track_id, kbps)):
             if self._hit(out):
                 return out
-            self._transcode(src, out, kbps)
+            self._transcode(src, out, kbps, low_priority)
             for old in self.dir.glob(f"{track_id}_{kbps}_*.opus"):
                 if old != out:
                     old.unlink(missing_ok=True)
@@ -71,7 +76,7 @@ class OpusCache:
                 pass
         return True
 
-    def _transcode(self, src: Path, out: Path, kbps: int) -> None:
+    def _transcode(self, src: Path, out: Path, kbps: int, low_priority: bool = False) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
         tmp = out.with_name(f".{out.name}.{threading.get_ident()}.tmp")
         cmd = [
@@ -82,7 +87,8 @@ class OpusCache:
         ]
         t0 = time.monotonic()
         try:
-            proc = subprocess.run(cmd, capture_output=True, timeout=FFMPEG_TIMEOUT_S)
+            proc = subprocess.run(cmd, capture_output=True, timeout=FFMPEG_TIMEOUT_S, check=False,
+                                  preexec_fn=_lower_priority if low_priority else None)
         except (OSError, subprocess.TimeoutExpired) as e:
             tmp.unlink(missing_ok=True)
             raise TranscodeError(f"ffmpeg failed to run: {e}") from e

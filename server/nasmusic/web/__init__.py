@@ -11,12 +11,11 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from nasmusic import auth
-from nasmusic.ai.api import AIConfig
-from nasmusic.app import api as api_mod
+from nasmusic.app import suggestions as sugg
 from nasmusic.app.context import AppContext, ctx, db
 from nasmusic.app.scheduler import JOB_NAMES
 from nasmusic.auth import qr
@@ -146,8 +145,11 @@ def logout():
     return resp
 
 
-def _analysis_progress(conn: sqlite3.Connection) -> dict:
-    mv = AIConfig.__dataclass_fields__["model_version"].default
+def _analysis_progress(conn: sqlite3.Connection, configured: str) -> dict:
+    """Progress for the model version the AI is actually writing: the version of the most recently
+    analysed features row (e.g. 'basic-1' when Essentia is unavailable), else the configured one."""
+    row = conn.execute("SELECT model_version FROM features ORDER BY analysed_at DESC LIMIT 1").fetchone()
+    mv = row[0] if row else configured
     counts = {r["status"]: r["n"] for r in conn.execute(
         "SELECT j.status, COUNT(*) AS n FROM analysis_jobs j JOIN tracks t ON t.id = j.track_id "
         "WHERE j.model_version = ? AND t.missing = 0 GROUP BY j.status", (mv,))}
@@ -156,7 +158,7 @@ def _analysis_progress(conn: sqlite3.Connection) -> dict:
         "WHERE f.model_version = ? AND t.missing = 0", (mv,)).fetchone()[0]
     total = conn.execute("SELECT COUNT(*) FROM tracks WHERE missing = 0").fetchone()[0]
     return {
-        "model": mv, "analysed": analysed, "total": total, "failed": counts.get("failed", 0),
+        "model": mv, "configured": configured, "analysed": analysed, "total": total, "failed": counts.get("failed", 0),
         "pending": counts.get("pending", 0),
         "pct": round(100 * analysed / total, 1) if total else 0.0,
     }
@@ -178,7 +180,7 @@ def _jobs(conn: sqlite3.Connection, c: AppContext) -> list[dict]:
 def dashboard(request: Request, conn: sqlite3.Connection = Depends(db), c: AppContext = Depends(ctx)):
     return render(
         request, "dashboard.html",
-        stats=queries.stats(conn), analysis=_analysis_progress(conn), jobs=_jobs(conn, c),
+        stats=queries.stats(conn), analysis=_analysis_progress(conn, c.cfg.model_version), jobs=_jobs(conn, c),
         devices=auth.list_devices(conn), cache_gb=round(c.opus.size_bytes() / 1e9, 2),
         cache_limit=c.cfg.opus_cache_gb, cert=c.cert_sha256,
         mixes=conn.execute("SELECT kind, title, created_at FROM mixes WHERE active = 1 ORDER BY created_at DESC")
@@ -205,16 +207,29 @@ def pair_page(request: Request, conn: sqlite3.Connection = Depends(db), c: AppCo
 
 @router.get("/admin/suggestions", response_class=HTMLResponse, dependencies=[Depends(admin)])
 def suggestions_page(request: Request, conn: sqlite3.Connection = Depends(db)):
-    return render(request, "suggestions.html", suggestions=api_mod.list_suggestions(conn))
+    return render(request, "suggestions.html", suggestions=sugg.list_all(conn))
 
 
 @router.post("/admin/suggestions/{suggestion_id}", dependencies=[Depends(admin)])
 def answer(suggestion_id: str, status: str = Form(...), conn: sqlite3.Connection = Depends(db)):
     if status not in ("want", "not_interested", "have", "new"):
         raise HTTPException(400, "bad status")
-    if not api_mod.answer_suggestion(conn, suggestion_id, status):
+    if not sugg.answer(conn, suggestion_id, status):
         raise HTTPException(404, "no such suggestion")
     return RedirectResponse(f"/admin/suggestions#s-{suggestion_id}", status_code=303)
+
+
+@router.get("/admin/suggestions/{suggestion_id}/preview", dependencies=[Depends(admin)])
+async def admin_preview(suggestion_id: str, request: Request, conn: sqlite3.Connection = Depends(db),
+                        c: AppContext = Depends(ctx)):
+    return await sugg.preview(c, conn, suggestion_id, request.headers.get("range"))
+
+
+@router.get("/admin/suggestions/{suggestion_id}/cover", dependencies=[Depends(admin)])
+def admin_cover(suggestion_id: str, size: int = 256, conn: sqlite3.Connection = Depends(db),
+                c: AppContext = Depends(ctx)):
+    return FileResponse(sugg.cover(c, conn, suggestion_id, size), media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=604800"})
 
 
 @router.get("/admin/settings", response_class=HTMLResponse, dependencies=[Depends(admin)])
