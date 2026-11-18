@@ -194,6 +194,8 @@ paths:
         '200':
           description: new mix (kind=more_like)
           content: { application/json: { schema: { $ref: '#/components/schemas/Mix' } } }
+        '404': { description: track unknown or not analysed yet }
+        '503': { description: AI engine unavailable }
   /tracks/{trackId}/why:
     get:
       summary: Human-readable reason a track was picked (latest mix it appears in, else a general taste explanation).
@@ -267,6 +269,25 @@ paths:
               properties:
                 status: { type: string, enum: [want, not_interested, have] }
       responses: { '204': { description: saved } }
+  /suggestions/{suggestionId}/preview:
+    get:
+      summary: |
+        30-second preview audio, proxied by the server (third-party preview links expire within minutes,
+        and proxying keeps the phone from contacting third parties). Streamed through, never stored.
+      parameters: [ { name: suggestionId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: audio/mpeg }
+        '404': { description: no preview for this suggestion }
+        '502': { description: upstream preview unavailable }
+  /suggestions/{suggestionId}/cover:
+    get:
+      summary: Cover image, proxied by the server (may be cached on disk).
+      parameters:
+        - { name: suggestionId, in: path, required: true, schema: { type: string } }
+        - { name: size, in: query, schema: { type: integer, default: 512 } }
+      responses:
+        '200': { description: image/jpeg }
+        '404': { description: no cover }
 components:
   securitySchemes:
     device: { type: http, scheme: bearer }
@@ -341,12 +362,23 @@ components:
               format: { type: string, enum: [opus, flac] }
               why: { type: string, enum: [mix, favourite] }
               mixIds: { type: array, items: { type: string } }
+              durationS: { type: number }
+              bytes: { type: integer, description: size of the file /stream will return for this format }
+              bytesExact:
+                type: boolean
+                description: |
+                  true = `bytes` is exact (FLAC, or Opus already in the transcode cache). false = estimate
+                  from duration x bitrate; the server pre-transcodes manifest tracks after the nightly run,
+                  so by sync time Opus sizes are normally exact.
     Event:
       type: object
       required: [id, type, trackId, at]
       properties:
         id: { type: string, description: client-generated UUID, used for idempotency }
-        type: { type: string, enum: [play, skip, star, unstar, rate, thumb_up, thumb_down] }
+        type:
+          type: string
+          enum: [play, skip, star, unstar, rate, thumb_up, thumb_down, thumb_clear]
+          description: thumb_clear removes an earlier thumb_up or thumb_down (and unblocks the track).
         trackId: { type: string }
         at: { type: string, format: date-time }
         positionS: { type: [number, 'null'], description: playback position when the event happened (skip second) }
@@ -365,8 +397,10 @@ components:
         year: { type: [integer, 'null'] }
         artistMbid: { type: [string, 'null'] }
         releaseGroupMbid: { type: [string, 'null'] }
-        coverUrl: { type: [string, 'null'] }
-        previewUrl: { type: [string, 'null'] }
+        hasCover: { type: boolean, description: 'if true, fetch GET /suggestions/{id}/cover' }
+        hasPreview: { type: boolean, description: 'if true, play GET /suggestions/{id}/preview' }
+        coverUrl: { type: [string, 'null'], description: 'upstream source used by the server; the app must not fetch it' }
+        previewUrl: { type: [string, 'null'], description: 'upstream source used by the server; the app must not fetch it' }
         buyLinks: { type: array, items: { type: object, properties: { name: { type: string }, url: { type: string } } } }
         reason: { type: string }
         status: { type: string, enum: [new, want, not_interested, have] }

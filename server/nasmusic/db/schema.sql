@@ -56,7 +56,7 @@ CREATE INDEX IF NOT EXISTS tracks_starred ON tracks(starred_at);
 CREATE TABLE IF NOT EXISTS events (
     id          TEXT PRIMARY KEY,      -- client UUID (idempotency)
     device_id   TEXT REFERENCES devices(id),
-    type        TEXT NOT NULL CHECK (type IN ('play','skip','star','unstar','rate','thumb_up','thumb_down')),
+    type        TEXT NOT NULL CHECK (type IN ('play','skip','star','unstar','rate','thumb_up','thumb_down','thumb_clear')),
     track_id    TEXT NOT NULL REFERENCES tracks(id),
     at          TEXT NOT NULL,
     position_s  REAL,
