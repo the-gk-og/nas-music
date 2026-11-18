@@ -1,0 +1,44 @@
+# Full stack (from Phase 2): the custom nas-music server + Cloudflare Tunnel (+ optional Lidarr).
+# Navidrome is removed at this point. Same install route as phase1 ("Install via YAML").
+#
+# Replace before pasting:
+#   /mnt/POOL/media/music      -> music dataset (read-only for the server)
+#   /mnt/POOL/apps/nasmusic    -> server data: database, cert, Opus cache, models
+#   PASTE_TUNNEL_TOKEN_HERE    -> Cloudflare tunnel token
+# In Cloudflare, point the public hostname (music.<your domain>) at:  http://nasmusic:8080
+
+services:
+  nasmusic:
+    image: nasmusic:latest          # built from ../../server (see README: "Building the server image")
+    container_name: nasmusic
+    user: "568:568"
+    restart: unless-stopped
+    ports:
+      - "8443:8443"                  # LAN HTTPS (self-signed, pinned by the app). Port 8080 stays internal.
+    environment:
+      NASMUSIC_CONFIG: /data/config.toml
+    volumes:
+      - /mnt/POOL/media/music:/music:ro
+      - /mnt/POOL/apps/nasmusic:/data
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: PASTE_TUNNEL_TOKEN_HERE
+    depends_on:
+      - nasmusic
+
+  # Optional: files purchased albums into the library. Remove the leading '#' to enable.
+  # lidarr:
+  #   image: lscr.io/linuxserver/lidarr:latest
+  #   container_name: lidarr
+  #   restart: unless-stopped
+  #   environment: { PUID: "568", PGID: "568", TZ: "Europe/London" }
+  #   ports: ["8686:8686"]
+  #   volumes:
+  #     - /mnt/POOL/apps/lidarr:/config
+  #     - /mnt/POOL/media/music:/music          # read-write: Lidarr moves files in
+  #     - /mnt/POOL/media/music-import:/import  # drop purchased albums here
