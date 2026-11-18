@@ -1,25 +1,32 @@
 package org.nasmusic.app.ui.theme
 
-import android.os.Build
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 
-private val Dark = darkColorScheme(
-    primary = Color(0xFF8FD3B6),
-    onPrimary = Color(0xFF00382A),
-    secondary = Color(0xFFB4CCBF),
-    background = Color(0xFF0F1412),
-    surface = Color(0xFF0F1412),
-    surfaceVariant = Color(0xFF1F2925),
+val Accent = Color(0xFF4ADE80)
+
+/** True-black dark theme with one green accent (docs/v2.md §7). */
+private val Scheme = darkColorScheme(
+    primary = Accent,
+    onPrimary = Color(0xFF00210E),
+    secondary = Accent,
+    onSecondary = Color(0xFF00210E),
+    tertiary = Accent,
+    background = Color.Black,
+    onBackground = Color.White,
+    surface = Color.Black,
+    onSurface = Color.White,
+    surfaceVariant = Color(0xFF1C1C1C),
+    onSurfaceVariant = Color(0xFFB8B8B8),
+    surfaceContainer = Color(0xFF121212),
+    surfaceContainerHigh = Color(0xFF222222),
+    surfaceContainerHighest = Color(0xFF2A2A2A),
+    surfaceContainerLow = Color(0xFF0E0E0E),
+    outline = Color(0xFF5A5A5A),
+    outlineVariant = Color(0xFF333333),
 )
 
-/** Always dark (it is a music player); uses Material You colours on Android 12+. */
 @Composable
-fun NasMusicTheme(content: @Composable () -> Unit) {
-    val scheme = if (Build.VERSION.SDK_INT >= 31) dynamicDarkColorScheme(LocalContext.current) else Dark
-    MaterialTheme(colorScheme = scheme, content = content)
-}
+fun NasMusicTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = Scheme, content = content)

@@ -26,6 +26,7 @@ coroutines = "1.10.2"
 coil = "3.3.0"
 zxingEmbedded = "4.3.0"
 tink = "1.18.0"
+palette = "1.0.0"
 junit = "4.13.2"
 robolectric = "4.16"
 androidxTestCore = "1.6.1"
@@ -63,6 +64,7 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 zxing-android-embedded = { module = "com.journeyapps:zxing-android-embedded", version.ref = "zxingEmbedded" }
+palette = { module = "androidx.palette:palette-ktx", version.ref = "palette" }
 tink-android = { module = "com.google.crypto.tink:tink-android", version.ref = "tink" }
 junit = { module = "junit:junit", version.ref = "junit" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }

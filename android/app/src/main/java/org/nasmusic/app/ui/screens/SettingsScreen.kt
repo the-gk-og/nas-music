@@ -41,6 +41,7 @@ import org.nasmusic.app.sync.SyncScheduler
 
 @Composable
 fun SettingsScreen(c: AppContainer) {
+    val ui = org.nasmusic.app.ui.LocalUi.current
     val scope = rememberCoroutineScope()
     val settings by c.settings.settings.collectAsStateWithLifecycle()
     val config by c.secureStore.config.collectAsStateWithLifecycle()
@@ -89,6 +90,13 @@ fun SettingsScreen(c: AppContainer) {
 
         HorizontalDivider()
         Section("Offline")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Offline favourites")
+                Text("Off: stream everything. On: favourites and today's mixes download overnight on Wi-Fi while charging.", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(settings.offlineFavourites, { on -> scope.launch { c.settings.setOfflineFavourites(on) } })
+        }
         Text("Favourites format")
         SingleChoiceSegmentedButtonRow {
             AudioFormat.entries.forEachIndexed { i, f ->
@@ -121,19 +129,26 @@ fun SettingsScreen(c: AppContainer) {
             }
             Switch(settings.allowTunnelSync, { on -> scope.launch { c.settings.setAllowTunnelSync(on) } })
         }
-        OutlinedButton(onClick = { SyncScheduler.syncNow(c.context) }) { Text("Sync now") }
+        OutlinedButton(enabled = settings.offlineFavourites, onClick = { SyncScheduler.syncNow(c.context) }) { Text("Sync now") }
 
         HorizontalDivider()
-        Section("Device")
-        OutlinedButton(onClick = { confirmUnpair = true }) { Text("Re-pair / forget this server") }
+        Section("Data & recommendations")
+        OutlinedButton(onClick = { ui.go("data") }) { Text("Choose what to collect") }
+
+        HorizontalDivider()
+        Section("Account")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { ui.go("account") }) { Text("Account") }
+            OutlinedButton(onClick = { confirmUnpair = true }) { Text("Log out") }
+        }
     }
 
     if (confirmUnpair) {
         AlertDialog(
             onDismissRequest = { confirmUnpair = false },
-            title = { Text("Forget this server?") },
-            text = { Text("You will need to scan a new pairing QR. Downloaded music stays until the next sync.") },
-            confirmButton = { TextButton(onClick = { confirmUnpair = false; c.pairing.unpair() }) { Text("Forget") } },
+            title = { Text("Log out?") },
+            text = { Text("You'll sign in again with your username and password. Downloaded music stays until the next sync.") },
+            confirmButton = { TextButton(onClick = { confirmUnpair = false; scope.launch { c.auth.logout(c.api) } }) { Text("Log out") } },
             dismissButton = { TextButton(onClick = { confirmUnpair = false }) { Text("Cancel") } },
         )
     }

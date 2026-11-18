@@ -109,6 +109,7 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.zxing.android.embedded)
     implementation(libs.tink.android)
+    implementation(libs.palette)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

@@ -12,6 +12,8 @@ object ApiFactory {
         ignoreUnknownKeys = true
         explicitNulls = false
         coerceInputValues = true
+        // Send defaults like deviceKind="android"; nulls stay out (explicitNulls = false).
+        encodeDefaults = true
     }
 
     fun create(callFactory: Call.Factory, baseUrl: String = RoutedCallFactory.VIRTUAL_BASE): NasMusicApi =

@@ -9,6 +9,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import org.nasmusic.app.data.api.AudioFormat
@@ -20,6 +21,10 @@ data class AppSettings(
     val syncHour: Int = 3,
     val allowTunnelSync: Boolean = false,
     val streamBitrate: Int = 160,
+    /** v2: off by default — stream like Spotify; when on, favourites + mixes download overnight. */
+    val offlineFavourites: Boolean = false,
+    /** Lyrics text size multiplier (Tt button). */
+    val lyricsScale: Float = 1f,
 ) {
     companion object { const val SYNC_WINDOW_HOURS = 2 }
 }
@@ -32,20 +37,29 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     private val hour = intPreferencesKey("sync_hour")
     private val tunnelSync = booleanPreferencesKey("allow_tunnel_sync")
     private val bitrate = intPreferencesKey("stream_bitrate")
+    private val offline = booleanPreferencesKey("offline_favourites")
+    private val lyricsScaleKey = androidx.datastore.preferences.core.floatPreferencesKey("lyrics_scale")
 
-    val settings: StateFlow<AppSettings> = context.dataStore.data.map { p ->
-        AppSettings(
+    private fun read(p: androidx.datastore.preferences.core.Preferences) = AppSettings(
             favouritesFormat = if (p[favFormat] == "flac") AudioFormat.FLAC else AudioFormat.OPUS,
             storageLimitMb = p[limit] ?: AppSettings().storageLimitMb,
             syncHour = p[hour] ?: 3,
             allowTunnelSync = p[tunnelSync] ?: false,
             streamBitrate = p[bitrate] ?: 160,
+            offlineFavourites = p[offline] ?: false,
+            lyricsScale = p[lyricsScaleKey] ?: 1f,
         )
-    }.stateIn(scope, SharingStarted.Eagerly, AppSettings())
+
+    val settings: StateFlow<AppSettings> = context.dataStore.data.map(::read).stateIn(scope, SharingStarted.Eagerly, AppSettings())
+
+    /** Reads from disk; use in workers, where [settings] may still hold defaults right after process start. */
+    suspend fun current(): AppSettings = read(context.dataStore.data.first())
 
     suspend fun setFavouritesFormat(f: AudioFormat) = context.dataStore.edit { it[favFormat] = f.wire }
     suspend fun setStorageLimitMb(mb: Int) = context.dataStore.edit { it[limit] = mb.coerceAtLeast(256) }
     suspend fun setSyncHour(h: Int) = context.dataStore.edit { it[hour] = h.mod(24) }
     suspend fun setAllowTunnelSync(on: Boolean) = context.dataStore.edit { it[tunnelSync] = on }
+    suspend fun setOfflineFavourites(on: Boolean) = context.dataStore.edit { it[offline] = on }
+    suspend fun setLyricsScale(s: Float) = context.dataStore.edit { it[lyricsScaleKey] = s.coerceIn(0.7f, 2f) }
     suspend fun setStreamBitrate(kbps: Int) = context.dataStore.edit { it[bitrate] = kbps }
 }

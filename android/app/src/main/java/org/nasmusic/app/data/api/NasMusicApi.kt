@@ -3,6 +3,7 @@ package org.nasmusic.app.data.api
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
+import retrofit2.http.PATCH
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.PUT
@@ -63,7 +64,7 @@ interface NasMusicApi {
 
     /** 404 = unknown track or no lyrics; returned as a Response so callers can tell it from a network error. */
     @GET("tracks/{id}/lyrics")
-    suspend fun lyrics(@Path("id") trackId: String): Response<Lyrics>
+    suspend fun lyrics(@Path("id") trackId: String, @Query("source") source: String? = null): Response<Lyrics>
 
     @GET("sync/manifest")
     suspend fun manifest(@Query("favouritesFormat") favouritesFormat: String): SyncManifest
@@ -76,4 +77,142 @@ interface NasMusicApi {
 
     @POST("suggestions/{id}")
     suspend fun setSuggestionStatus(@Path("id") id: String, @Body body: SuggestionStatus): Response<Unit>
+    // ---- v2 (docs/v2.md §4) ----
+    @GET("server-info")
+    suspend fun serverInfo(): ServerInfo
+
+    @POST("auth/login")
+    suspend fun login(@Body body: LoginRequest): Session
+
+    @POST("auth/register")
+    suspend fun register(@Body body: RegisterRequest): Session
+
+    @POST("auth/logout")
+    suspend fun logout(): Response<Unit>
+
+    @GET("me")
+    suspend fun me(): Me
+
+    @PUT("me/password")
+    suspend fun changePassword(@Body body: PasswordChange): Response<Unit>
+
+    @GET("me/devices")
+    suspend fun myDevices(): List<MyDevice>
+
+    @DELETE("me/devices/{id}")
+    suspend fun deleteDevice(@Path("id") id: String): Response<Unit>
+
+    @POST("me/pair-code")
+    suspend fun pairCode(): PairCode
+
+    @GET("me/settings")
+    suspend fun mySettings(): UserSettings
+
+    @PUT("me/settings")
+    suspend fun putMySettings(@Body body: UserSettings): Response<Unit>
+
+    @GET("me/data")
+    suspend fun myData(): MyData
+
+    /** signal=all also erases listening history and needs confirm=true. */
+    @DELETE("me/data")
+    suspend fun deleteMyData(@Query("signal") signal: String, @Query("confirm") confirm: Boolean? = null): Response<Unit>
+
+    @GET("library/folders")
+    suspend fun folders(@Query("path") path: String = ""): FolderListing
+
+    @GET("library/genres")
+    suspend fun genres(): List<Genre>
+
+    @GET("library/genres/{genre}/tracks")
+    suspend fun genreTracks(@Path("genre") genre: String, @Query("limit") limit: Int = 1000): List<Track>
+
+    @GET("library/tracks")
+    suspend fun allTracks(
+        @Query("sort") sort: String = "title",
+        @Query("offset") offset: Int = 0,
+        @Query("limit") limit: Int = 1000,
+    ): List<Track>
+
+    @GET("library/tracks/{id}/info")
+    suspend fun trackInfo(@Path("id") id: String): TrackInfo
+
+    @GET("lists/{kind}")
+    suspend fun smartList(@Path("kind") kind: String, @Query("offset") offset: Int = 0, @Query("limit") limit: Int = 500): List<Track>
+
+    @GET("playlists")
+    suspend fun playlists(): List<Playlist>
+
+    @POST("playlists")
+    suspend fun createPlaylist(@Body body: NameBody): Playlist
+
+    @GET("playlists/{id}")
+    suspend fun playlist(@Path("id") id: String): Playlist
+
+    @PATCH("playlists/{id}")
+    suspend fun renamePlaylist(@Path("id") id: String, @Body body: NameBody): Response<Unit>
+
+    @DELETE("playlists/{id}")
+    suspend fun deletePlaylist(@Path("id") id: String): Response<Unit>
+
+    @POST("playlists/{id}/tracks")
+    suspend fun addToPlaylist(@Path("id") id: String, @Body body: TrackIdsBody): Response<Unit>
+
+    @DELETE("playlists/{id}/tracks/{position}")
+    suspend fun removeFromPlaylist(@Path("id") id: String, @Path("position") position: Int): Response<Unit>
+
+    @POST("playlists/{id}/move")
+    suspend fun movePlaylistTrack(@Path("id") id: String, @Body body: MoveBody): Response<Unit>
+
+    @GET("queues")
+    suspend fun queues(): List<Queue>
+
+    @POST("queues")
+    suspend fun createQueue(@Body body: NewQueue): Queue
+
+    @GET("queues/{id}")
+    suspend fun queue(@Path("id") id: String): Queue
+
+    @PATCH("queues/{id}")
+    suspend fun patchQueue(@Path("id") id: String, @Body body: QueuePatch): Response<Unit>
+
+    @DELETE("queues/{id}")
+    suspend fun deleteQueue(@Path("id") id: String): Response<Unit>
+
+    /** position: an index, "next" or "end". */
+    @POST("queues/{id}/tracks")
+    suspend fun addToQueue(@Path("id") id: String, @Body body: TrackIdsBody): Response<Unit>
+
+    @DELETE("queues/{id}/tracks/{position}")
+    suspend fun removeFromQueue(@Path("id") id: String, @Path("position") position: Int): Response<Unit>
+
+    @POST("queues/{id}/move")
+    suspend fun moveQueueTrack(@Path("id") id: String, @Body body: MoveBody): Response<Unit>
+
+    @POST("queues/{id}/save-as-playlist")
+    suspend fun saveQueueAsPlaylist(@Path("id") id: String, @Body body: NameBody): Playlist
+
+    @PUT("tracks/{id}/lyrics")
+    suspend fun putLyrics(@Path("id") id: String, @Body body: LyricsEdit): Response<Unit>
+
+    @DELETE("tracks/{id}/lyrics")
+    suspend fun deleteLyrics(@Path("id") id: String): Response<Unit>
+
+    @GET("admin/invites")
+    suspend fun invites(): List<Invite>
+
+    @POST("admin/invites")
+    suspend fun createInvite(@Body body: NewInvite): Invite
+
+    @DELETE("admin/invites/{code}")
+    suspend fun deleteInvite(@Path("code") code: String): Response<Unit>
+
+    @GET("admin/users")
+    suspend fun users(): List<AdminUser>
+
+    @PATCH("admin/users/{id}")
+    suspend fun patchUser(@Path("id") id: String, @Body body: AdminUserPatch): Response<Unit>
+
+    @POST("admin/users/{id}/reset-password")
+    suspend fun resetPassword(@Path("id") id: String, @Body body: NewPassword): Response<Unit>
 }

@@ -19,6 +19,14 @@ import org.nasmusic.app.net.ServerRouter
 import org.nasmusic.app.pairing.PairingRepository
 import org.nasmusic.app.pairing.SecureStore
 import org.nasmusic.app.playback.PlayerConnection
+import org.nasmusic.app.auth.AuthRepository
+import org.nasmusic.app.connect.ConnectClient
+import org.nasmusic.app.context.ContextCollector
+import org.nasmusic.app.eq.EqRepository
+import org.nasmusic.app.net.CertProbe
+import org.nasmusic.app.playback.AbRepeat
+import org.nasmusic.app.playback.QueueSync
+import kotlinx.coroutines.launch
 import org.nasmusic.app.sync.Downloader
 import org.nasmusic.app.sync.EventUploadWorker
 
@@ -58,5 +66,30 @@ class AppContainer(val context: Context) {
 
     val library = LibraryRepository(api, db, ApiFactory.json)
     val lyrics = LyricsRepository(db.lyrics(), { api.lyrics(it) }, ApiFactory.json)
-    val player = PlayerConnection(context)
+
+    // ---- v2 ----
+    val certProbe = CertProbe(baseClient)
+    val auth = AuthRepository(secureStore, baseClient)
+    val queueSync = QueueSync({ api }, scope)
+    val connect = ConnectClient(
+        clients = ::clients,
+        route = router.route,
+        scope = scope,
+        deviceName = { AuthRepository.deviceName() },
+        appVersion = BuildConfig.VERSION_NAME,
+    )
+    val player = PlayerConnection(context, connect, queueSync, { api }, scope)
+    val abRepeat = AbRepeat()
+    val eq = EqRepository(context)
+    val contextCollector = ContextCollector(context, scope)
+
+    /** Keep both addresses (and, via the tunnel, the LAN pin) current from /server-info. */
+    fun startServerInfoRefresh() = scope.launch {
+        router.route.collect { r ->
+            if (r == Route.OFFLINE || secureStore.config.value?.isPaired != true) return@collect
+            runCatching { api.serverInfo() }.onSuccess { auth.applyServerInfo(it, r) }
+            queueSync.refresh()
+            contextCollector.syncFrom(api)
+        }
+    }
 }

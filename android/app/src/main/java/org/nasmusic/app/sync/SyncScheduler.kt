@@ -39,6 +39,10 @@ object SyncScheduler {
         )
     }
 
+    fun cancelNight(context: Context) {
+        WorkManager.getInstance(context).cancelUniqueWork(NIGHT)
+    }
+
     /** The "Sync now" button: any connected network, no charging requirement. Route rules still apply. */
     fun syncNow(context: Context) {
         val req = OneTimeWorkRequestBuilder<SyncWorker>()
