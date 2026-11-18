@@ -1,4 +1,4 @@
-"""nasmusic CLI: serve | scan | pair-code | hash-password."""
+"""nasmusic CLI: serve | scan | pair-code | hash-password | user."""
 from __future__ import annotations
 
 import argparse
@@ -58,11 +58,18 @@ def cmd_serve(args) -> None:
     log = logging.getLogger("nasmusic")
     log.info("%s TLS certificate for %s, SHA-256 fingerprint:\n    %s",
              "Generated new" if created else "Using", cfg.lan_host, fp)
-    if not cfg.admin_password_hash:
-        log.warning("admin_password_hash is not set; the web UI login is disabled (run `nasmusic hash-password`)")
 
     jobs = Jobs(cfg)
     ctx = build_context(cfg, jobs)
+    from nasmusic.core import open_db as _open
+
+    _c = _open(cfg)
+    try:
+        if not _c.execute("SELECT 1 FROM users WHERE password_hash != '!' AND is_admin = 1").fetchone():
+            log.warning("no admin has a password yet: set admin_password_hash in the config, or run "
+                        "`nasmusic user passwd %s`", cfg.admin_username)
+    finally:
+        _c.close()
     app = create_app(cfg, context=ctx)
     common = {"host": cfg.bind_host, "lifespan": "off", "log_config": None, "timeout_graceful_shutdown": 5,
               "server_header": False,
@@ -112,7 +119,12 @@ def cmd_pair_code(args) -> None:
     files, _ = tls.ensure_cert(cfg.data_dir, cfg.lan_host)
     conn = open_db(cfg)
     try:
-        code, expires = auth.create_pair_code(conn)
+        from nasmusic.auth import users
+
+        u = users.by_username(conn, args.user or cfg.admin_username)
+        if u is None:
+            sys.exit(f"no such user: {args.user or cfg.admin_username}")
+        code, expires = auth.create_pair_code(conn, u.id)
         payload = qr.payload(cfg, server_id(conn), tls.fingerprint(files.cert), code)
     finally:
         conn.close()
@@ -120,7 +132,50 @@ def cmd_pair_code(args) -> None:
         print(qr.payload_json(payload))
         return
     print(qr.terminal(qr.payload_json(payload)))
-    print(f"Pair code: {code}   (single use, expires {expires})")
+    print(f"Pair code: {code}   (single use, expires {expires}, signs in as {u.username})")
+
+
+def _read_password(prompt: str) -> str:
+    if sys.stdin.isatty():
+        pw = getpass.getpass(prompt)
+        if pw != getpass.getpass("Repeat: "):
+            sys.exit("Passwords don't match.")
+        return pw
+    return sys.stdin.readline().rstrip("\n")
+
+
+def cmd_user(args) -> None:
+    from nasmusic import auth
+    from nasmusic.auth import users
+    from nasmusic.core import init_db, open_db
+
+    cfg = _load(args)
+    init_db(cfg)
+    conn = open_db(cfg)
+    try:
+        if args.action == "list":
+            for u in users.list_all(conn):
+                flags = " ".join(f for f, on in (("admin", u["isAdmin"]), ("disabled", u["disabled"])) if on)
+                print(f"{u['username']:<24} {u['deviceCount']:>3} devices  {flags}")
+            return
+        if not args.name:
+            sys.exit("give a username")
+        pw = _read_password(f"Password for {args.name}: ")
+        try:
+            if args.action == "add":
+                users.create(conn, args.name, pw, is_admin=args.admin)
+                print(f"created {args.name}{' (admin)' if args.admin else ''}")
+            else:
+                u = users.by_username(conn, args.name)
+                if u is None:
+                    sys.exit(f"no such user: {args.name}")
+                users.set_password(conn, u.id, pw)
+                n = len(auth.revoke_user_devices(conn, u.id))
+                print(f"password changed for {u.username}; signed out {n} device(s)")
+        except users.UserError as e:
+            sys.exit(e.detail)
+    finally:
+        conn.close()
 
 
 def cmd_hash_password(args) -> None:
@@ -154,10 +209,16 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--analyse", action="store_true", help="also run audio analysis afterwards")
     s.set_defaults(fn=cmd_scan)
     s = sub.add_parser("pair-code", parents=[common], help="print a one-time pairing QR + code")
+    s.add_argument("--user", help="the user the device signs in as (default: admin_username)")
     s.add_argument("--json", action="store_true", help="print the QR payload JSON instead")
     s.set_defaults(fn=cmd_pair_code)
     s = sub.add_parser("hash-password", parents=[common], help="hash an admin password for config.toml")
     s.set_defaults(fn=cmd_hash_password)
+    s = sub.add_parser("user", parents=[common], help="manage users: list | add NAME [--admin] | passwd NAME")
+    s.add_argument("action", choices=["list", "add", "passwd"])
+    s.add_argument("name", nargs="?")
+    s.add_argument("--admin", action="store_true", help="with add: make the user an admin")
+    s.set_defaults(fn=cmd_user)
     args = p.parse_args(argv)
     if not hasattr(args, "config"):
         args.config = None

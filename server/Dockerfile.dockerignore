@@ -1,0 +1,11 @@
+# Build context is the repo root (docker build -f server/Dockerfile .). Allow-list what the image needs.
+*
+!server/pyproject.toml
+!server/uv.lock
+!server/nasmusic
+!server/config.example.toml
+!web
+web/node_modules
+web/dist
+**/__pycache__
+**/*.pyc

@@ -4,9 +4,9 @@ on:
   push:
     branches: [main]
     tags: ['v*']
-    paths: ['server/**', 'api/**', '.github/workflows/server.yml']
+    paths: ['server/**', 'web/**', 'api/**', '.github/workflows/server.yml']
   pull_request:
-    paths: ['server/**', 'api/**', '.github/workflows/server.yml']
+    paths: ['server/**', 'web/**', 'api/**', '.github/workflows/server.yml']
   workflow_dispatch:
 
 permissions:
@@ -56,7 +56,8 @@ jobs:
             type=semver,pattern={{version}}
       - uses: docker/build-push-action@v6
         with:
-          context: server
+          context: .                  # repo root: the image also builds web/ (the web player)
+          file: server/Dockerfile
           platforms: linux/amd64
           build-args: WITH_ANALYSIS=1
           push: ${{ github.event_name != 'pull_request' }}
