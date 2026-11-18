@@ -106,6 +106,8 @@ data class Lyrics(
     val source: String,
     val lines: List<LyricLine> = emptyList(),
     val text: String = "",
+    /** v2: the server accepts PUT /tracks/{id}/lyrics overrides (source becomes "user"). */
+    val canEdit: Boolean = false,
 )
 
 @Serializable
@@ -147,6 +149,8 @@ data class EventDto(
     val mixId: String? = null,
     val rating: Int? = null,
     val offline: Boolean = false,
+    /** v2 §10: opt-in listening context; only enabled signals are present. */
+    val context: kotlinx.serialization.json.JsonObject? = null,
 )
 
 @Serializable

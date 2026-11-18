@@ -24,6 +24,7 @@ class HttpClients(
     }
 
     val lan: OkHttpClient by lazy {
+        if (!config.hasLanPin) return@lazy base.newBuilder().addInterceptor(auth).build()
         val tm = PinnedCertTrustManager(config.certSha256)
         val ssl = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }
         val lanHost = config.lanHttpUrl?.host
