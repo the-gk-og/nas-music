@@ -211,6 +211,18 @@ paths:
                 properties:
                   reason: { type: string }
                   similarTo: { type: array, items: { $ref: '#/components/schemas/Track' }, description: up to 3 tracks it sounds like }
+  /tracks/{trackId}/lyrics:
+    get:
+      summary: |
+        Lyrics for a track, read from the file itself: embedded tags (FLAC/Vorbis LYRICS, UNSYNCEDLYRICS,
+        SYNCEDLYRICS; MP3 USLT/SYLT; M4A ©lyr) or a sidecar `.lrc` file with the same name. Synced (LRC)
+        lyrics are preferred when both exist. The app caches these for downloaded tracks so they work offline.
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: lyrics
+          content: { application/json: { schema: { $ref: '#/components/schemas/Lyrics' } } }
+        '404': { description: unknown track, or the track has no lyrics }
   /sync/manifest:
     get:
       summary: |
@@ -331,6 +343,23 @@ components:
         flacBytes: { type: integer, description: size of the original file }
         starred: { type: boolean }
         rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
+    Lyrics:
+      type: object
+      required: [trackId, synced, source, lines, text]
+      properties:
+        trackId: { type: string }
+        synced: { type: boolean, description: 'true when every line has a timeMs (LRC timestamps)' }
+        source: { type: string, enum: [embedded, lrc_file] }
+        lines:
+          type: array
+          description: In display order. Synced lines are sorted by timeMs; a line repeated at several timestamps appears once per timestamp.
+          items:
+            type: object
+            required: [text]
+            properties:
+              timeMs: { type: [integer, 'null'], description: 'start time in ms (LRC offset tag already applied); null when unsynced' }
+              text: { type: string, description: 'may be empty for instrumental gaps' }
+        text: { type: string, description: 'plain lyrics without timestamps, one line per lyric line' }
     MixTrack:
       type: object
       required: [track, reason]
