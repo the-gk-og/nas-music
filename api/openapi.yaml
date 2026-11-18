@@ -1,0 +1,373 @@
+openapi: 3.1.0
+info:
+  title: nas-music API
+  version: 0.1.0
+  description: |
+    Contract between the nas-music server and the Android app. All paths are under /api/v1.
+    Auth: `Authorization: Bearer <deviceToken>` on every endpoint except /health and /pair.
+    Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
+    Times are ISO-8601 UTC strings. IDs are opaque strings.
+servers:
+  - url: /api/v1
+security:
+  - device: []
+paths:
+  /health:
+    get:
+      security: []
+      summary: Liveness + identity. Used by the app to test if the LAN address is reachable.
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, serverId, version]
+                properties:
+                  status: { type: string, enum: [ok] }
+                  serverId: { type: string, description: Stable random id of this server install }
+                  version: { type: string }
+  /pair:
+    post:
+      security: []
+      summary: Exchange a one-time pairing code (from the QR shown in the web UI) for a device token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairCode, deviceName]
+              properties:
+                pairCode: { type: string }
+                deviceName: { type: string }
+      responses:
+        '200':
+          description: paired
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deviceId, deviceToken]
+                properties:
+                  deviceId: { type: string }
+                  deviceToken: { type: string }
+        '403': { description: code invalid or expired (codes live 10 minutes, single use) }
+  /library/artists:
+    get:
+      parameters:
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 1000 } }
+      responses:
+        '200':
+          description: artists sorted by name
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Artist' } }
+  /library/artists/{artistId}:
+    get:
+      parameters: [ { name: artistId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: artist with albums
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Artist'
+                  - type: object
+                    properties:
+                      albums: { type: array, items: { $ref: '#/components/schemas/Album' } }
+        '404': { description: not found }
+  /library/albums:
+    get:
+      parameters:
+        - { name: artistId, in: query, schema: { type: string } }
+        - { name: sort, in: query, schema: { type: string, enum: [name, year, added], default: name } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 1000 } }
+      responses:
+        '200':
+          description: albums
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Album' } }
+  /library/albums/{albumId}:
+    get:
+      parameters: [ { name: albumId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: album with tracks in disc/track order
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Album'
+                  - type: object
+                    properties:
+                      tracks: { type: array, items: { $ref: '#/components/schemas/Track' } }
+        '404': { description: not found }
+  /library/tracks/{trackId}:
+    get:
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: track
+          content: { application/json: { schema: { $ref: '#/components/schemas/Track' } } }
+        '404': { description: not found }
+  /library/search:
+    get:
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+      responses:
+        '200':
+          description: matches
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  artists: { type: array, items: { $ref: '#/components/schemas/Artist' } }
+                  albums: { type: array, items: { $ref: '#/components/schemas/Album' } }
+                  tracks: { type: array, items: { $ref: '#/components/schemas/Track' } }
+  /stream/{trackId}:
+    get:
+      summary: Audio bytes. Supports HTTP Range for seeking. Opus is transcoded with ffmpeg and cached on disk.
+      parameters:
+        - { name: trackId, in: path, required: true, schema: { type: string } }
+        - { name: format, in: query, schema: { type: string, enum: [opus, flac], default: opus } }
+        - { name: bitrate, in: query, schema: { type: integer, default: 160, description: kbps, opus only } }
+      responses:
+        '200': { description: full body (audio/ogg for opus, audio/flac for flac); Content-Length set }
+        '206': { description: partial content }
+        '404': { description: not found }
+  /art/{albumId}:
+    get:
+      parameters:
+        - { name: albumId, in: path, required: true, schema: { type: string } }
+        - { name: size, in: query, schema: { type: integer, default: 512 } }
+      responses:
+        '200': { description: image/jpeg }
+        '404': { description: no art }
+  /favourites:
+    get:
+      responses:
+        '200':
+          description: starred tracks, most recently starred first
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Track' } }
+  /favourites/{trackId}:
+    put:
+      summary: Star. Idempotent. (The app may also send a `star` event; either path works.)
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      responses: { '204': { description: starred } }
+    delete:
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      responses: { '204': { description: unstarred } }
+  /mixes/today:
+    get:
+      summary: Mixes built by the last nightly run (may be empty before the first run).
+      responses:
+        '200':
+          description: mixes
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Mix' } }
+  /mixes/{mixId}:
+    get:
+      parameters: [ { name: mixId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: mix
+          content: { application/json: { schema: { $ref: '#/components/schemas/Mix' } } }
+        '404': { description: not found }
+  /mixes/more-like/{trackId}:
+    post:
+      summary: Build a fresh mix around a seed track, on demand.
+      parameters:
+        - { name: trackId, in: path, required: true, schema: { type: string } }
+        - { name: minutes, in: query, schema: { type: integer, default: 40, minimum: 10, maximum: 240 } }
+      responses:
+        '200':
+          description: new mix (kind=more_like)
+          content: { application/json: { schema: { $ref: '#/components/schemas/Mix' } } }
+  /tracks/{trackId}/why:
+    get:
+      summary: Human-readable reason a track was picked (latest mix it appears in, else a general taste explanation).
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: reason
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reason]
+                properties:
+                  reason: { type: string }
+                  similarTo: { type: array, items: { $ref: '#/components/schemas/Track' }, description: up to 3 tracks it sounds like }
+  /sync/manifest:
+    get:
+      summary: |
+        The full set of tracks the phone should hold offline right now (today's mixes + favourites).
+        The app downloads what it lacks and deletes downloaded tracks not in this list.
+      parameters:
+        - { name: favouritesFormat, in: query, schema: { type: string, enum: [opus, flac], default: opus } }
+      responses:
+        '200':
+          description: manifest
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncManifest' }
+  /events:
+    post:
+      summary: Batch upload of listening feedback. Idempotent by event id; duplicates are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events: { type: array, maxItems: 1000, items: { $ref: '#/components/schemas/Event' } }
+      responses:
+        '200':
+          description: accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, duplicates]
+                properties:
+                  accepted: { type: integer }
+                  duplicates: { type: integer }
+  /suggestions:
+    get:
+      summary: Current weekly album suggestions (status new first).
+      responses:
+        '200':
+          description: suggestions
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Suggestion' } }
+  /suggestions/{suggestionId}:
+    post:
+      parameters: [ { name: suggestionId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [want, not_interested, have] }
+      responses: { '204': { description: saved } }
+components:
+  securitySchemes:
+    device: { type: http, scheme: bearer }
+  schemas:
+    Artist:
+      type: object
+      required: [id, name, albumCount]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        albumCount: { type: integer }
+        mbid: { type: [string, 'null'] }
+    Album:
+      type: object
+      required: [id, title, artistId, artist, trackCount]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        artistId: { type: string }
+        artist: { type: string }
+        year: { type: [integer, 'null'] }
+        trackCount: { type: integer }
+        durationS: { type: number }
+        hasArt: { type: boolean }
+        mbid: { type: [string, 'null'] }
+    Track:
+      type: object
+      required: [id, title, artistId, artist, albumId, album, durationS, starred]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        artistId: { type: string }
+        artist: { type: string }
+        albumId: { type: string }
+        album: { type: string }
+        trackNo: { type: [integer, 'null'] }
+        discNo: { type: [integer, 'null'] }
+        year: { type: [integer, 'null'] }
+        genre: { type: [string, 'null'] }
+        durationS: { type: number }
+        flacBytes: { type: integer, description: size of the original file }
+        starred: { type: boolean }
+        rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
+    MixTrack:
+      type: object
+      required: [track, reason]
+      properties:
+        track: { $ref: '#/components/schemas/Track' }
+        reason: { type: string, description: short "why this song" line }
+    Mix:
+      type: object
+      required: [id, kind, title, createdAt, tracks]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [daily, morning, evening, deep_cuts, more_like] }
+        title: { type: string }
+        createdAt: { type: string, format: date-time }
+        durationS: { type: number }
+        tracks: { type: array, items: { $ref: '#/components/schemas/MixTrack' } }
+    SyncManifest:
+      type: object
+      required: [generatedAt, items]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        items:
+          type: array
+          items:
+            type: object
+            required: [trackId, format, why]
+            properties:
+              trackId: { type: string }
+              format: { type: string, enum: [opus, flac] }
+              why: { type: string, enum: [mix, favourite] }
+              mixIds: { type: array, items: { type: string } }
+    Event:
+      type: object
+      required: [id, type, trackId, at]
+      properties:
+        id: { type: string, description: client-generated UUID, used for idempotency }
+        type: { type: string, enum: [play, skip, star, unstar, rate, thumb_up, thumb_down] }
+        trackId: { type: string }
+        at: { type: string, format: date-time }
+        positionS: { type: [number, 'null'], description: playback position when the event happened (skip second) }
+        durationS: { type: [number, 'null'], description: track length }
+        source: { type: [string, 'null'], enum: [mix, library, favourites, more_like, search, null] }
+        mixId: { type: [string, 'null'] }
+        rating: { type: [integer, 'null'], minimum: 1, maximum: 5 }
+        offline: { type: boolean, default: false, description: true if recorded without a connection and uploaded later }
+    Suggestion:
+      type: object
+      required: [id, artist, album, reason, status]
+      properties:
+        id: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        year: { type: [integer, 'null'] }
+        artistMbid: { type: [string, 'null'] }
+        releaseGroupMbid: { type: [string, 'null'] }
+        coverUrl: { type: [string, 'null'] }
+        previewUrl: { type: [string, 'null'] }
+        buyLinks: { type: array, items: { type: object, properties: { name: { type: string }, url: { type: string } } } }
+        reason: { type: string }
+        status: { type: string, enum: [new, want, not_interested, have] }
+        createdAt: { type: string, format: date-time }
