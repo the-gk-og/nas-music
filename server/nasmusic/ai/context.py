@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 import math
 import re
-from itertools import pairwise
 from dataclasses import dataclass, field
 from datetime import datetime
+from itertools import pairwise
 from typing import Any
 
 # Switch keys in `user_settings` -> the context fields they cover (api/openapi.yaml, EventContext and
