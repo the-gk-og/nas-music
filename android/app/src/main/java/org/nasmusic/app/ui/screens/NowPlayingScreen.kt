@@ -237,7 +237,10 @@ private fun LyricsPanel(c: AppContainer, trackId: String, positionMs: Long, onCl
     LaunchedEffect(trackId, result) {
         if (result is LyricsResult.None && fileName == null) fileName = runCatching { c.api.trackInfo(trackId).fileName }.getOrNull()
     }
-    val lyrics = (result as? LyricsResult.Found)?.lyrics
+    // A source picked from the dropdown (?source=) is shown without replacing the cached default.
+    var picked by remember(trackId, reload) { mutableStateOf<org.nasmusic.app.data.api.Lyrics?>(null) }
+    val default = (result as? LyricsResult.Found)?.lyrics
+    val lyrics = picked ?: default
 
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -247,7 +250,18 @@ private fun LyricsPanel(c: AppContainer, trackId: String, positionMs: Long, onCl
                     Icon(Icons.Default.ArrowDropDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 DropdownMenu(sourceMenu, { sourceMenu = false }) {
-                    DropdownMenuItem({ Text("✓ " + (lyrics?.let { LrcFormat.sourceLabel(it.source) } ?: "Embedded lyrics")) }, { sourceMenu = false })
+                    val sources = (default?.sources.orEmpty() + listOfNotNull(default?.source)).distinct()
+                    if (sources.isEmpty()) DropdownMenuItem({ Text("Embedded lyrics") }, { sourceMenu = false })
+                    sources.forEach { src ->
+                        val mark = if (src == lyrics?.source) "✓ " else ""
+                        DropdownMenuItem({ Text(mark + LrcFormat.sourceLabel(src)) }, {
+                            sourceMenu = false
+                            if (src == default?.source) picked = null
+                            else scope.launch {
+                                picked = runCatching { c.api.lyrics(trackId, src).body() }.getOrNull() ?: run { ui.toast = "Couldn't load that version"; null }
+                            }
+                        })
+                    }
                     if (lyrics?.source == "user") {
                         DropdownMenuItem({ Text("Revert to the file's lyrics") }, {
                             sourceMenu = false
@@ -270,7 +284,7 @@ private fun LyricsPanel(c: AppContainer, trackId: String, positionMs: Long, onCl
             null -> Spacer(Modifier.weight(1f))
             is LyricsResult.Found -> Box(Modifier.weight(1f)) {
                 MaterialTheme(typography = MaterialTheme.typography.scaled(settings.lyricsScale)) {
-                    LyricsView(r.lyrics, positionMs, onSeek = c.player::seekTo)
+                    LyricsView(lyrics ?: r.lyrics, positionMs, onSeek = c.player::seekTo)
                 }
             }
             LyricsResult.None -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(8.dp)) {

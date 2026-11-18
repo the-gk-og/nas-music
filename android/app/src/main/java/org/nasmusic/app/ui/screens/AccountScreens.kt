@@ -114,7 +114,7 @@ fun AccountScreen(c: AppContainer) {
     }
 
     pair?.let { p ->
-        val bmp = remember(p) { runCatching { BarcodeEncoder().encodeBitmap(p.qrPayload, BarcodeFormat.QR_CODE, 720, 720) }.getOrNull() }
+        val bmp = remember(p) { runCatching { BarcodeEncoder().encodeBitmap(p.qrText, BarcodeFormat.QR_CODE, 720, 720) }.getOrNull() }
         AlertDialog(
             onDismissRequest = { pair = null },
             title = { Text("Scan on the other phone") },
@@ -322,7 +322,7 @@ fun DataSettingsScreen(c: AppContainer) {
                     ContextSignal.entries.forEach { s ->
                         TextButton(onClick = { deleteConfirm = null; scope.launch { del(c, s.key) { ui.toast = it } } }) { Text("Only ${s.title}") }
                     }
-                    TextButton(onClick = { deleteConfirm = "all" }) { Text("Everything, including listening history", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { deleteConfirm = "all" }) { Text("All context + listening history (favourites, playlists and queues are kept)", color = MaterialTheme.colorScheme.error) }
                 }
             },
             confirmButton = {
@@ -346,7 +346,7 @@ fun DataSettingsScreen(c: AppContainer) {
 }
 
 private suspend fun del(c: AppContainer, signal: String, toast: (String) -> Unit) {
-    val ok = runCatching { c.api.deleteMyData(signal).isSuccessful }.getOrDefault(false)
+    val ok = runCatching { c.api.deleteMyData(signal, confirm = if (signal == "all") true else null).isSuccessful }.getOrDefault(false)
     toast(if (ok) "Deleted" else "Couldn't delete (needs the server)")
 }
 

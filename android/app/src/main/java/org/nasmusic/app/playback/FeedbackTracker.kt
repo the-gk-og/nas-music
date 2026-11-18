@@ -29,7 +29,7 @@ class FeedbackTracker(
 
     // Listening details for the current track
     private val seeks = mutableListOf<Pair<Long, Long>>()
-    private val volumes = mutableListOf<Float>()
+    private val volumes = mutableListOf<Pair<Long, Float>>()
     private var previousTrackId: String? = null
     private var sessionId: String = UUID.randomUUID().toString()
     private var sessionPosition = 0
@@ -80,8 +80,11 @@ class FeedbackTracker(
         }
     }
 
-    override fun onVolumeChanged(volume: Float) { volumes += volume }
-    override fun onDeviceVolumeChanged(volume: Int, muted: Boolean) { volumes += if (muted) 0f else volume.toFloat() }
+    override fun onVolumeChanged(volume: Float) { volumes += player.currentPosition to volume }
+    override fun onDeviceVolumeChanged(volume: Int, muted: Boolean) {
+        val max = player.deviceInfo.maxVolume.takeIf { it > 0 } ?: 15
+        volumes += player.currentPosition to if (muted) 0f else volume.toFloat() / max
+    }
 
     override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
         val leaving = old.mediaItem ?: return

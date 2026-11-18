@@ -61,7 +61,10 @@ data class MyDevice(
 )
 
 @Serializable
-data class PairCode(val pairCode: String, val qrPayload: String)
+data class PairCode(val pairCode: String, val expiresAt: String? = null, val qrPayload: JsonElement) {
+    /** Compact JSON for the QR (the contract sends the docs/pairing.md object; tolerate a string too). */
+    val qrText: String get() = (qrPayload as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content ?: qrPayload.toString()
+}
 
 @Serializable
 data class FolderEntry(val name: String, val path: String, val trackCount: Int = 0)
@@ -172,8 +175,9 @@ data class AdminUserPatch(val disabled: Boolean? = null, val isAdmin: Boolean? =
 @Serializable
 data class NewPassword(val new: String)
 
-/** GET/PUT /me/settings: free-form key → value map (context switches live here, prefixed "context."). */
-typealias UserSettings = Map<String, JsonElement>
+/** GET/PUT /me/settings: `{settings: {key: value}}`; PUT merges (null deletes). Context switches are `context.<signal>`. */
+@Serializable
+data class UserSettings(val settings: Map<String, JsonElement> = emptyMap())
 
 /** GET /me/data: shown to the user as-is. */
 typealias MyData = JsonObject

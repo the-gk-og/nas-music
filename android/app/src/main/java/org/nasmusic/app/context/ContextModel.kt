@@ -44,7 +44,8 @@ enum class ContextSignal(val key: String, val title: String, val explanation: St
 /** Player-derived details for one track play (the "Listening details" signal). */
 data class ListeningDetails(
     val seeks: List<Pair<Long, Long>> = emptyList(),
-    val volumeChanges: List<Float> = emptyList(),
+    /** (position in the track ms, new volume 0..1) */
+    val volumeChanges: List<Pair<Long, Float>> = emptyList(),
     val repeatOfPrevious: Boolean = false,
     val addedFrom: String? = null,
     val sessionId: String? = null,
@@ -75,7 +76,7 @@ object ContextBuilder {
         val o = buildJsonObject {
             if (ContextSignal.LISTENING in enabled) i.listening?.let { l ->
                 put("seeks", buildJsonArray { l.seeks.forEach { (from, to) -> add(buildJsonObject { put("fromMs", from); put("toMs", to) }) } })
-                put("volumeChanges", buildJsonArray { l.volumeChanges.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } })
+                put("volumeChanges", buildJsonArray { l.volumeChanges.forEach { (at, v) -> add(buildJsonObject { put("atMs", at); put("volume", v) }) } })
                 put("repeatOfPrevious", l.repeatOfPrevious)
                 l.addedFrom?.let { put("addedFrom", it) }
                 l.sessionId?.let { put("sessionId", it) }

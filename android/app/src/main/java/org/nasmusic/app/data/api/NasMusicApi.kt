@@ -64,7 +64,7 @@ interface NasMusicApi {
 
     /** 404 = unknown track or no lyrics; returned as a Response so callers can tell it from a network error. */
     @GET("tracks/{id}/lyrics")
-    suspend fun lyrics(@Path("id") trackId: String): Response<Lyrics>
+    suspend fun lyrics(@Path("id") trackId: String, @Query("source") source: String? = null): Response<Lyrics>
 
     @GET("sync/manifest")
     suspend fun manifest(@Query("favouritesFormat") favouritesFormat: String): SyncManifest
@@ -114,8 +114,9 @@ interface NasMusicApi {
     @GET("me/data")
     suspend fun myData(): MyData
 
+    /** signal=all also erases listening history and needs confirm=true. */
     @DELETE("me/data")
-    suspend fun deleteMyData(@Query("signal") signal: String): Response<Unit>
+    suspend fun deleteMyData(@Query("signal") signal: String, @Query("confirm") confirm: Boolean? = null): Response<Unit>
 
     @GET("library/folders")
     suspend fun folders(@Query("path") path: String = ""): FolderListing
@@ -124,7 +125,7 @@ interface NasMusicApi {
     suspend fun genres(): List<Genre>
 
     @GET("library/genres/{genre}/tracks")
-    suspend fun genreTracks(@Path("genre") genre: String): List<Track>
+    suspend fun genreTracks(@Path("genre") genre: String, @Query("limit") limit: Int = 1000): List<Track>
 
     @GET("library/tracks")
     suspend fun allTracks(

@@ -108,6 +108,8 @@ data class Lyrics(
     val text: String = "",
     /** v2: the server accepts PUT /tracks/{id}/lyrics overrides (source becomes "user"). */
     val canEdit: Boolean = false,
+    /** v2: every source that has lyrics for this track (source dropdown); pick one with ?source=. */
+    val sources: List<String> = emptyList(),
 )
 
 @Serializable

@@ -69,13 +69,13 @@ class ContextCollector(private val context: Context, private val scope: Coroutin
         _enabled.value = load()
         applySensors()
         if (api != null) scope.launch {
-            runCatching { api.putMySettings(changes.entries.associate { (s, on) -> s.settingsKey to JsonPrimitive(on) }) }
+            runCatching { api.putMySettings(org.nasmusic.app.data.api.UserSettings(changes.entries.associate { (s, on) -> s.settingsKey to JsonPrimitive(on) })) }
         }
     }
 
     /** Pull switches set on another of the user's devices. */
     suspend fun syncFrom(api: NasMusicApi) {
-        val remote = runCatching { api.mySettings() }.getOrNull() ?: return
+        val remote = runCatching { api.mySettings().settings }.getOrNull() ?: return
         val e = prefs.edit()
         ContextSignal.entries.forEach { s ->
             (remote[s.settingsKey] as? JsonPrimitive)?.content?.toBooleanStrictOrNull()?.let { e.putBoolean(s.settingsKey, it) }
