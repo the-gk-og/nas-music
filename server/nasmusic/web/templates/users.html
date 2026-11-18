@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<h1>Users</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+<section class="card">
+  <h2>Invite someone</h2>
+  {% if new_invite %}
+  {% for i in invites if i.code == new_invite %}
+  <p class="ok">Invite created. Send this link (it works once, until {{ i.expires_at|localtime(tz, '%Y-%m-%d') }}):</p>
+  <p class="mono">{{ i.url }}</p>
+  {% endfor %}
+  {% endif %}
+  <form method="post" action="/admin/invites" class="actions">
+    <input type="text" name="note" placeholder="Note (who it's for)" maxlength="200" style="flex:2;min-width:12rem;margin:0">
+    <input type="number" name="days" value="7" min="1" max="90" style="width:6rem;margin:0" aria-label="Valid for days">
+    <button type="submit">Create invite</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Accounts</h2>
+  <div class="scroll"><table>
+    <tr><th>User</th><th>Joined</th><th>Last login</th><th>Devices</th><th></th></tr>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.username }}{% if u.isAdmin %} <span class="pill">admin</span>{% endif %}{% if u.disabled %} <span class="pill bad">disabled</span>{% endif %}{% if u.id == me.user_id %} <span class="pill">you</span>{% endif %}</td>
+      <td class="muted">{{ u.createdAt|localtime(tz, '%Y-%m-%d') }}</td>
+      <td class="muted">{{ u.lastLogin|localtime(tz) or "never" }}</td>
+      <td>{{ u.deviceCount }}</td>
+      <td>
+        <div class="actions">
+        <form class="inline" method="post" action="/admin/users/{{ u.id }}">
+          <input type="hidden" name="action" value="{{ 'enable' if u.disabled else 'disable' }}">
+          <button class="{{ 'secondary' if u.disabled else 'danger' }}">{{ "Enable" if u.disabled else "Disable" }}</button></form>
+        <form class="inline" method="post" action="/admin/users/{{ u.id }}">
+          <input type="hidden" name="action" value="{{ 'remove_admin' if u.isAdmin else 'make_admin' }}">
+          <button class="secondary">{{ "Remove admin" if u.isAdmin else "Make admin" }}</button></form>
+        </div>
+        <details><summary class="muted">Reset password</summary>
+          <form method="post" action="/admin/users/{{ u.id }}">
+            <input type="hidden" name="action" value="reset_password">
+            <input type="password" name="password" minlength="8" required autocomplete="new-password" placeholder="New password (8+ characters)">
+            <button class="secondary">Set password and sign out everywhere</button>
+          </form>
+        </details>
+      </td>
+    </tr>
+    {% endfor %}
+  </table></div>
+</section>
+
+<section class="card">
+  <h2>Invites</h2>
+  {% if invites %}
+  <div class="scroll"><table>
+    <tr><th>Code</th><th>Note</th><th>Status</th><th></th></tr>
+    {% for i in invites %}
+    <tr>
+      <td class="mono">{{ i.code }}</td>
+      <td>{{ i.note or "" }}<br><span class="muted">by {{ i.created_by }}, {{ i.created_at|localtime(tz, '%Y-%m-%d') }}</span></td>
+      <td>{% if i.used_by %}used by {{ i.used_by }}{% elif i.expired %}<span class="muted">expired</span>{% else %}open until {{ i.expires_at|localtime(tz, '%Y-%m-%d') }}{% endif %}</td>
+      <td>{% if not i.used_by %}<form class="inline" method="post" action="/admin/invites/{{ i.code }}/delete"><button class="danger">Delete</button></form>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">No invites yet.</p>{% endif %}
+</section>
+{% endblock %}

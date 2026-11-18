@@ -11,7 +11,8 @@
     <div class="stat"><b>{{ stats.artists }}</b><span>artists</span></div>
     <div class="stat"><b>{{ stats.hours }}</b><span>hours</span></div>
     <div class="stat"><b>{{ stats.gb }}</b><span>GB</span></div>
-    <div class="stat"><b>{{ stats.starred }}</b><span>favourites</span></div>
+    <div class="stat"><b>{{ stats.users }}</b><span>users</span></div>
+    <div class="stat"><b>{{ stats.starred }}</b><span>your favourites</span></div>
   </div>
   {% if stats.missing %}<p class="warn">{{ stats.missing }} file(s) missing since they were last seen.</p>{% endif %}
   <p class="muted">Opus cache: {{ cache_gb }} / {{ cache_limit }} GB</p>
@@ -43,10 +44,11 @@
   <h2>Devices</h2>
   {% if devices %}
   <div class="scroll"><table>
-    <tr><th>Name</th><th>Paired</th><th>Last seen</th><th></th></tr>
+    <tr><th>Name</th><th>User</th><th>Paired</th><th>Last seen</th><th></th></tr>
     {% for d in devices %}
     <tr>
-      <td>{{ d.name }}</td>
+      <td>{{ d.name }} <span class="pill">{{ d.kind }}</span>{% if d.id in online %} <span class="pill ok">online</span>{% endif %}</td>
+      <td>{{ d.username }}</td>
       <td class="muted">{{ d.created_at|localtime(tz, '%Y-%m-%d') }}</td>
       <td class="muted">{{ d.last_seen|localtime(tz) or "never" }}</td>
       <td>{% if d.revoked %}<span class="muted">revoked</span>{% else %}

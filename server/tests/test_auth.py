@@ -7,6 +7,10 @@ from nasmusic import auth
 from nasmusic.auth import tls
 
 
+def _admin_id(conn):
+    return conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()[0]
+
+
 def test_health_is_public(anon):
     r = anon.get("/api/v1/health")
     assert r.status_code == 200
@@ -24,7 +28,7 @@ def test_endpoints_need_token(anon, path):
 
 
 def test_pair_flow_single_use(anon, conn):
-    code, _ = auth.create_pair_code(conn)
+    code, _ = auth.create_pair_code(conn, _admin_id(conn))
     r = anon.post("/api/v1/pair", json={"pairCode": code.lower(), "deviceName": "Pixel"})
     assert r.status_code == 200
     token = r.json()["deviceToken"]
@@ -43,7 +47,7 @@ def test_pair_flow_single_use(anon, conn):
 
 
 def test_pair_code_expires(anon, conn):
-    code, expires = auth.create_pair_code(conn, now=datetime.now(UTC) - timedelta(minutes=11))
+    code, expires = auth.create_pair_code(conn, _admin_id(conn), now=datetime.now(UTC) - timedelta(minutes=11))
     assert anon.post("/api/v1/pair", json={"pairCode": code, "deviceName": "x"}).status_code == 403
 
 

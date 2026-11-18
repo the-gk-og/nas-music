@@ -83,21 +83,24 @@ def test_incremental_and_missing(cfg, conn, base_flac):
 
     # A starred track that vanishes is kept (with its star) but marked missing and hidden.
     tid = scanner.track_id("The Band/Second/02 Closing.flac")
-    conn.execute("UPDATE tracks SET starred_at = '2026-01-01T00:00:00Z' WHERE id = ?", (tid,))
+    uid = conn.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()[0]
+    conn.execute("INSERT INTO user_tracks (user_id, track_id, starred_at) VALUES (?, ?, '2026-01-01T00:00:00Z')",
+                 (uid, tid))
     moved = cfg.library_root.parent / "closing.bak"
     shutil.move(cfg.library_root / "The Band/Second/02 Closing.flac", moved)
     res = scanner.scan(cfg, conn)
     assert res.missing == 1
-    row = conn.execute("SELECT missing, starred_at FROM tracks WHERE id = ?", (tid,)).fetchone()
+    row = conn.execute("SELECT t.missing, ut.starred_at FROM tracks t JOIN user_tracks ut ON ut.track_id = t.id "
+                       "WHERE t.id = ?", (tid,)).fetchone()
     assert row["missing"] == 1 and row["starred_at"]
-    assert queries.track(conn, tid) is None
-    assert queries.favourites(conn) == []
+    assert queries.track(conn, uid, tid) is None
+    assert queries.favourites(conn, uid) == []
 
     # It comes back.
     shutil.move(moved, cfg.library_root / "The Band/Second/02 Closing.flac")
     res = scanner.scan(cfg, conn)
     assert res.restored == 1 and res.missing == 0
-    assert queries.track(conn, tid)["starred"] is True
+    assert queries.track(conn, uid, tid)["starred"] is True
 
 
 def test_whole_album_removed_hides_album_and_artist(cfg, conn):

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Join{% endblock %}
+{% block header %}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:380px;margin:12vh auto 0">
+  <h1>♫ {{ server_name }}</h1>
+  {% if done %}
+  <p class="ok">Welcome, {{ done }}! Your account is ready.</p>
+  <p>Open the nas-music app (Android or desktop), enter this server's address and log in.</p>
+  {% else %}
+  <p>You've been invited. Choose a username and password.</p>
+  <form method="post" action="/join/{{ code }}">
+    <label for="un">Username</label>
+    <input id="un" type="text" name="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.\-]+"
+           autocomplete="username" autocapitalize="none" spellcheck="false">
+    <label for="pw">Password (8+ characters)</label>
+    <input id="pw" type="password" name="password" required minlength="8" autocomplete="new-password">
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <button type="submit">Create account</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
