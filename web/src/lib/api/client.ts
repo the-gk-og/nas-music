@@ -120,7 +120,7 @@ export class ApiClient {
     });
     if (res.status === 401) this.onUnauthorized?.();
     if (!res.ok) {
-      let detail = '';
+      let detail: string;
       try {
         const j = await res.json();
         detail = typeof j?.detail === 'string' ? j.detail : JSON.stringify(j?.detail ?? j);

@@ -6,7 +6,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 // `npm run dev` proxies /api to a real server: NM_SERVER=https://192.168.68.2:8443 npm run dev
 export default defineConfig(({ mode }) => ({
   plugins: [svelte()],
-  base: './',
+  base: '/',
   define: {
     __MOCK_DEFAULT__: JSON.stringify(mode === 'mock'),
   },
