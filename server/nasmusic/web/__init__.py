@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import sqlite3
 import threading
 import time
@@ -148,8 +149,17 @@ def logout():
 def _analysis_progress(conn: sqlite3.Connection, configured: str) -> dict:
     """Progress for the model version the AI is actually writing: the version of the most recently
     analysed features row (e.g. 'basic-1' when Essentia is unavailable), else the configured one."""
-    row = conn.execute("SELECT model_version FROM features ORDER BY analysed_at DESC LIMIT 1").fetchone()
-    mv = row[0] if row else configured
+    status: dict = {}
+    srow = conn.execute("SELECT value FROM settings WHERE key = 'ai.status.model_version'").fetchone()
+    if srow:
+        try:
+            status = json.loads(srow[0]) or {}
+        except (ValueError, TypeError):
+            status = {}
+    mv = status.get("analysing")
+    if not mv:
+        row = conn.execute("SELECT model_version FROM features ORDER BY analysed_at DESC LIMIT 1").fetchone()
+        mv = row[0] if row else configured
     counts = {r["status"]: r["n"] for r in conn.execute(
         "SELECT j.status, COUNT(*) AS n FROM analysis_jobs j JOIN tracks t ON t.id = j.track_id "
         "WHERE j.model_version = ? AND t.missing = 0 GROUP BY j.status", (mv,))}
@@ -161,6 +171,7 @@ def _analysis_progress(conn: sqlite3.Connection, configured: str) -> dict:
         "model": mv, "configured": configured, "analysed": analysed, "total": total, "failed": counts.get("failed", 0),
         "pending": counts.get("pending", 0),
         "pct": round(100 * analysed / total, 1) if total else 0.0,
+        "fallback_reason": status.get("fallback_reason"),
     }
 
 

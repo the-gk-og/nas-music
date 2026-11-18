@@ -24,7 +24,7 @@
     {% if analysis.failed %} · <span class="bad">{{ analysis.failed }} failed</span>{% endif %}
     {% if analysis.pending %} · {{ analysis.pending }} queued{% endif %}</p>
   <p class="muted">Model: {{ analysis.model }}{% if analysis.model != analysis.configured %}
-    <span class="warn">(fallback; configured: {{ analysis.configured }})</span>{% endif %}</p>
+    <span class="warn">(fallback; configured: {{ analysis.configured }}{% if analysis.fallback_reason %} — {{ analysis.fallback_reason }}{% endif %})</span>{% endif %}</p>
 </section>
 
 <section class="card">

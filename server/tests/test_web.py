@@ -152,3 +152,18 @@ def test_scheduler_jobs_registered(cfg):
         assert "day_of_week='sun'" in str(ids["discovery"].trigger)
     finally:
         jobs.shutdown()
+
+
+def test_progress_prefers_ai_status_key(conn):
+    import json
+
+    from nasmusic.web import _analysis_progress
+
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('ai.status.model_version', ?)",
+        (json.dumps({"requested": "effnet-discogs-1", "analysing": "basic-1",
+                     "fallback_reason": "Essentia is not importable"}),),
+    )
+    p = _analysis_progress(conn, "effnet-discogs-1")
+    assert p["model"] == "basic-1"
+    assert p["fallback_reason"] == "Essentia is not importable"
