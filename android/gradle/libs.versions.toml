@@ -5,7 +5,7 @@
 #   Coil 3 - Apache-2.0
 #   zxing-android-embedded (and ZXing core) - Apache-2.0
 #   Tink (pulls protobuf-javalite, BSD-3-Clause) - Apache-2.0
-#   JUnit 4 - EPL-1.0 (test only)
+#   JUnit 4 - EPL-1.0, Robolectric - MIT, androidx.test - Apache-2.0 (test only)
 [versions]
 agp = "8.13.2"
 kotlin = "2.2.21"
@@ -27,6 +27,8 @@ coil = "3.3.0"
 zxingEmbedded = "4.3.0"
 tink = "1.18.0"
 junit = "4.13.2"
+robolectric = "4.16"
+androidxTestCore = "1.6.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -63,6 +65,8 @@ coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version
 zxing-android-embedded = { module = "com.journeyapps:zxing-android-embedded", version.ref = "zxingEmbedded" }
 tink-android = { module = "com.google.crypto.tink:tink-android", version.ref = "tink" }
 junit = { module = "junit:junit", version.ref = "junit" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTestCore" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

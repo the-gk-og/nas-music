@@ -61,6 +61,10 @@ interface NasMusicApi {
     @GET("tracks/{id}/why")
     suspend fun why(@Path("id") trackId: String): WhyResponse
 
+    /** 404 = unknown track or no lyrics; returned as a Response so callers can tell it from a network error. */
+    @GET("tracks/{id}/lyrics")
+    suspend fun lyrics(@Path("id") trackId: String): Response<Lyrics>
+
     @GET("sync/manifest")
     suspend fun manifest(@Query("favouritesFormat") favouritesFormat: String): SyncManifest
 

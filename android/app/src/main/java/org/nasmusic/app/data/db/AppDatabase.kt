@@ -1,19 +1,22 @@
 package org.nasmusic.app.data.db
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [EventEntity::class, DownloadEntity::class, CacheEntity::class],
-    version = 1,
+    entities = [EventEntity::class, DownloadEntity::class, CacheEntity::class, LyricsEntity::class],
+    version = 2,
     exportSchema = true,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun events(): EventDao
     abstract fun downloads(): DownloadDao
     abstract fun cache(): CacheDao
+    abstract fun lyrics(): LyricsDao
 
     companion object {
         fun build(context: Context): AppDatabase =
