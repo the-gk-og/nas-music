@@ -8,25 +8,27 @@
   import { ui } from './lib/ui.svelte';
   import { desktopInit } from './lib/desktop';
   import ConnectScreen from './screens/ConnectScreen.svelte';
+  import Home from './screens/Home.svelte';
+  import ForYou from './screens/ForYou.svelte';
+  import Search from './screens/Search.svelte';
+  import Library from './screens/Library.svelte';
   import Queues from './screens/Queues.svelte';
   import NowPlaying from './screens/NowPlaying.svelte';
   import Folders from './screens/Folders.svelte';
-  import Albums from './screens/Albums.svelte';
   import AlbumDetail from './screens/AlbumDetail.svelte';
-  import Artists from './screens/Artists.svelte';
   import ArtistDetail from './screens/ArtistDetail.svelte';
-  import Genres from './screens/Genres.svelte';
   import TrackListPage from './screens/TrackListPage.svelte';
-  import Playlists from './screens/Playlists.svelte';
   import PlaylistDetail from './screens/PlaylistDetail.svelte';
-  import Search from './screens/Search.svelte';
-  import More from './screens/More.svelte';
+  import ToGet from './screens/ToGet.svelte';
   import Settings from './screens/Settings.svelte';
   import Equalizer from './screens/Equalizer.svelte';
-  import Mixes from './screens/Mixes.svelte';
-  import Discover from './screens/Discover.svelte';
   import Account from './screens/Account.svelte';
   import Admin from './screens/Admin.svelte';
+  import PlayerBar from './components/PlayerBar.svelte';
+  import RightPanel from './components/RightPanel.svelte';
+  import { appearance } from './lib/appearance.svelte';
+  import { library } from './lib/library.svelte';
+  import { tabletSidePane } from './lib/v3';
 
   /** `/join/<code>` (served by the server) or `#/join/<code>` registers with an invite. */
   function inviteFromUrl(): string {
@@ -44,16 +46,29 @@
     signedIn = invite ? false : await session.refresh();
     ready = true;
     if (signedIn) {
-      if (ui.route.name === 'join') ui.go('now');
-      void player.init();
+      if (ui.route.name === 'join') ui.go('home');
+      afterSignIn();
     }
+  }
+
+  function afterSignIn() {
+    void player.init();
+    void appearance.load();
+    void library.refreshPlaylists();
+    void library.refreshPins();
   }
 
   function onSignedIn() {
     signedIn = true;
-    if (ui.route.name === 'join' || !location.hash) ui.go('now');
-    void player.init();
+    if (ui.route.name === 'join' || !location.hash) ui.go('home');
+    afterSignIn();
   }
+
+  const form = $derived(appearance.form);
+  const name = $derived(ui.route.name === 'queues' ? 'queue' : ui.route.name);
+  /** Tablet landscape: Now Playing (or the Queue, when Now Playing is the page) as a side pane. */
+  const sidePane = $derived(form === 'tablet' && tabletSidePane(appearance.width, appearance.height));
+  const fullNow = $derived(name === 'now');
 
   // Session expired elsewhere (401) → back to the Connect screen.
   $effect(() => {
@@ -68,6 +83,11 @@
     if (!signedIn) return;
     const el = e.target as HTMLElement;
     if (el.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      ui.focusSearch();
+      return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === ' ' || e.code === 'Space' || e.key === 'MediaPlayPause') {
       e.preventDefault();
@@ -81,14 +101,20 @@
       if (e.shiftKey) void player.prev();
       else player.seekBy(-5);
     } else if (e.key === 'l' || e.key === 'L') {
-      ui.go('now');
-      ui.lyricsOpen = !ui.lyricsOpen;
+      if (form === 'desktop') ui.togglePanel('lyrics');
+      else {
+        ui.go('now');
+        ui.lyricsOpen = !ui.lyricsOpen;
+      }
+    } else if (e.key === 'q' || e.key === 'Q') {
+      if (form === 'desktop') ui.togglePanel('queue');
+      else ui.go('queue');
     } else if (e.key === 'm' || e.key === 'M') player.toggleMute();
     else if (e.key === 's' || e.key === 'S') player.toggleShuffle();
     else if (e.key === 'r' || e.key === 'R') player.cycleRepeat();
     else if (e.key === '/') {
       e.preventDefault();
-      ui.go('search');
+      ui.focusSearch();
     } else if (e.key === 'Escape' && ui.dialog) ui.close();
   }
 
@@ -105,37 +131,44 @@
 {:else if !signedIn}
   <ConnectScreen inviteCode={invite} ondone={onSignedIn} />
 {:else}
-  <div class="shell">
-    <Nav />
+  {#snippet page(n: string, p: string)}
+    {#if n === 'home'}<Home />
+    {:else if n === 'foryou'}<ForYou />
+    {:else if n === 'search'}<Search />
+    {:else if n === 'library'}<Library />
+    {:else if n === 'queue'}<Queues />
+    {:else if n === 'now'}<NowPlaying />
+    {:else if n === 'folders'}<Folders path={p} />
+    {:else if n === 'album'}<AlbumDetail id={p} />
+    {:else if n === 'artist'}<ArtistDetail id={p} />
+    {:else if n === 'genre'}<TrackListPage kind="genre" param={p} />
+    {:else if n === 'list'}<TrackListPage kind="list" param={p} />
+    {:else if n === 'mix'}<TrackListPage kind="mix" param={p} />
+    {:else if n === 'playlist'}<PlaylistDetail id={p} />
+    {:else if n === 'toget'}<ToGet />
+    {:else if n === 'settings'}<Settings />
+    {:else if n === 'equalizer'}<Equalizer />
+    {:else if n === 'account'}<Account />
+    {:else if n === 'admin'}<Admin />
+    {:else}<Home />
+    {/if}
+  {/snippet}
+
+  <div class="shell {form}" class:fullnow={fullNow}>
+    {#if !(fullNow && form === 'phone')}<Nav />{/if}
     <main>
       <div class="content">
-        {#key ui.route.name + '|' + ui.route.param}
-          {#if ui.route.name === 'queues'}<Queues />
-          {:else if ui.route.name === 'now'}<NowPlaying />
-          {:else if ui.route.name === 'folders'}<Folders path={ui.route.param} />
-          {:else if ui.route.name === 'albums'}<Albums />
-          {:else if ui.route.name === 'album'}<AlbumDetail id={ui.route.param} />
-          {:else if ui.route.name === 'artists'}<Artists />
-          {:else if ui.route.name === 'artist'}<ArtistDetail id={ui.route.param} />
-          {:else if ui.route.name === 'genres'}<Genres />
-          {:else if ui.route.name === 'genre'}<TrackListPage kind="genre" param={ui.route.param} />
-          {:else if ui.route.name === 'list'}<TrackListPage kind="list" param={ui.route.param} />
-          {:else if ui.route.name === 'mix'}<TrackListPage kind="mix" param={ui.route.param} />
-          {:else if ui.route.name === 'playlists'}<Playlists />
-          {:else if ui.route.name === 'playlist'}<PlaylistDetail id={ui.route.param} />
-          {:else if ui.route.name === 'search'}<Search />
-          {:else if ui.route.name === 'settings'}<Settings />
-          {:else if ui.route.name === 'equalizer'}<Equalizer />
-          {:else if ui.route.name === 'mixes'}<Mixes />
-          {:else if ui.route.name === 'discover'}<Discover />
-          {:else if ui.route.name === 'account'}<Account />
-          {:else if ui.route.name === 'admin'}<Admin />
-          {:else}<More />
-          {/if}
+        {#key name + '|' + ui.route.param}
+          <div class="view">{@render page(name, ui.route.param)}</div>
         {/key}
       </div>
-      {#if ui.route.name !== 'now'}<MiniPlayer />{/if}
+      {#if form !== 'desktop' && !fullNow}<MiniPlayer />{/if}
     </main>
+    {#if form === 'desktop' && ui.panel && !fullNow}<RightPanel />{/if}
+    {#if sidePane}
+      <aside class="side">{#if fullNow}<Queues compact />{:else}<NowPlaying />{/if}</aside>
+    {/if}
+    {#if form === 'desktop'}<div class="playerbar"><PlayerBar /></div>{/if}
   </div>
   <Dialogs />
 {/if}
@@ -165,12 +198,53 @@
   }
   .shell {
     height: 100%;
+    display: grid;
+    background: var(--bg);
+  }
+  /* phone: content, mini player, bottom tabs */
+  .shell.phone {
+    grid-template-rows: 1fr auto;
+    grid-template-areas: 'main' 'nav';
+  }
+  .shell.phone :global(.nav) {
+    grid-area: nav;
+  }
+  .shell.phone main {
+    grid-area: main;
+  }
+  /* tablet: rail | content | optional side pane */
+  .shell.tablet {
+    grid-template-columns: auto 1fr auto;
+  }
+  .side {
+    width: min(420px, 40vw);
+    border-left: 1px solid var(--line);
+    min-height: 0;
+    overflow: hidden;
     display: flex;
-    flex-direction: column-reverse;
+    flex-direction: column;
+  }
+  .side > :global(*) {
+    flex: 1;
+  }
+  /* desktop: sidebar | main | right panel, player bar along the bottom */
+  .shell.desktop {
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: 1fr auto;
+  }
+  .playerbar {
+    grid-column: 1 / -1;
+  }
+  .shell.desktop.fullnow main {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .shell.desktop.fullnow :global(.nav) {
+    display: none;
   }
   main {
-    flex: 1;
     min-height: 0;
+    min-width: 0;
     display: flex;
     flex-direction: column;
   }
@@ -179,15 +253,33 @@
     min-height: 0;
     position: relative;
   }
-  @media (min-width: 900px) {
-    .shell {
-      flex-direction: row;
+  .view {
+    height: 100%;
+  }
+  .view > :global(*) {
+    height: 100%;
+  }
+  :global([data-motion='quick']) .view {
+    animation: fadein 0.15s ease-out;
+  }
+  :global([data-motion='expressive']) .view {
+    animation: risein 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @keyframes fadein {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes risein {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
     }
   }
   .toasts {
     position: fixed;
     left: 50%;
-    bottom: calc(var(--tabbar-h) + var(--mini-h) + 16px);
+    bottom: calc(var(--tabbar-h) + var(--mini-h) + 24px);
     transform: translateX(-50%);
     display: grid;
     gap: 8px;

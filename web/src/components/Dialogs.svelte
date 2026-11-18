@@ -5,14 +5,21 @@
     Disc3,
     Gauge,
     Info,
-    Laptop,
     ListEnd,
     ListPlus,
     ListStart,
-    Monitor,
+    LogOut,
+    Pause,
+    Pin,
+    PinOff,
+    Play,
     Plus,
+    Radio,
+    Settings as SettingsIcon,
+    Shield,
+    SlidersVertical,
+    UserRound,
     Share2,
-    Smartphone,
     Sparkles,
     Speaker,
     User,
@@ -27,6 +34,12 @@
   import { queueLabel } from '../lib/queue';
   import Cover from './Cover.svelte';
   import Sheet from './Sheet.svelte';
+  import Art from './Art.svelte';
+  import Avatar from './Avatar.svelte';
+  import DevicesList from './DevicesList.svelte';
+  import { canPin, openItem, playItem, radioFor } from '../lib/items';
+  import { library } from '../lib/library.svelte';
+  import { samples } from '../lib/samples.svelte';
 
   const d = $derived(ui.dialog);
 
@@ -132,7 +145,23 @@
     editorLine = Math.min(editorLine + 1, raw.split('\n').length - 1);
   }
 
-  const kindIcon = (k: string) => (k === 'android' || k === 'watch' ? Smartphone : k === 'desktop' ? Laptop : k === 'web' ? Monitor : Speaker);
+  async function logout() {
+    if (!(await ui.confirm('Sign out', 'Sign out of this device?', 'Sign out'))) return;
+    player.reset();
+    await session.logout();
+    location.hash = '';
+    location.reload();
+  }
+
+  async function addToGet(c: import('../lib/types').CatalogItem) {
+    try {
+      await session.api.addToGet({ catalogId: c.id, type: c.type === 'track' ? 'track' : 'album', title: c.title, artist: c.artist, year: c.year });
+      ui.toast(`Added "${c.title}" to To get`);
+      ui.close();
+    } catch (e) {
+      ui.toast((e as Error).message);
+    }
+  }
   const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 </script>
 
@@ -157,6 +186,7 @@
       <hr />
       <button onclick={() => goto('album', t.albumId)}><Disc3 />Go to album</button>
       <button onclick={() => goto('artist', t.artistId)}><User />Go to artist</button>
+      <button onclick={() => { ui.close(); void player.startRadio({ type: 'track', id: t.id }, `${t.title} radio`); }}><Radio />Start radio</button>
       <button onclick={() => moreLike(t.id)}><Sparkles />More like this</button>
       <button onclick={() => ui.open({ kind: 'songInfo', trackId: t.id })}><Info />Song info</button>
       <button onclick={() => share(t.id)}><Share2 />Share</button>
@@ -258,24 +288,65 @@
   <Sheet label="Devices">
     <div class="pad">
       <h2><Speaker size={24} /> Devices</h2>
-      {#if player.connectStatus !== 'open'}
-        <p class="muted small">{player.connectStatus === 'reconnecting' ? 'Connecting to the server… (live device control needs a v2 server)' : 'Not connected'}</p>
-      {/if}
-      {#each player.devices.filter((x) => x.online || x.isActive) as dev (dev.id)}
-        {@const Icon = kindIcon(dev.kind)}
-        {@const active = player.remoteState?.activeDeviceId === dev.id}
-        <button class="row-item dev" class:active disabled={!dev.canPlay} onclick={() => { player.transfer(dev.id); ui.close(); }}>
-          <Icon size={24} />
-          <div class="grow">
-            <div>{dev.name}{dev.id === player.myDeviceId ? ' (this device)' : ''}</div>
-            <div class="sub">{active ? (player.remoteState?.playing ? 'Playing' : 'Active') : dev.canPlay ? 'Tap to play here' : 'Remote only'}</div>
-          </div>
-        </button>
-      {:else}
-        {#if player.connectStatus === 'open'}<p class="muted">No other devices online.</p>{/if}
-      {/each}
+      <DevicesList onpick={() => ui.close()} />
     </div>
     <div class="foot"><span></span><button class="btn text" onclick={() => ui.close()}>Close</button></div>
+  </Sheet>
+{:else if d?.kind === 'itemMenu'}
+  {@const it = d.item}
+  <Sheet label="Options">
+    <div class="menuhead">
+      <div class="thumb"><Art item={it} size={128} round={it.type === 'artist'} /></div>
+      <div class="ellipsis"><b class="ellipsis">{it.title}</b>{#if it.subtitle}<div class="muted ellipsis">{it.subtitle}</div>{/if}</div>
+    </div>
+    <div class="menu">
+      {#if it.type !== 'catalog'}<button onclick={() => { ui.close(); void playItem(it); }}><Play />Play</button>{/if}
+      {#if it.type === 'album' || it.type === 'artist' || it.type === 'playlist' || it.type === 'track'}
+        <button onclick={() => { ui.close(); radioFor(it); }}><Radio />Start radio</button>
+      {/if}
+      {#if canPin(it)}
+        {@const pinned = library.isPinned(it.type, it.id)}
+        <button onclick={() => { ui.close(); void library.togglePin(it.type, it.id, it.title); }}>{#if pinned}<PinOff />Unpin from Home{:else}<Pin />Pin to Home{/if}</button>
+      {/if}
+      {#if it.type === 'album' || it.type === 'artist' || it.type === 'playlist' || it.type === 'mix'}
+        <button onclick={() => { ui.close(); openItem(it); }}><Disc3 />Open</button>
+      {/if}
+      {#if it.type === 'track' && it.track}
+        <button onclick={() => ui.open({ kind: 'songMenu', ctx: { track: it.track! } })}><Info />Song menu…</button>
+      {/if}
+      {#if it.type === 'catalog' && it.catalog}
+        <button onclick={() => ui.open({ kind: 'catalog', item: it.catalog! })}><Info />Details…</button>
+      {/if}
+    </div>
+  </Sheet>
+{:else if d?.kind === 'catalog'}
+  {@const c = d.item}
+  <Sheet label="Not in your library">
+    <div class="menuhead">
+      <div class="bigthumb"><Art item={{ type: 'catalog', id: c.id, title: c.title, catalog: c }} size={256} /></div>
+      <div><b>{c.title}</b><div class="muted">{c.type === 'track' ? 'Song' : 'Album'} · {c.artist}{c.year ? ` · ${c.year}` : ''}</div>
+        <div class="muted small">{c.owned ? 'In your library' : 'Not in your library'}</div></div>
+    </div>
+    <div class="menu">
+      {#if c.hasPreview}<button onclick={() => samples.toggle(c.id)}>{#if samples.playing === c.id}<Pause />Stop sample{:else}<Play />Play 30 s sample{/if}</button>{/if}
+      {#if !c.inToGet && !c.owned}<button onclick={() => addToGet(c)}><Plus />Add to To get</button>{/if}
+      <button onclick={() => { ui.close(); ui.go('search', c.artist); }}><Sparkles />Find similar in my library</button>
+      <button onclick={() => { ui.close(); ui.go('toget'); }}><ListEnd />Open To get</button>
+    </div>
+  </Sheet>
+{:else if d?.kind === 'profile'}
+  <Sheet label="Profile">
+    <div class="menuhead"><Avatar name={session.saved.username ?? '?'} size={44} /><div><b>{session.saved.username}</b><div class="muted small">{session.isAdmin ? 'Admin' : 'Listener'} · {session.isMock ? 'demo server' : session.saved.origin || location.host}</div></div></div>
+    <div class="menu">
+      <button onclick={() => goto('settings', '')}><SettingsIcon />Settings</button>
+      <button onclick={() => goto('equalizer', '')}><SlidersVertical />Equalizer</button>
+      <button onclick={() => ui.open({ kind: 'devices' })}><Speaker />Devices</button>
+      <button onclick={() => goto('toget', '')}><ListEnd />To get</button>
+      <button onclick={() => goto('account', '')}><UserRound />Account</button>
+      {#if session.isAdmin}<button onclick={() => goto('admin', '')}><Shield />Admin</button>{/if}
+      <hr />
+      <button onclick={logout}><LogOut />Sign out</button>
+    </div>
   </Sheet>
 {:else if d?.kind === 'prompt'}
   <Sheet label={d.title}>
@@ -413,11 +484,5 @@
   }
   .small {
     font-size: 0.85rem;
-  }
-  .dev.active {
-    color: var(--accent);
-  }
-  .grow {
-    flex: 1;
   }
 </style>

@@ -1,53 +1,53 @@
 // UI state: hash routing, tabs, sheets/dialogs, toasts.
 import type { Track } from './types';
 
-export type TabId = 'queues' | 'now' | 'folders' | 'albums' | 'artists' | 'genres' | 'playlists' | 'search' | 'more';
+export type TabId = 'home' | 'foryou' | 'search' | 'library' | 'queue';
 
+/** v3 destinations (§2): five bottom tabs on phones, a rail on tablets, the sidebar on desktop. */
 export const TABS: { id: TabId; label: string }[] = [
-  { id: 'queues', label: 'Queues' },
-  { id: 'now', label: 'Now playing' },
-  { id: 'folders', label: 'Folders' },
-  { id: 'albums', label: 'Albums' },
-  { id: 'artists', label: 'Artists' },
-  { id: 'genres', label: 'Genres' },
-  { id: 'playlists', label: 'Playlists' },
+  { id: 'home', label: 'Home' },
+  { id: 'foryou', label: 'For You' },
   { id: 'search', label: 'Search' },
-  { id: 'more', label: 'More' },
+  { id: 'library', label: 'Library' },
+  { id: 'queue', label: 'Queue' },
 ];
+
+export type PanelId = 'queue' | 'lyrics' | 'devices';
 
 export interface Route {
   name: string;
   param: string;
 }
 
-/** Which tab a page belongs to, for the underline. */
+/** Which destination a page belongs to, for the highlight. */
 const TAB_OF: Record<string, TabId> = {
-  queues: 'queues',
-  now: 'now',
-  folders: 'folders',
-  albums: 'albums',
-  album: 'albums',
-  artists: 'artists',
-  artist: 'artists',
-  genres: 'genres',
-  genre: 'genres',
-  playlists: 'playlists',
-  playlist: 'playlists',
-  list: 'playlists',
+  home: 'home',
+  foryou: 'foryou',
+  mix: 'foryou',
+  toget: 'foryou',
   search: 'search',
+  library: 'library',
+  folders: 'library',
+  album: 'library',
+  artist: 'library',
+  genre: 'library',
+  playlist: 'library',
+  list: 'library',
+  queue: 'queue',
+  queues: 'queue',
 };
 
 export function parseHash(hash: string): Route {
   const h = hash.replace(/^#\/?/, '');
-  if (!h) return { name: 'now', param: '' };
+  if (!h) return { name: 'home', param: '' };
   const i = h.indexOf('/');
   const name = i < 0 ? h : h.slice(0, i);
   const param = i < 0 ? '' : decodeURIComponent(h.slice(i + 1));
   return { name, param };
 }
 
-export function tabOf(r: Route): TabId {
-  return TAB_OF[r.name] ?? 'more';
+export function tabOf(r: Route): TabId | null {
+  return TAB_OF[r.name] ?? null;
 }
 
 export interface SongMenuCtx {
@@ -67,6 +67,9 @@ export type Dialog =
   | { kind: 'speed' }
   | { kind: 'lyricsEditor'; track: Track; raw: string }
   | { kind: 'devices' }
+  | { kind: 'itemMenu'; item: import('./types').ShelfItem }
+  | { kind: 'profile' }
+  | { kind: 'catalog'; item: import('./types').CatalogItem }
   | { kind: 'prompt'; title: string; label: string; value: string; ok: string; resolve: (v: string | null) => void }
   | { kind: 'confirm'; title: string; message: string; ok: string; resolve: (v: boolean) => void };
 
@@ -77,13 +80,38 @@ class UiStore {
   /** Now Playing shows lyrics instead of the cover. */
   lyricsOpen = $state(false);
   lyricsSize = $state(1);
+  /** Desktop right panel (Queue / Lyrics / Devices); null = closed. */
+  panel = $state<PanelId | null>((() => {
+    try {
+      const v = localStorage.getItem('nm.panel');
+      return v === null ? 'queue' : ((v || null) as PanelId | null);
+    } catch {
+      return 'queue';
+    }
+  })());
+  /** Ask the search page to focus its box (from `/` or Ctrl+K). */
+  searchFocus = $state(0);
   private toastId = 0;
 
   constructor() {
     if (typeof window !== 'undefined') window.addEventListener('hashchange', () => (this.route = parseHash(location.hash)));
   }
 
-  get tab(): TabId {
+  togglePanel(p: PanelId) {
+    this.panel = this.panel === p ? null : p;
+    try {
+      localStorage.setItem('nm.panel', this.panel ?? '');
+    } catch {
+      /* ignore */
+    }
+  }
+
+  focusSearch() {
+    if (this.route.name !== 'search') this.go('search');
+    this.searchFocus++;
+  }
+
+  get tab(): TabId | null {
     return tabOf(this.route);
   }
 
@@ -95,7 +123,7 @@ class UiStore {
 
   back() {
     if (history.length > 1) history.back();
-    else this.go('albums');
+    else this.go('home');
   }
 
   open(d: Dialog) {

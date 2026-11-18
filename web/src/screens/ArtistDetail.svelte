@@ -1,64 +1,85 @@
 <script lang="ts">
-  import { ArrowLeft, Play } from '@lucide/svelte';
-  import Cover from '../components/Cover.svelte';
+  import ItemGrid from '../components/ItemGrid.svelte';
+  import PageHeader from '../components/PageHeader.svelte';
+  import TrackList from '../components/TrackList.svelte';
+  import ViewToggle from '../components/ViewToggle.svelte';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
-  import type { Album, Artist, Track } from '../lib/types';
-  import { ui } from '../lib/ui.svelte';
+  import type { Album, Artist, ShelfItem, Track } from '../lib/types';
 
   let { id }: { id: string } = $props();
   let artist = $state<(Artist & { albums: Album[] }) | null>(null);
+  let tracks = $state<Track[]>([]);
   let error = $state<string | null>(null);
+  let showAll = $state(false);
+
   $effect(() => {
-    session.api.artist(id).then((a) => (artist = a)).catch((e) => (error = e.message));
+    session.api
+      .artist(id)
+      .then(async (a) => {
+        artist = a;
+        const all: Track[] = [];
+        for (const al of a.albums.slice(0, 12)) all.push(...(await session.api.album(al.id)).tracks);
+        tracks = all;
+      })
+      .catch((e) => (error = e.message));
   });
 
-  async function playAll() {
-    if (!artist) return;
-    const all: Track[] = [];
-    for (const a of artist.albums) all.push(...(await session.api.album(a.id)).tracks);
-    await player.playList(all, 0, `Artist: ${artist.name}`, { source: 'library', addedFrom: 'artist' });
-  }
+  // "Top tracks": favourites first, then by album order (no per-artist play counts in the API yet).
+  const top = $derived([...tracks.filter((t) => t.starred), ...tracks.filter((t) => !t.starred)]);
+  const meta = { source: 'library' as const, addedFrom: 'artist' };
+  const item = $derived<ShelfItem | null>(artist ? { type: 'artist', id: artist.id, title: artist.name, albumId: artist.albums[0]?.id ?? null } : null);
+  const albums = $derived((artist?.albums ?? []).map((a): ShelfItem => ({ type: 'album', id: a.id, title: a.title, subtitle: String(a.year ?? ''), albumId: a.id })));
 </script>
 
-<div class="page">
-  <div class="topbar">
-    <button class="icon-btn" aria-label="Back" onclick={() => ui.back()}><ArrowLeft size={24} /></button>
-    <h1>{artist?.name ?? ''}</h1>
-    {#if artist}<button class="icon-btn" aria-label="Play all" onclick={playAll}><Play size={24} fill="currentColor" /></button>{/if}
-  </div>
+<div class="page artist">
   {#if error}<div class="empty">{error}</div>
-  {:else if artist}
-    <div class="grid">
-      {#each artist.albums as a (a.id)}
-        <button class="card" onclick={() => ui.go('album', a.id)}>
-          <Cover albumId={a.id} size={256} rounded={0} />
-          <div class="t ellipsis">{a.title}</div>
-          <div class="y muted">{a.year ?? ''}</div>
-        </button>
-      {/each}
-    </div>
+  {:else if artist && item}
+    <PageHeader
+      {item}
+      kind="artist"
+      label="Artist"
+      meta="{artist.albums.length} album{artist.albums.length === 1 ? '' : 's'} · {tracks.length} songs"
+      onplay={() => player.playList(top, 0, `Artist: ${artist!.name}`, meta)}
+      onshuffle={() => {
+        if (!player.shuffle) player.toggleShuffle();
+        void player.playList(top, Math.floor(Math.random() * top.length), `Artist: ${artist!.name}`, meta);
+      }}
+      onradio={() => player.startRadio({ type: 'artist', id: artist!.id }, `${artist!.name} radio`)}
+    />
+    {#if top.length}
+      <h2 class="h">Top tracks</h2>
+      <TrackList tracks={showAll ? top : top.slice(0, 5)} queueName="Artist: {artist.name}" {meta} />
+      {#if top.length > 5}<button class="btn text sa" onclick={() => (showAll = !showAll)}>{showAll ? 'Show less' : 'Show all'}</button>{/if}
+    {/if}
+    <div class="hrow"><h2 class="h">Albums</h2><ViewToggle section="artist.albums" /></div>
+    <ItemGrid items={albums} section="artist.albums" />
+    <button class="radio" onclick={() => player.startRadio({ type: 'artist', id: artist!.id }, `${artist!.name} radio`)}>▶ {artist.name} radio</button>
   {:else}<div class="empty">Loading…</div>{/if}
 </div>
 
 <style>
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 12px;
-    padding: 12px;
+  .artist {
+    --gutter: clamp(16px, 3vw, 32px);
   }
-  .card {
-    border: 1.5px solid #333;
-    border-radius: 12px;
-    overflow: hidden;
-    text-align: left;
+  .h {
+    margin: 20px var(--gutter) 8px;
+    font-size: 1.4rem;
   }
-  .t {
-    padding: 8px 10px 0;
+  .hrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-right: var(--gutter);
   }
-  .y {
-    padding: 0 10px 8px;
-    font-size: 0.85rem;
+  .sa {
+    margin-left: calc(var(--gutter) - 10px);
+  }
+  .radio {
+    margin: 24px var(--gutter);
+    padding: 12px 20px;
+    border-radius: 999px;
+    border: 1px solid #555;
+    font-weight: 700;
   }
 </style>
