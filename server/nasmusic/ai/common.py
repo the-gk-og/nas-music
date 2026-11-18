@@ -105,6 +105,29 @@ def ensure_default_settings(conn: sqlite3.Connection) -> None:
     )
 
 
+STATUS_KEY = "ai.status.model_version"
+
+
+def write_status(conn: sqlite3.Connection, **fields: Any) -> None:
+    """Merge `fields` into the JSON status object at settings[STATUS_KEY] (one short transaction, so
+    concurrent analysis and nightly runs don't overwrite each other's fields)."""
+    with transaction(conn):
+        cur = read_status(conn)
+        cur.update(fields)
+        cur["updated_at"] = iso()
+        conn.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
+                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (STATUS_KEY, json.dumps(cur)))
+
+
+def read_status(conn: sqlite3.Connection) -> dict[str, Any]:
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (STATUS_KEY,)).fetchone()
+    try:
+        cur = json.loads(row[0]) if row else {}
+    except (TypeError, ValueError):
+        return {}
+    return cur if isinstance(cur, dict) else {}
+
+
 @dataclass
 class Settings:
     values: dict[str, Any]
@@ -124,7 +147,7 @@ class Settings:
 
 def load_settings(conn: sqlite3.Connection) -> Settings:
     vals: dict[str, Any] = {}
-    for key, value in conn.execute("SELECT key, value FROM settings WHERE key LIKE 'ai.%'"):
+    for key, value in conn.execute("SELECT key, value FROM settings WHERE key LIKE 'ai.%' AND key NOT LIKE 'ai.status.%'"):
         try:
             vals[key] = json.loads(value)
         except (TypeError, ValueError):
@@ -230,15 +253,18 @@ def load_library(conn: sqlite3.Connection, model_version: str) -> Library:
         (model_version,),
     ).fetchall()
     good = []
-    dims = None
+    sizes: dict[int, int] = {}
     for r in rows:
+        sizes[r[11]] = sizes.get(r[11], 0) + 1
+    dims = max(sizes, key=lambda d: sizes[d]) if sizes else None  # majority wins if a version is mixed
+    for r in rows:
+        if r[11] != dims:
+            continue
         try:
             v = from_blob(r[10], r[11])
         except ValueError:
             continue
-        if dims is None:
-            dims = v.size
-        if v.size != dims or not np.all(np.isfinite(v)):
+        if not np.all(np.isfinite(v)):
             continue
         good.append((r, v))
     n = len(good)

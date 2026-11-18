@@ -32,18 +32,23 @@ def analyse_pending(conn: sqlite3.Connection, cfg: AIConfig, limit: int | None =
     from dataclasses import replace
 
     from . import analyser, models
-    from .common import BASIC_VERSION, ensure_default_settings
+    from .common import BASIC_VERSION, ensure_default_settings, write_status
     from .extractors import effective_version
 
+    requested = cfg.model_version
     try:
         ensure_default_settings(conn)
-        version = effective_version(cfg.model_version)
+        version = effective_version(requested)
+        reason = None if version == requested else "Essentia is not importable"
         if version != BASIC_VERSION:
             try:
                 models.ensure_models(Path(cfg.data_dir), version)
-            except Exception:
+            except Exception as e:
                 log.exception("model files for %s unavailable; analysing with %s for now", version, BASIC_VERSION)
-                cfg = replace(cfg, model_version=BASIC_VERSION)
+                reason = f"model files unavailable: {e}"[:300]
+                version = BASIC_VERSION
+        cfg = replace(cfg, model_version=version)
+        write_status(conn, requested=requested, analysing=version, fallback_reason=reason)
         return analyser.analyse_pending(conn, cfg, limit)
     except Exception:
         log.exception("analyse_pending failed")
@@ -52,13 +57,14 @@ def analyse_pending(conn: sqlite3.Connection, cfg: AIConfig, limit: int | None =
 
 def run_nightly(conn: sqlite3.Connection, cfg: AIConfig) -> list[str]:
     """Ingest feedback, retrain, deactivate yesterday's mixes, write today's mixes. Returns new mix ids."""
-    from .common import ensure_default_settings
+    from .common import ensure_default_settings, write_status
     from .mixes import build_nightly
     from .recommender import Recommender
 
     try:
         ensure_default_settings(conn)
         rec = Recommender(conn, cfg)
+        write_status(conn, mixes=rec.version)
         if len(rec.lib):
             rec.train(save=True)
         return build_nightly(rec)

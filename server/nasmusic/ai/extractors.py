@@ -141,8 +141,8 @@ def _dct_matrix(n_in: int, n_out: int) -> np.ndarray:
 
 
 class BasicExtractor:
-    """Pure numpy features. Embedding layout (104 dims):
-    40 log-mel means, 13 MFCC means, 13 MFCC stds, 12 chroma, 26 summary stats."""
+    """Pure numpy features. Embedding layout (107 dims):
+    40 log-mel means, 13 MFCC means, 13 MFCC stds, 12 chroma, 29 summary stats."""
 
     version = BASIC_VERSION
     sr = 22050

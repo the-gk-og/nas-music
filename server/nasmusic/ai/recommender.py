@@ -8,10 +8,13 @@ Signals (from `events` plus the current `tracks` state):
 | skip after 30 s                | -0.6  (mild dislike)                                    |
 | skip before 30 s               | -1.5  (strong)                                          |
 | repeated skip (30 days)        | each further skip x1.5, x2.0 ... (capped at -3 / event) |
-| thumbs-up                      | +2.0                                                    |
+| thumbs-up (latest thumb event) | +2.0                                                    |
 | star (tracks.starred_at)       | +3.0  (strong like)                                     |
 | rating r (tracks.rating)       | (r - 3) x 1.0, i.e. 1 star = -2 ... 5 stars = +2        |
-| thumbs-down / tracks.blocked   | excluded from every mix                                 |
+| thumbs-down (latest thumb)     | excluded from every mix                                 |
+
+Thumbs: per track the latest thumb_up / thumb_down / thumb_clear event wins (thumb_clear cancels the
+earlier thumb). Tracks with no thumb events fall back to `tracks.blocked`.
 
 Event weights decay with a half-life (`ai.rec.half_life_days`).
 
@@ -55,7 +58,8 @@ from .extractors import effective_version
 
 log = logging.getLogger("nasmusic.ai.recommender")
 
-FEEDBACK_TYPES = ("play", "skip", "star", "unstar", "rate", "thumb_up", "thumb_down")
+FEEDBACK_TYPES = ("play", "skip", "star", "unstar", "rate", "thumb_up", "thumb_down", "thumb_clear")
+THUMB_TYPES = ("thumb_up", "thumb_down", "thumb_clear")
 N_PCA = 16
 N_TAGS = 24
 MIN_AUC = 0.55
@@ -119,7 +123,7 @@ def collect_signals(conn: sqlite3.Connection, lib: Library, settings: Settings, 
     n_feedback = 0
 
     rows = conn.execute(
-        "SELECT track_id, type, at, position_s, duration_s FROM events ORDER BY at"
+        "SELECT track_id, type, at, position_s, duration_s FROM events ORDER BY at, received_at"
     ).fetchall()
     for track_id, etype, at, pos, dur in rows:
         if etype in FEEDBACK_TYPES:
@@ -132,7 +136,7 @@ def collect_signals(conn: sqlite3.Connection, lib: Library, settings: Settings, 
         age = max((now - ts).total_seconds() / 86400, 0.0)
         decay = 0.5 ** (age / half_life)
         prior = sum(1 for t in recent_skips[i] if (ts - t).days < 30)
-        w = event_weight(etype, pos, dur or lib.duration[i], prior, early) * decay
+        w = 0.0 if etype in THUMB_TYPES else event_weight(etype, pos, dur or lib.duration[i], prior, early) * decay
         weight[i] += w
         for name, win in windows.items():
             if _in_window(local.hour, win):
@@ -147,15 +151,16 @@ def collect_signals(conn: sqlite3.Connection, lib: Library, settings: Settings, 
             skips[i] += 1
             recent_skips[i].append(ts)
             label = 0
-        elif etype in ("thumb_down", "thumb_up"):
-            thumbs[i] = etype
+        elif etype in THUMB_TYPES:
+            thumbs[i] = etype  # events are in time order: the latest one wins
         if etype in ("play", "skip"):
             last[i] = min(last[i], age)
         events.append((ts, local.hour, local.weekday(), i, etype, label))
 
     for i, t in thumbs.items():
-        if t == "thumb_down":
-            blocked[i] = True
+        blocked[i] = t == "thumb_down"  # overrides tracks.blocked, which may lag behind the events
+        if t == "thumb_up":
+            weight[i] += event_weight("thumb_up", None, None, 0)
     weight += np.where(lib.starred, 3.0, 0.0)
     weight += np.where(lib.rating > 0, lib.rating - 3.0, 0.0)
     return Signals(weight=weight, plays=plays, skips=skips, last_played_days=last, blocked=blocked,

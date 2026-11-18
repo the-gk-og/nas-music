@@ -6,11 +6,11 @@ import json
 import httpx
 import numpy as np
 import pytest
-from tests.ai.conftest import ffmpeg_ok, write_tone
 
 from nasmusic.ai import analyser, api, models
 from nasmusic.ai.common import from_blob, iso
 from nasmusic.ai.extractors import BasicExtractor, effective_version, key_from_chroma
+from tests.ai.conftest import ffmpeg_ok, write_tone
 
 pytestmark = pytest.mark.skipif(not ffmpeg_ok(), reason="ffmpeg not installed")
 
@@ -30,7 +30,7 @@ def test_basic_extractor_on_flac(tmp_path):
     write_tone(high, 3000)
     ex = BasicExtractor()
     a, b = ex.extract_file(low, 12), ex.extract_file(high, 12)
-    assert a.embedding.shape == b.embedding.shape and a.embedding.dtype == np.float32
+    assert a.embedding.shape == b.embedding.shape == (107,) and a.embedding.dtype == np.float32
     assert np.all(np.isfinite(a.embedding))
     assert not np.allclose(a.embedding, b.embedding)
     assert 0 <= a.energy <= 1 and 0 <= b.energy <= 1
@@ -77,6 +77,23 @@ def test_analyse_pending_resumable_and_failures(conn, cfg):
     assert len(analyser.pending_tracks(conn, "basic-1", 7)) == 2
 
 
+def test_model_download_failure_falls_back(conn, cfg, monkeypatch):
+    from dataclasses import replace
+
+    from nasmusic.ai import extractors
+    from nasmusic.ai.common import read_status
+    monkeypatch.setattr(extractors, "essentia_available", lambda: True)
+
+    def offline(*a, **k):
+        raise models.ModelDownloadError("offline")
+    monkeypatch.setattr(models, "ensure_models", offline)
+    write_tone(cfg.library_root / "z.flac", 600)
+    add_track(conn, "z.flac")
+    assert api.analyse_pending(conn, replace(cfg, model_version="effnet-discogs-1")) == 1
+    st = read_status(conn)
+    assert st["analysing"] == "basic-1" and "offline" in st["fallback_reason"]
+
+
 def test_crash_leftover_pending_is_resumed(conn, cfg):
     write_tone(cfg.library_root / "x.flac", 330)
     tid = add_track(conn, "x.flac")
@@ -94,6 +111,13 @@ def test_essentia_fallback(conn, cfg, monkeypatch):
     add_track(conn, "y.flac")
     assert api.analyse_pending(conn, replace(cfg, model_version="effnet-discogs-1")) == 1
     assert conn.execute("SELECT model_version FROM features").fetchone()[0] == "basic-1"
+    from nasmusic.ai.common import STATUS_KEY, read_status
+    st = read_status(conn)
+    assert st["requested"] == "effnet-discogs-1" and st["analysing"] == "basic-1"
+    assert "Essentia" in st["fallback_reason"]
+    api.run_nightly(conn, cfg)
+    assert read_status(conn)["mixes"] == "basic-1" and read_status(conn)["analysing"] == "basic-1"
+    assert STATUS_KEY == "ai.status.model_version"
 
 
 def test_benchmark(conn, cfg):

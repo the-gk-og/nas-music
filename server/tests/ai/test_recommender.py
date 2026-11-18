@@ -4,10 +4,10 @@ import json
 from datetime import timedelta
 
 import numpy as np
-from tests.ai.conftest import NOW
 
 from nasmusic.ai.common import ensure_default_settings
 from nasmusic.ai.recommender import Recommender, TasteModel, event_weight
+from tests.ai.conftest import NOW
 
 
 def test_event_weights():
@@ -113,3 +113,28 @@ def test_threshold_is_a_setting(conn, cfg, synth):
     _learnable_history(synth, 250, np.random.default_rng(9))
     m = Recommender(conn, cfg).train(save=False)
     assert m.mode == "learned"
+
+
+def test_latest_thumb_wins_and_clear_cancels(conn, cfg, synth):
+    t = synth.tracks
+    day = timedelta(days=1)
+    # down then clear: unblocked, even if tracks.blocked lags behind the events
+    synth.event(t[0]["id"], "thumb_down", NOW - 3 * day)
+    synth.event(t[0]["id"], "thumb_clear", NOW - 2 * day)
+    conn.execute("UPDATE tracks SET blocked = 1 WHERE id = ?", (t[0]["id"],))
+    # up then down: blocked
+    synth.event(t[1]["id"], "thumb_up", NOW - 3 * day)
+    synth.event(t[1]["id"], "thumb_down", NOW - 2 * day)
+    # down then up: liked, not blocked
+    synth.event(t[2]["id"], "thumb_down", NOW - 3 * day)
+    synth.event(t[2]["id"], "thumb_up", NOW - 2 * day)
+    # up then clear: neutral
+    synth.event(t[3]["id"], "thumb_up", NOW - 3 * day)
+    synth.event(t[3]["id"], "thumb_clear", NOW - 2 * day)
+    # no thumb events: tracks.blocked still counts
+    conn.execute("UPDATE tracks SET blocked = 1 WHERE id = ?", (t[4]["id"],))
+    rec = Recommender(conn, cfg)
+    i = [rec.lib.index[x["id"]] for x in t[:5]]
+    assert list(rec.sig.blocked[i]) == [False, True, False, False, True]
+    assert list(rec.sig.weight[i]) == [0.0, 0.0, 2.0, 0.0, 0.0]
+    assert rec.sig.n_feedback == 8

@@ -20,6 +20,7 @@ from .recommender import Recommender
 log = logging.getLogger("nasmusic.ai.mixes")
 
 NIGHTLY_KINDS = ("daily", "morning", "evening", "deep_cuts")
+MORE_LIKE_MAX_ACTIVE = 3
 
 
 @dataclass(frozen=True)
@@ -254,24 +255,38 @@ class MixBuilder:
     def write(self, kind: str, title: str, ordered: list[int], bucket: dict[int, str], score: np.ndarray,
               spec: MixSpec | None = None, seed: int | None = None) -> str:
         mid = new_id()
+        # everything is computed before the write transaction, which then only holds the lock for inserts
+        rows = [(mid, pos, self.lib.ids[i], float(score[i]) if np.isfinite(score[i]) else None,
+                 self.reason(i, bucket.get(i, "rare"), spec, seed)) for pos, i in enumerate(ordered)]
         with transaction(self.rec.conn) as c:
+            if kind == "more_like":
+                retire_more_like(c, self.rec.now, keep_active=MORE_LIKE_MAX_ACTIVE - 1)
             c.execute("INSERT INTO mixes (id, kind, title, for_date, created_at, seed_track, active) "
                       "VALUES (?,?,?,?,?,?,1)",
                       (mid, kind, title, self.today, iso(self.rec.now),
                        self.lib.ids[seed] if seed is not None else None))
-            c.executemany(
-                "INSERT INTO mix_tracks (mix_id, position, track_id, score, reason) VALUES (?,?,?,?,?)",
-                [(mid, pos, self.lib.ids[i], float(score[i]) if np.isfinite(score[i]) else None,
-                  self.reason(i, bucket.get(i, "rare"), spec, seed)) for pos, i in enumerate(ordered)])
+            c.executemany("INSERT INTO mix_tracks (mix_id, position, track_id, score, reason) VALUES (?,?,?,?,?)",
+                          rows)
         return mid
 
 
+def retire_more_like(conn: sqlite3.Connection, now: datetime, keep_active: int = MORE_LIKE_MAX_ACTIVE) -> None:
+    """On-demand mixes go into the phone's sync manifest while active, so they must not pile up:
+    deactivate those older than 24 h and all but the newest `keep_active`."""
+    conn.execute("UPDATE mixes SET active = 0 WHERE active = 1 AND kind = 'more_like' AND created_at < ?",
+                 (iso(now - timedelta(days=1)),))
+    conn.execute(
+        "UPDATE mixes SET active = 0 WHERE active = 1 AND kind = 'more_like' AND id NOT IN ("
+        "SELECT id FROM mixes WHERE active = 1 AND kind = 'more_like' "
+        "ORDER BY created_at DESC, rowid DESC LIMIT ?)", (max(keep_active, 0),))
+
+
 def deactivate_old(conn: sqlite3.Connection, now: datetime, keep_days: float) -> None:
+    """Nightly: yesterday's mixes and every on-demand mix go inactive."""
     with transaction(conn):
         marks = ",".join("?" * len(NIGHTLY_KINDS))
         conn.execute(f"UPDATE mixes SET active = 0 WHERE active = 1 AND kind IN ({marks})", NIGHTLY_KINDS)
-        conn.execute("UPDATE mixes SET active = 0 WHERE active = 1 AND kind = 'more_like' AND created_at < ?",
-                     (iso(now - timedelta(days=1)),))
+        conn.execute("UPDATE mixes SET active = 0 WHERE active = 1 AND kind = 'more_like'")
         conn.execute("DELETE FROM mixes WHERE active = 0 AND created_at < ?",
                      (iso(now - timedelta(days=keep_days)),))
 
