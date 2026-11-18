@@ -9,7 +9,8 @@
 
 services:
   nasmusic:
-    image: nasmusic:latest          # built from ../../server (see README: "Building the server image")
+    image: ghcr.io/the-gk-og/nasmusic:latest   # built by GitHub Actions; pull it first (README: "Getting the server image")
+    pull_policy: missing
     container_name: nasmusic
     user: "568:568"
     restart: unless-stopped

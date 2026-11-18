@@ -62,10 +62,29 @@ Picard is free and open source. Run it on your PC against the music share:
    then **Save**. Once you trust it, do the rest in batches of 20–50 albums.
 4. Albums Picard can't match: leave them. The server falls back to matching by name.
 
-## Building the server image (Phase 2)
+## Getting the server image (Phase 2)
 
-Until images are published, build on any machine with Docker and copy the image across:
-```bash
-docker build -t nasmusic:latest server/
-docker save nasmusic:latest | ssh admin@<NAS IP> docker load
-```
+GitHub Actions builds `ghcr.io/the-gk-og/nasmusic:latest` on every push to `main` that changes `server/`.
+The repository is private, so the NAS needs a token to pull it:
+
+1. On GitHub: **Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token**.
+   Tick only **read:packages**, set an expiry, and copy the token.
+2. On TrueNAS: **System → Shell** (or SSH in), then log in and pull. Paste the token when it asks for a password:
+   ```bash
+   sudo docker login ghcr.io -u the-gk-og
+   sudo docker pull ghcr.io/the-gk-og/nasmusic:latest
+   ```
+3. Install `full/compose.yaml` via **Install via YAML**. Because it uses `pull_policy: missing`, the app uses
+   the image you just pulled.
+
+To update later: run the `docker pull` line again, then restart the app in **Apps**.
+
+If you make the repository public, the package can be made public too, and the login step goes away.
+
+## Getting the APK
+
+Every push to `main` that changes `android/` builds a debug APK. Download it from GitHub:
+**Actions → android → the latest run → Artifacts → nas-music-debug-apk** (a zip containing `app-debug.apk`).
+Pushing a tag such as `v0.1.0` also attaches the APK to a GitHub Release.
+
+To install it, allow "Install unknown apps" for your browser or file manager on the phone.
