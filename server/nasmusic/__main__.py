@@ -65,7 +65,9 @@ def cmd_serve(args) -> None:
     ctx = build_context(cfg, jobs)
     app = create_app(cfg, context=ctx)
     common = {"host": cfg.bind_host, "lifespan": "off", "log_config": None, "timeout_graceful_shutdown": 5,
-              "server_header": False}
+              "server_header": False,
+              # Protocol-level WebSocket pings keep Connect sockets alive through the Cloudflare tunnel.
+              "ws_ping_interval": 20.0, "ws_ping_timeout": 20.0}
     servers = [
         _Server(uvicorn.Config(app, port=cfg.https_port, ssl_certfile=str(files.cert),
                                ssl_keyfile=str(files.key), **common)),
