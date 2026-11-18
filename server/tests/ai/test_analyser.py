@@ -6,7 +6,7 @@ import json
 import httpx
 import numpy as np
 import pytest
-from conftest import ffmpeg_ok, write_tone
+from tests.ai.conftest import ffmpeg_ok, write_tone
 
 from nasmusic.ai import analyser, api, models
 from nasmusic.ai.common import from_blob, iso

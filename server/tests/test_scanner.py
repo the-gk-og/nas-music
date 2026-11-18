@@ -1,7 +1,7 @@
 import os
 import shutil
 
-from conftest import make_flac, png_bytes
+from tests.conftest import make_flac, png_bytes
 
 from nasmusic.library import art, queries, scanner
 

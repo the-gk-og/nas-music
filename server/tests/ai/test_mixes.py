@@ -5,7 +5,7 @@ from itertools import pairwise
 
 import numpy as np
 import pytest
-from conftest import NOW, build_library, mix_rows
+from tests.ai.conftest import NOW, build_library, mix_rows
 
 from nasmusic.ai import api
 from nasmusic.ai.common import ensure_default_settings

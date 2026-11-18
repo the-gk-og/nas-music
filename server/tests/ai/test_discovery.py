@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import numpy as np
 import pytest
-from conftest import NOW
+from tests.ai.conftest import NOW
 
 from nasmusic.ai import api, discovery
 from nasmusic.ai.common import ensure_default_settings, norm_name

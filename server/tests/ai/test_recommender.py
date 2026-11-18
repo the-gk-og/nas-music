@@ -4,7 +4,7 @@ import json
 from datetime import timedelta
 
 import numpy as np
-from conftest import NOW
+from tests.ai.conftest import NOW
 
 from nasmusic.ai.common import ensure_default_settings
 from nasmusic.ai.recommender import Recommender, TasteModel, event_weight

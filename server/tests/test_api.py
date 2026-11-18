@@ -2,7 +2,7 @@ import json
 import uuid
 
 import pytest
-from conftest import track_ids
+from tests.conftest import track_ids
 
 from nasmusic.ai import api as ai
 

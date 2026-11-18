@@ -3,7 +3,7 @@ import subprocess
 import threading
 import time
 
-from conftest import track_ids
+from tests.conftest import track_ids
 
 from nasmusic.stream.transcode import OpusCache
 
