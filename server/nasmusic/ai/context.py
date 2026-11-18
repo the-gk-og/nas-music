@@ -8,21 +8,26 @@ from __future__ import annotations
 import json
 import math
 import re
+from itertools import pairwise
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-# Switch keys in `user_settings` -> the context fields they cover. The spec names the switches but
-# not their keys; these are the AI engine's assumption (see README, "Spec gaps").
+# Switch keys in `user_settings` -> the context fields they cover (api/openapi.yaml, EventContext and
+# /me/settings). The server already drops switched-off fields on ingest, including per-device overrides
+# (`device.<deviceId>.context.<signal>`). The engine also applies the user-level switch to events already
+# stored, so turning a signal off stops it being used straight away, without erasing it.
 SWITCHES: dict[str, tuple[str, ...]] = {
-    "context.listening_details": ("seeks", "volumeChanges", "repeatOfPrevious", "addedFrom", "sessionId",
-                                  "sessionPosition"),
-    "context.audio_output": ("output",),
-    "context.device_network": ("deviceKind", "network", "charging", "batteryPct", "screenOn"),
-    "context.movement": ("motion", "cadenceSpm"),
+    "context.listening": ("seeks", "volumeChanges", "repeatOfPrevious", "addedFrom", "sessionId",
+                          "sessionPosition"),
+    "context.output": ("output",),
+    "context.device": ("deviceKind", "network", "charging", "batteryPct", "screenOn"),
+    "context.motion": ("motion", "cadenceSpm"),
     "context.location": ("place", "geohash5"),
     "context.weather": ("weather",),
+    "context.search": ("searchQuery",),
     "context.time": ("localHour", "weekday", "holiday"),
+    "context.health": ("heartRate", "workout"),
 }
 
 CATEGORICAL = ("output", "motion", "place", "network", "weather")
@@ -41,6 +46,7 @@ class Context:
     network: str | None = None
     weather: str | None = None       # condition
     temp_c: float | None = None
+    workout: str | None = None       # health: active workout type from the watch
     repeat: bool = False
     seeks: list[tuple[float, float]] = field(default_factory=list)   # (from_s, to_s)
     volume_deltas: list[float] = field(default_factory=list)
@@ -88,7 +94,7 @@ def parse(raw: str | dict | None, local: datetime, disabled: set[str] = frozense
     hour = _num(d.get("localHour"))
     wd = _num(d.get("weekday"))
     ctx = Context(hour=int(hour) % 24 if hour is not None else local.hour,
-                  weekday=int(wd) % 7 if wd is not None else local.weekday())
+                  weekday=(int(wd) - 1) % 7 if wd is not None else local.weekday())  # ISO 1 = Monday -> 0
     out = d.get("output")
     if isinstance(out, str) and out:
         kind, _, name = out.partition(":")
@@ -106,22 +112,21 @@ def parse(raw: str | dict | None, local: datetime, disabled: set[str] = frozense
         ctx.temp_c = _num(w.get("tempC", w.get("temp", w.get("temperature"))))
     elif isinstance(w, str) and w:
         ctx.weather = w.strip().lower()
+    if isinstance(d.get("workout"), str) and d["workout"].strip():
+        ctx.workout = d["workout"].strip().lower()
     ctx.repeat = d.get("repeatOfPrevious") is True
     for s in d.get("seeks") or []:
         if isinstance(s, dict):
             a, b = _seconds(s, "from"), _seconds(s, "to")
             if a is not None and b is not None:
                 ctx.seeks.append((a, b))
-    for v in d.get("volumeChanges") or []:
-        if isinstance(v, dict):
-            delta = _num(v.get("delta"))
-            if delta is None:
-                a, b = _num(v.get("from")), _num(v.get("to"))
-                delta = b - a if a is not None and b is not None else None
-            if delta is not None:
-                ctx.volume_deltas.append(delta)
-        elif _num(v) is not None:
-            ctx.volume_deltas.append(float(v))
+    # contract: [{atMs, volume}] absolute levels 0..1 after each change -> deltas between them.
+    # The level before the first change is unknown, so a single entry only counts if it mutes.
+    levels = [_num(v.get("volume")) for v in d.get("volumeChanges") or [] if isinstance(v, dict)]
+    levels = [v for v in levels if v is not None]
+    ctx.volume_deltas = [b - a for a, b in pairwise(levels)]
+    if levels and levels[-1] <= 0.01:
+        ctx.volume_deltas.append(-1.0)  # muted
     return ctx
 
 
@@ -165,7 +170,7 @@ def context_keys(ctx: Context, settings) -> set[str]:
         keys.add("morning")
     if in_window(ctx.hour, settings["ai.mix.evening.hours"]):
         keys.add("evening")
-    if ctx.motion == "running" or (ctx.place and _WORKOUT_PLACE.search(ctx.place)):
+    if ctx.motion == "running" or ctx.workout or (ctx.place and _WORKOUT_PLACE.search(ctx.place)):
         keys.add("workout")
     if ctx.output == "car":
         keys.add("drive")

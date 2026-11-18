@@ -15,19 +15,31 @@ LOCAL = datetime(2026, 11, 18, 14, 30, tzinfo=UTC)
 
 
 def test_parse_context_fields_and_missing():
-    c = cx.parse('{"output": "bluetooth:Sony WH-1000", "motion": "Running", "place": "gym", '
-                 '"weather": {"condition": "Rain", "tempC": 7.5}, "localHour": 6, "weekday": 2, '
-                 '"seeks": [{"from": 10, "to": 120}, {"fromMs": 5000, "toMs": 2000}], '
-                 '"volumeChanges": [{"from": 0.3, "to": 0.6}, -0.1], "repeatOfPrevious": true}', LOCAL)
+    # formats as in api/openapi.yaml EventContext
+    c = cx.parse('{"output": "bluetooth:Sony WH-1000", "motion": "running", "place": "gym", '
+                 '"weather": {"condition": "Rain", "tempC": 7.5, "code": 61}, "localHour": 6, "weekday": 2, '
+                 '"seeks": [{"fromMs": 10000, "toMs": 120000}, {"fromMs": 5000, "toMs": 2000}], '
+                 '"volumeChanges": [{"atMs": 1000, "volume": 0.3}, {"atMs": 9000, "volume": 0.6}, '
+                 '{"atMs": 20000, "volume": 0.5}], "repeatOfPrevious": true, "workout": "Running"}', LOCAL)
     assert (c.output, c.output_name, c.motion, c.place) == ("bluetooth", "Sony WH-1000", "running", "gym")
-    assert (c.weather, c.temp_c, c.hour, c.weekday, c.repeat) == ("rain", 7.5, 6, 2, True)
+    assert (c.weather, c.temp_c, c.hour, c.repeat, c.workout) == ("rain", 7.5, 6, True, "running")
+    assert c.weekday == 1                                       # ISO 2 = Tuesday -> Python weekday 1
     assert c.seeks == [(10.0, 120.0), (5.0, 2.0)] and np.isclose(sum(c.volume_deltas), 0.2)
+    muted = cx.parse({"volumeChanges": [{"atMs": 500, "volume": 0.0}]}, LOCAL)
+    assert cx.detail_weight(muted, 200) == -0.2
     empty = cx.parse(None, LOCAL)
     assert (empty.hour, empty.weekday, empty.output, empty.place) == (14, LOCAL.weekday(), None, None)
     assert cx.parse("not json", LOCAL).output is None
     # a switched-off signal is ignored even if old events still carry it
     off = cx.parse({"place": "gym", "output": "car"}, LOCAL, cx.disabled_fields({"context.location": False}))
     assert off.place is None and off.output == "car"
+    # switch keys are the ones in the API contract (/me/settings)
+    assert set(cx.SWITCHES) == {f"context.{s}" for s in ("listening", "output", "device", "motion", "location",
+                                                          "weather", "search", "time", "health")}
+    off = cx.parse({"output": "car", "workout": "run", "seeks": [{"fromMs": 1, "toMs": 9}]}, LOCAL,
+                   cx.disabled_fields({"context.output": False, "context.health": False,
+                                       "context.listening": False}))
+    assert (off.output, off.workout, off.seeks) == (None, None, [])
 
 
 def test_listening_detail_weights():
@@ -44,6 +56,7 @@ def test_context_keys_and_titles():
     s = Settings({})
     assert "workout" in cx.context_keys(cx.Context(18, 1, motion="running"), s)
     assert "workout" in cx.context_keys(cx.Context(18, 1, place="City Gym"), s)
+    assert "workout" in cx.context_keys(cx.Context(18, 1, workout="cycling"), s)
     assert "drive" in cx.context_keys(cx.Context(8, 1, output="car"), s)
     k = cx.context_keys(cx.Context(23, 1, place="home"), s)
     assert {"late_night", "place:home", "evening"} <= k

@@ -175,8 +175,9 @@ def test_more_like_and_explain_are_per_user(conn, cfg, synth):
 
 def test_transitional_v1_database(tmp_path, cfg, monkeypatch):
     """Until server core's migration lands, a v1 database works single-user with the v1 call shapes."""
+    from pathlib import Path
     conn = db.connect(tmp_path / "v1.db")
-    db.init(conn)
+    conn.executescript((Path(__file__).parent / "schema_v1.sql").read_text())
     synth = build_library(conn, cfg)
     t0 = synth.by_cluster(0)[0]
     conn.execute("UPDATE tracks SET starred_at = '2026-01-01T00:00:00Z' WHERE id = ?", (t0["id"],))

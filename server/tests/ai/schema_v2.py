@@ -103,6 +103,8 @@ ALTER TABLE tracks DROP COLUMN blocked;
 
 def init_v2(conn) -> None:
     db.init(conn)
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'user_tracks'").fetchone():
+        return  # server core's schema.sql is already v2: use it as is
     conn.execute("PRAGMA foreign_keys = OFF")
     conn.executescript(V2_DDL)
     conn.execute("PRAGMA foreign_keys = ON")
