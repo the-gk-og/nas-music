@@ -14,7 +14,7 @@ import pytest
 from nasmusic.ai import api, discovery
 from nasmusic.ai.common import ensure_default_settings, norm_name
 from nasmusic.ai.discovery import USER_AGENT, Discovery, Http, buy_links
-from tests.ai.conftest import NOW
+from tests.ai.conftest import NOW, USER
 
 # similar-artist graph served by the fake ListenBrainz
 SIMILAR = {
@@ -113,11 +113,11 @@ def setup_taste(conn, synth):
     for t in synth.by_cluster(5)[:20]:
         synth.skip(t, NOW - timedelta(days=5))
     # answered before
-    conn.execute("INSERT INTO suggestions (id, artist, album, reason, status, created_at, release_group_mbid) "
-                 "VALUES ('s1', 'Coldplay', 'Coldplay Album A', 'x', 'not_interested', '2026-01-01T00:00:00Z', ?)",
-                 (mbid("ColdplayColdplay Album A"),))
-    conn.execute("INSERT INTO suggestions (id, artist, album, reason, status, created_at) "
-                 "VALUES ('s2', 'Tricky', 'Tricky Album A', 'x', 'have', '2026-01-01T00:00:00Z')")
+    conn.execute("INSERT INTO suggestions (id, user_id, artist, album, reason, status, created_at, "
+                 "release_group_mbid) VALUES ('s1', ?, 'Coldplay', 'Coldplay Album A', 'x', 'not_interested', "
+                 "'2026-01-01T00:00:00Z', ?)", (USER, mbid("ColdplayColdplay Album A")))
+    conn.execute("INSERT INTO suggestions (id, user_id, artist, album, reason, status, created_at) "
+                 "VALUES ('s2', ?, 'Tricky', 'Tricky Album A', 'x', 'have', '2026-01-01T00:00:00Z')", (USER,))
     ensure_default_settings(conn)
 
 
@@ -130,7 +130,7 @@ def make(conn, cfg, synth, web=None, clock=None, **kw):
     def embed(audio: bytes) -> np.ndarray:
         name = audio.decode().replace("_", " ")
         return synth.centres[SOUNDS.get(name, 1)] + rng.normal(size=synth.centres.shape[1]) * 0.5
-    return Discovery(conn, cfg, http=http, embed=embed, **kw), web, clock
+    return Discovery(conn, cfg, http=http, embed=embed, user_id=USER, **kw), web, clock
 
 
 def suggestions(conn):
@@ -224,11 +224,11 @@ def test_offline_and_empty_library_are_graceful(conn, cfg, synth, monkeypatch):
     assert d.run() == 0
     # the api entry point never raises, whatever happens inside
     monkeypatch.setattr(discovery, "run", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
-    assert api.run_weekly_discovery(conn, cfg) == 0
+    assert api.run_weekly_discovery(conn, cfg) == {USER: 0}
 
 
 def test_empty_library(conn, cfg):
-    d = Discovery(conn, cfg, http=Http(httpx.Client(transport=httpx.MockTransport(FakeWeb()))))
+    d = Discovery(conn, cfg, http=Http(httpx.Client(transport=httpx.MockTransport(FakeWeb()))), user_id=USER)
     assert d.run() == 0
 
 
@@ -244,3 +244,41 @@ def test_buy_links():
     links = buy_links("Sigur Rós", "Ágætis byrjun")
     assert links[0]["url"].startswith("https://bandcamp.com/search?q=Sigur+R")
     assert links[1]["url"].startswith("https://www.qobuz.com/gb-en/search/albums/Sigur%20R")
+
+
+def test_suggestions_and_answers_are_per_user(conn, cfg, synth):
+    from tests.ai.schema_v2 import add_user
+    setup_taste(conn, synth)  # USER: answered Coldplay "not interested" and Tricky Album A "have"
+    add_user(conn, "bob")
+    # bob has the same taste but has answered nothing
+    for t in synth.tracks:
+        if t["artist_id"] in {r[0] for r in conn.execute(
+                "SELECT id FROM artists WHERE name IN ('Radiohead', 'Massive Attack', 'Miles Davis')")}:
+            for d in (11, 21):
+                synth.play(t, NOW - timedelta(days=d), user="bob")
+    make(conn, cfg, synth)[0].run()
+    d_bob, _, _ = make(conn, cfg, synth, rec=None)
+    d_bob = Discovery(conn, cfg, http=d_bob.http, embed=d_bob._embed, user_id="bob")
+    assert d_bob.answered() == (set(), set(), [])
+    d_bob.run()
+    by_user = {}
+    for uid, artist, album in conn.execute("SELECT user_id, artist, album FROM suggestions WHERE status = 'new'"):
+        by_user.setdefault(uid, set()).add((artist, album))
+    assert ("Tricky", "Tricky Album A") in by_user["bob"]       # USER's "have" doesn't hide it from bob
+    assert ("Tricky", "Tricky Album A") not in by_user[USER]
+    # the same release group can be suggested to both users
+    assert by_user["bob"] & by_user[USER]
+    # USER's "not interested" penalty doesn't reach bob's scoring
+    assert all(c.penalty == 0 for c in _candidates(d_bob))
+
+
+def _candidates(d):
+    """Re-run candidate generation to inspect penalties (no writes)."""
+    captured = []
+    orig = Discovery.write
+    Discovery.write = lambda self, picked: captured.extend(picked) or 0
+    try:
+        d.run()
+    finally:
+        Discovery.write = orig
+    return [a.cand for a in captured]

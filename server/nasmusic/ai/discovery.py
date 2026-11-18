@@ -30,7 +30,7 @@ from urllib.parse import quote, quote_plus
 import httpx
 import numpy as np
 
-from .common import iso, load_settings, new_id, norm_name, transaction
+from .common import iso, new_id, norm_name, transaction
 from .extractors import decode, make_extractor
 from .recommender import Recommender
 
@@ -128,11 +128,12 @@ class Album:
 
 class Discovery:
     def __init__(self, conn: sqlite3.Connection, cfg, http: Http | None = None, rec: Recommender | None = None,
-                 embed: Callable[[bytes], np.ndarray | None] | None = None):
+                 embed: Callable[[bytes], np.ndarray | None] | None = None, user_id: str | None = None):
         self.conn, self.cfg = conn, cfg
+        self.user_id = rec.user_id if rec is not None else user_id
         self.http = http or Http()
-        self.s = load_settings(conn)
-        self.rec = rec or Recommender(conn, cfg)
+        self.rec = rec or Recommender(conn, cfg, user_id)
+        self.s = self.rec.settings  # global ai.* plus the user's own overrides
         self.model = self.rec.load_or_train()
         self._embed = embed
         self._extractor = None
@@ -188,8 +189,9 @@ class Discovery:
 
     def answered(self) -> tuple[set[tuple[str, str]], set[str], list[str]]:
         albums, mbids, not_interested = set(), set(), []
+        owner, owner_vals = self.rec.store.where_owner(self.user_id)  # answers are per user
         for artist, album, rg, status in self.conn.execute(
-                "SELECT artist, album, release_group_mbid, status FROM suggestions"):
+                "SELECT artist, album, release_group_mbid, status FROM suggestions WHERE 1 = 1" + owner, owner_vals):
             albums.add((norm_name(artist), norm_name(album)))
             if rg:
                 mbids.add(rg)
@@ -405,15 +407,16 @@ class Discovery:
         n = 0
         now = iso()
         locale = self.s["ai.discovery.qobuz_locale"] or "gb-en"
+        cols, marks, vals = self.rec.store.owner(self.user_id)
         with transaction(self.conn):
             for a in picked:
                 cur = self.conn.execute(
                     "INSERT OR IGNORE INTO suggestions (id, artist, album, year, artist_mbid, release_group_mbid, "
-                    "cover_url, preview_url, buy_links, reason, score, status, created_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?, 'new', ?)",
+                    f"cover_url, preview_url, buy_links, reason, score, status, created_at{cols}) "
+                    f"VALUES (?,?,?,?,?,?,?,?,?,?,?, 'new', ?{marks})",
                     (new_id(), a.cand.name, a.title, a.year, a.cand.mbid, a.rg_mbid, a.cover_url, a.preview_url,
                      json.dumps(buy_links(a.cand.name, a.title, locale)), reason(a, self.model), round(a.score, 4),
-                     now))
+                     now, *vals))
                 n += cur.rowcount
         log.info("discovery: %d new suggestions (%d HTTP calls)", n, self.http.calls)
         return n
@@ -451,5 +454,5 @@ def _year(date: str | None) -> int | None:
         return None
 
 
-def run(conn: sqlite3.Connection, cfg, http: Http | None = None, **kw) -> int:
-    return Discovery(conn, cfg, http=http, **kw).run()
+def run(conn: sqlite3.Connection, cfg, http: Http | None = None, user_id: str | None = None, **kw) -> int:
+    return Discovery(conn, cfg, http=http, user_id=user_id, **kw).run()

@@ -40,6 +40,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "ai.rec.recent_penalty_days": 14,         # freshness: penalty fades over this many days
     "ai.rec.never_played_boost": 0.05,
     "ai.rec.skip_early_s": 30,
+    "ai.rec.new_user_plays": 20,              # below this many plays a user gets library-wide cold start
     # mixes
     "ai.mix.daily.minutes": 240,
     "ai.mix.morning.minutes": 90,
@@ -54,6 +55,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "ai.mix.recent_days": 3,
     "ai.mix.morning.hours": [5, 11],          # local hours [start, end)
     "ai.mix.evening.hours": [17, 24],
+    "ai.mix.late_night.hours": [22, 4],
+    "ai.mix.context.min_plays": 30,           # a context mix needs this many plays in that context
+    "ai.mix.context.minutes": 60,
+    "ai.mix.context.max": 3,                  # at most this many context mixes per night
     "ai.mix.keep_days": 60,                   # inactive mixes older than this are deleted
     # discovery
     "ai.discovery.per_week": 10,
@@ -145,13 +150,17 @@ class Settings:
         return round(self.num(key))
 
 
-def load_settings(conn: sqlite3.Connection) -> Settings:
+def load_settings(conn: sqlite3.Connection, user_overrides: dict[str, Any] | None = None) -> Settings:
+    """Global `ai.*` settings, with a user's own `ai.*` keys from `user_settings` layered on top."""
     vals: dict[str, Any] = {}
     for key, value in conn.execute("SELECT key, value FROM settings WHERE key LIKE 'ai.%' AND key NOT LIKE 'ai.status.%'"):
         try:
             vals[key] = json.loads(value)
         except (TypeError, ValueError):
             log.warning("setting %s has invalid JSON %r; using default", key, value)
+    for key, value in (user_overrides or {}).items():
+        if key.startswith("ai.") and not key.startswith("ai.status.") and key in DEFAULT_SETTINGS:
+            vals[key] = value
     return Settings(vals)
 
 
@@ -224,9 +233,7 @@ class Library:
     album: list[str]
     title: list[str]
     duration: np.ndarray
-    blocked: np.ndarray        # bool
-    starred: np.ndarray        # bool
-    rating: np.ndarray         # 0 when unrated
+    added_days: np.ndarray     # days since the track was added to the library
     genre: list[str | None]
     model_version: str
 
@@ -242,8 +249,8 @@ class Library:
 def load_library(conn: sqlite3.Connection, model_version: str) -> Library:
     rows = conn.execute(
         """
-        SELECT t.id, t.artist_id, COALESCE(a.name, ''), t.album_id, t.title, t.duration_s, t.blocked,
-               t.starred_at, t.rating, t.genre, f.embedding, f.dims, f.energy, f.bpm, f.danceability, f.tags
+        SELECT t.id, t.artist_id, COALESCE(a.name, ''), t.album_id, t.title, t.duration_s, t.added_at,
+               NULL, NULL, t.genre, f.embedding, f.dims, f.energy, f.bpm, f.danceability, f.tags
         FROM tracks t
         JOIN features f ON f.track_id = t.id AND f.model_version = ?
         LEFT JOIN artists a ON a.id = t.artist_id
@@ -283,9 +290,8 @@ def load_library(conn: sqlite3.Connection, model_version: str) -> Library:
         tags=[_json_dict(r[15]) for r, _ in good],
         artist=[r[1] for r, _ in good], artist_name=[r[2] for r, _ in good], album=[r[3] for r, _ in good],
         title=[r[4] for r, _ in good], duration=np.array([r[5] or 0.0 for r, _ in good], dtype=float),
-        blocked=np.array([bool(r[6]) for r, _ in good], dtype=bool),
-        starred=np.array([r[7] is not None for r, _ in good], dtype=bool),
-        rating=np.array([r[8] or 0 for r, _ in good], dtype=float), genre=[r[9] for r, _ in good],
+        added_days=np.array([days_ago(parse_ts(r[6]), now_utc()) or 0.0 for r, _ in good], dtype=float),
+        genre=[r[9] for r, _ in good],
         model_version=model_version,
     )
     lib.index = {tid: i for i, tid in enumerate(lib.ids)}

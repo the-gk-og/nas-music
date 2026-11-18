@@ -3,11 +3,18 @@
 Analyser, recommender, mix builder and album discovery. Server core calls only the functions in
 [`api.py`](api.py) and shares data through the AI-owned tables in `db/schema.sql`
 (`features`, `analysis_jobs`, `taste_snapshots`, `mixes`, `mix_tracks`, `suggestions`). The engine
-reads `tracks`, `artists`, `albums`, `events` and `settings`.
+reads `tracks`, `artists`, `albums`, `events`, `settings`, and in v2 `users`, `user_tracks` and
+`user_settings`.
+
+**v2 is multi-user** (docs/v2.md §3, §10). Audio analysis is shared. Everything else (signals, taste
+model, mixes, explanations, suggestions) is computed per user, from that user's `events` and
+`user_tracks` only. See [Multi-user](#multi-user-v2) and [Listening context](#listening-context-v2).
 
 | Module | What it does |
 | --- | --- |
-| `api.py` | The contract. `analyse_pending`, `run_nightly`, `run_weekly_discovery` never raise; `more_like` raises `KeyError` for an unknown or not-yet-analysed track |
+| `api.py` | The contract (v2 signatures). `analyse_pending`, `run_nightly`, `run_nightly_for_user`, `run_weekly_discovery` never raise; `more_like` raises `KeyError` for an unknown user, or an unknown or not-yet-analysed track |
+| `store.py` | Per-user reads and writes (`user_id` filters, the anonymous popularity prior, the transitional v1 path) |
+| `context.py` | `events.context` parsing, collection switches, context mixes, listening-detail signals |
 | `extractors.py` | Audio → features, one class per `model_version` |
 | `models.py` | Downloads and SHA-256-verifies Essentia model files into `data_dir/models/<version>/` |
 | `analyser.py` | Resumable process-pool analysis; `benchmark()` |
@@ -15,6 +22,86 @@ reads `tracks`, `artists`, `albums`, `events` and `settings`.
 | `mixes.py` | Daily / Morning / Evening / Deep Cuts / More-like, ordering and reasons |
 | `discovery.py` | Weekly album suggestions (ListenBrainz, MusicBrainz, Last.fm, Deezer previews) |
 | `__main__.py` | Maintenance CLI: `python -m nasmusic.ai --help` |
+
+## Multi-user (v2)
+
+```python
+analyse_pending(conn, cfg, limit=None) -> int                       # global
+run_nightly(conn, cfg) -> dict[str, list[str]]                      # every non-disabled user
+run_nightly_for_user(conn, cfg, user_id) -> list[str]
+more_like(conn, cfg, user_id, track_id, minutes=40) -> str          # KeyError: unknown user/track
+explain(conn, cfg, user_id, track_id) -> tuple[str, list[str]]
+run_weekly_discovery(conn, cfg) -> dict[str, int]
+```
+
+* **Isolation.** `store.Store` is the only place that reads per-user tables, and every read is
+  filtered by `user_id`. Mixes, taste snapshots and suggestions are written with the user's id, and
+  nightly deactivation and the `more_like` cap (3 active) only touch that user's mixes. "Not
+  interested" answers, and their penalty on similar artists, apply only to the user who gave them. Tests:
+  `tests/ai/test_multiuser.py`.
+* **New users** (< `ai.rec.new_user_plays` = 20 plays) get a library-wide cold start:
+  `0.35·sound + 0.3·popularity + 0.15·recently added + 0.2·own likes`. "Sound" is the match to
+  8 popularity-weighted k-means centres over the **whole library**, and mixes take tracks from those
+  centres in turn, so a first Daily Mix covers the library's range. **Popularity** is the only
+  cross-user input: `SUM(user_tracks.play_count)` per track over *other* users, with no ids, events,
+  stars or skips. A test checks that two different histories with equal per-track play counts give a
+  new user identical scores. From 20 plays on, the user's own centres take over and no cross-user
+  data is read. Reasons say which signal picked a track ("Popular with listeners on this server",
+  "Recently added to the library", "A taste of the library's Hard Bop").
+* **Per-user settings.** A user's `user_settings` rows with `ai.*` keys from the table below override
+  the global value for that user (for example a longer Daily Mix). `user_settings['timezone']`
+  overrides `cfg.timezone`.
+* **Transitional v1 path.** On a database without `user_tracks` (before server core's migration), the
+  engine runs single-user from the v1 columns, and `run_nightly` / `run_weekly_discovery` return the
+  v1 types. `more_like(conn, cfg, track_id, minutes)` and `explain(conn, cfg, track_id)` are also
+  accepted, which is why `explain`'s `track_id` has a default. Remove `Store.legacy` once every
+  deployment is on v2.
+
+## Listening context (v2)
+
+`events.context` (JSON, opt-in per signal) is parsed by `context.py`. Every field is optional, and
+missing means unknown.
+
+* **Model features.** The LightGBM model gains output, motion, place, network and weather as
+  LightGBM categoricals (NaN = unknown), plus temperature. `localHour` / `weekday` from the context
+  override the ones derived from `at`. Context mixes are scored with their context set (for example
+  Drive → `output=car`).
+* **Context mixes** (`mixes.kind = 'context'`, ~`ai.mix.context.minutes`) are built when the user has
+  at least `ai.mix.context.min_plays` (30) plays in that context, at most `ai.mix.context.max` (3) a
+  night, most-played first:
+
+  | Context | When | Title |
+  | --- | --- | --- |
+  | `workout` | `motion=running`, or a place named like gym / fitness / workout / sport / pool / climb | Workout |
+  | `drive` | `output=car` | Drive |
+  | `late_night` | `place=home` and hour in `ai.mix.late_night.hours` (22–4) | Late night |
+  | `place:<name>` | any user-named place (not the phone's default `place-N`) | At \<name\> |
+
+  They may share tracks with the time-of-day mixes. Their "known" share comes from what the user plays
+  in that context ("You often play this when working out"), and Workout follows a high energy curve.
+* **Listening-detail signals.** `repeatOfPrevious` (or the same track replayed within 30 minutes) is
+  +1.5, a strong like. Seeking through the track (forward seeks covering more than 30 % of it, or 3+
+  forward seeks) is −0.5, a mild dislike. Seeking back to re-hear a part is +0.3. Turning the volume
+  up between `volumeChanges` levels is +0.2, and turning it well down or muting is −0.2. A watch's
+  `workout` field (health signal) also marks the Workout context.
+* **Switches** are the contract's `/me/settings` keys: `context.listening`, `context.output`,
+  `context.device`, `context.motion`, `context.location`, `context.weather`, `context.search`,
+  `context.time`, `context.health`. The server already drops switched-off fields on ingest, including
+  per-device overrides (`device.<deviceId>.context.<signal>`). The engine also ignores a signal in
+  *stored* events once its user-level switch is `false`, so turning it off takes effect at once,
+  without erasing anything.
+
+### Contract details the engine relies on (api/openapi.yaml `EventContext`, schema.sql v2)
+
+* `mixes.kind` allows `'context'`. On an older schema whose CHECK refuses it, context mixes are skipped
+  with a warning and the other mixes are still written.
+* `user_settings(user_id, key, value JSON)`. A user's `ai.*` keys and a `timezone` key are honoured
+  too; these are the engine's own additions, not yet in the contract.
+* `seeks[]` `{fromMs, toMs}`; `volumeChanges[]` `{atMs, volume}` (levels 0–1); `weekday` ISO (1 = Monday);
+  `weather` `{condition, tempC, code}`; `output` `"<kind>"` or `"bluetooth:<name>"`.
+* Server core maintains `user_tracks.play_count` / `last_played`, which drive the popularity prior and
+  the 3-day rule.
+* `DELETE /me/data?signal=all` deletes the user's `taste_snapshots` too.
 
 ## Models and `model_version`
 
@@ -130,13 +217,14 @@ Signals per track, decayed with a half-life of `ai.rec.half_life_days`:
 | skip before `ai.rec.skip_early_s` (30 s) | −1.5 (strong) |
 | repeated skip within 30 days | ×1.5, ×2.0 … per earlier skip (capped at −3 per event) |
 | thumbs-up (latest thumb event) | +2.0 |
-| star (`tracks.starred_at`) | +3.0 (strong like) |
-| rating r (`tracks.rating`) | r − 3 (1 star = −2 … 5 stars = +2) |
+| star (`user_tracks.starred_at`) | +3.0 (strong like) |
+| rating r (`user_tracks.rating`) | r − 3 (1 star = −2 … 5 stars = +2) |
 | thumbs-down (latest thumb event) | never in a mix |
+| repeat / seek-through / seek-back / volume (context) | +1.5 / −0.5 / +0.3 / ±0.2 (see Listening context) |
 
 For thumbs, the **latest** `thumb_up` / `thumb_down` / `thumb_clear` event per track wins, and
-`thumb_clear` cancels the earlier thumb. That state overrides `tracks.blocked`, which may lag behind
-the events. Tracks with no thumb events fall back to `tracks.blocked`.
+`thumb_clear` cancels the earlier thumb. That state overrides `user_tracks.blocked`, which may lag behind
+the events. Tracks with no thumb events fall back to `user_tracks.blocked`.
 
 * **Cold start.** Taste is a weighted spherical k-means over the embeddings of positively weighted
   tracks (up to `ai.rec.taste_clusters` centres, about one per 6 liked tracks), so liking metal and
@@ -258,6 +346,7 @@ defaults on the first `run_nightly` / `analyse_pending`, so the web UI can list 
 | `ai.rec.recent_penalty_days` | 14 | freshness penalty window |
 | `ai.rec.never_played_boost` | 0.05 | boost for never-played tracks |
 | `ai.rec.skip_early_s` | 30 | a skip before this is a strong dislike |
+| `ai.rec.new_user_plays` | 20 | below this, a user gets the library-wide cold start |
 | `ai.mix.daily.minutes` | 240 | Daily Mix length |
 | `ai.mix.morning.minutes` / `ai.mix.evening.minutes` | 90 | Morning / Evening length |
 | `ai.mix.deep_cuts.minutes` | 90 | Deep Cuts length |
@@ -268,6 +357,10 @@ defaults on the first `run_nightly` / `analyse_pending`, so the web UI can list 
 | `ai.mix.recent_days` | 3 | nothing played in the last N days |
 | `ai.mix.morning.hours` / `ai.mix.evening.hours` | [5, 11] / [17, 24] | local-time windows |
 | `ai.mix.keep_days` | 60 | delete inactive mixes older than this |
+| `ai.mix.late_night.hours` | [22, 4] | local hours for "Late night" |
+| `ai.mix.context.min_plays` | 30 | plays in a context before it gets a mix |
+| `ai.mix.context.minutes` | 60 | context mix length |
+| `ai.mix.context.max` | 3 | context mixes per night |
 | `ai.discovery.per_week` | 10 | suggestions per run |
 | `ai.discovery.max_per_cluster` | 2 | per artist cluster |
 | `ai.discovery.seed_artists` | 15 | top artists to expand from |

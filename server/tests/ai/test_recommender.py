@@ -7,7 +7,7 @@ import numpy as np
 
 from nasmusic.ai.common import ensure_default_settings
 from nasmusic.ai.recommender import Recommender, TasteModel, event_weight
-from tests.ai.conftest import NOW
+from tests.ai.conftest import NOW, USER
 
 
 def test_event_weights():
@@ -22,10 +22,10 @@ def test_event_weights():
 
 def test_star_rating_and_thumbs_down(conn, cfg, synth):
     t_star, t_rate, t_down = synth.tracks[0], synth.tracks[1], synth.tracks[2]
-    conn.execute("UPDATE tracks SET starred_at = ? WHERE id = ?", ("2026-01-01T00:00:00Z", t_star["id"]))
-    conn.execute("UPDATE tracks SET rating = 1 WHERE id = ?", (t_rate["id"],))
+    synth.user_track(t_star["id"], starred_at="2026-01-01T00:00:00Z")
+    synth.user_track(t_rate["id"], rating=1)
     synth.event(t_down["id"], "thumb_down", NOW - timedelta(days=1))
-    rec = Recommender(conn, cfg)
+    rec = Recommender(conn, cfg, USER)
     i = rec.lib.index
     assert rec.sig.weight[i[t_star["id"]]] == 3.0
     assert rec.sig.weight[i[t_rate["id"]]] == -2.0
@@ -40,7 +40,7 @@ def test_cold_start_multi_centroid(conn, cfg, synth):
             synth.play(t, NOW - timedelta(days=20 + d))
     for t in synth.by_cluster(5)[:10]:
         synth.skip(t, NOW - timedelta(days=20))
-    rec = Recommender(conn, cfg)
+    rec = Recommender(conn, cfg, USER)
     model = rec.train(save=True)
     assert model.mode == "cold"
     assert model.centroids.shape[0] >= 2
@@ -61,7 +61,7 @@ def test_cold_start_multi_centroid(conn, cfg, synth):
 def test_freshness(conn, cfg, synth):
     a, b = synth.by_cluster(2)[0], synth.by_cluster(2)[1]
     synth.play(a, NOW - timedelta(hours=5))
-    rec = Recommender(conn, cfg)
+    rec = Recommender(conn, cfg, USER)
     rec.train(save=False)
     s = rec.scores()
     ia, ib = rec.lib.index[a["id"]], rec.lib.index[b["id"]]
@@ -85,13 +85,13 @@ def test_cold_start_to_learned_switch(conn, cfg, synth):
     ensure_default_settings(conn)
     rng = np.random.default_rng(5)
     _learnable_history(synth, 300, rng)
-    rec = Recommender(conn, cfg)
+    rec = Recommender(conn, cfg, USER)
     m = rec.train(save=True)
     assert rec.sig.n_feedback == 300
     assert m.mode == "cold" and "waiting for feedback" in m.notes["learned"]
 
     _learnable_history(synth, 400, rng)  # now 700 >= 500
-    rec = Recommender(conn, cfg)
+    rec = Recommender(conn, cfg, USER)
     m = rec.train(save=True)
     assert m.mode == "learned", m.notes
     assert m.notes["validation_auc"] >= 0.7
@@ -102,7 +102,7 @@ def test_cold_start_to_learned_switch(conn, cfg, synth):
     # learned model survives a snapshot round trip and is used by a fresh Recommender
     notes = [json.loads(r[0])["mode"] for r in conn.execute("SELECT notes FROM taste_snapshots ORDER BY created_at, rowid")]
     assert notes[-1] == "learned"
-    rec2 = Recommender(conn, cfg)
+    rec2 = Recommender(conn, cfg, USER)
     assert rec2.load_or_train().mode == "learned"
     assert np.allclose(rec2.learned_prob(20, 2), p)
 
@@ -111,7 +111,7 @@ def test_threshold_is_a_setting(conn, cfg, synth):
     ensure_default_settings(conn)
     conn.execute("UPDATE settings SET value = '100' WHERE key = 'ai.rec.learned_min_events'")
     _learnable_history(synth, 250, np.random.default_rng(9))
-    m = Recommender(conn, cfg).train(save=False)
+    m = Recommender(conn, cfg, USER).train(save=False)
     assert m.mode == "learned"
 
 
@@ -121,7 +121,7 @@ def test_latest_thumb_wins_and_clear_cancels(conn, cfg, synth):
     # down then clear: unblocked, even if tracks.blocked lags behind the events
     synth.event(t[0]["id"], "thumb_down", NOW - 3 * day)
     synth.event(t[0]["id"], "thumb_clear", NOW - 2 * day)
-    conn.execute("UPDATE tracks SET blocked = 1 WHERE id = ?", (t[0]["id"],))
+    synth.user_track(t[0]["id"], blocked=1)
     # up then down: blocked
     synth.event(t[1]["id"], "thumb_up", NOW - 3 * day)
     synth.event(t[1]["id"], "thumb_down", NOW - 2 * day)
@@ -132,8 +132,8 @@ def test_latest_thumb_wins_and_clear_cancels(conn, cfg, synth):
     synth.event(t[3]["id"], "thumb_up", NOW - 3 * day)
     synth.event(t[3]["id"], "thumb_clear", NOW - 2 * day)
     # no thumb events: tracks.blocked still counts
-    conn.execute("UPDATE tracks SET blocked = 1 WHERE id = ?", (t[4]["id"],))
-    rec = Recommender(conn, cfg)
+    synth.user_track(t[4]["id"], blocked=1)
+    rec = Recommender(conn, cfg, USER)
     i = [rec.lib.index[x["id"]] for x in t[:5]]
     assert list(rec.sig.blocked[i]) == [False, True, False, False, True]
     assert list(rec.sig.weight[i]) == [0.0, 0.0, 2.0, 0.0, 0.0]
