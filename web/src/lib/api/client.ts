@@ -1,4 +1,10 @@
 import type {
+  Feed,
+  Pin,
+  RadioSeed,
+  SearchResults,
+  ToGetItem,
+  ToGetStatus,
   DataSummary,
   AdminUser,
   Album,
@@ -54,6 +60,8 @@ export interface MediaResolver {
   art(albumId: string, size: number): Promise<string>;
   stream(trackId: string, format: 'opus' | 'flac'): Promise<string>;
   suggestionCover?(id: string, size: number): Promise<string>;
+  catalogCover?(id: string, size: number): Promise<string>;
+  catalogPreview?(id: string): Promise<string>;
 }
 
 /** Accepts `192.168.68.2:8443`, `music.example.com`, `https://…/`, and returns a clean origin. */
@@ -184,6 +192,10 @@ export class ApiClient {
     return this.mode === 'cookie' ? Promise.resolve(this.base + path) : this.blobUrl(path);
   }
 
+  blobUrlPublic(path: string) {
+    return this.blobUrl(path);
+  }
+
   private async blobUrl(path: string): Promise<string> {
     const res = await this.fetchImpl(this.base + path, { headers: this.headers(false), credentials: 'omit' });
     if (!res.ok) throw new ApiError(res.status, res.statusText);
@@ -280,6 +292,31 @@ export class ApiClient {
     this.post<void>(`/queues/${encodeURIComponent(id)}/move`, { from, to });
   saveQueueAsPlaylist = (id: string, name: string) =>
     this.post<Playlist>(`/queues/${encodeURIComponent(id)}/save-as-playlist`, { name });
+
+  // ---- v3: feeds, global search, To get, pins, radio ----
+  home = () => this.get<Feed>('/home');
+  forYou = () => this.get<Feed>('/foryou');
+  globalSearch = (q: string, limit = 20) => this.get<SearchResults>('/search', { q, limit });
+  catalogPreviewSrc = (id: string): Promise<string> => {
+    const path = `/catalog/${encodeURIComponent(id)}/preview`;
+    if (this.media?.catalogPreview) return this.media.catalogPreview(id);
+    return this.mode === 'cookie' ? Promise.resolve(this.base + path) : this.blobUrlPublic(path);
+  };
+  catalogCoverSrc = (id: string, size = 256): Promise<string> => {
+    const path = `/catalog/${encodeURIComponent(id)}/cover?size=${size}`;
+    if (this.media?.catalogCover) return this.media.catalogCover(id, size);
+    return this.mode === 'cookie' ? Promise.resolve(this.base + path) : this.blobUrlPublic(path);
+  };
+  toGet = () => this.get<ToGetItem[]>('/toget');
+  addToGet = (b: { catalogId?: string; type: 'album' | 'track'; title: string; artist: string; year?: number | null; note?: string }) =>
+    this.post<ToGetItem>('/toget', b);
+  patchToGet = (id: string, b: { status?: ToGetStatus; note?: string | null }) => this.patch<ToGetItem>(`/toget/${encodeURIComponent(id)}`, b);
+  deleteToGet = (id: string) => this.del<void>(`/toget/${encodeURIComponent(id)}`);
+  pins = () => this.get<Pin[]>('/pins');
+  pin = (type: Pin['type'], id: string) => this.post<Pin>('/pins', { type, id });
+  unpin = (type: Pin['type'], id: string) => this.del<void>(`/pins/${type}/${encodeURIComponent(id)}`);
+  startRadio = (seed: RadioSeed) => this.post<Queue>('/radio', { seed });
+  radioMore = (queueId: string) => this.post<Queue>(`/radio/${encodeURIComponent(queueId)}/more`);
 
   // ---- admin ----
   invites = () => this.get<Invite[]>('/admin/invites');

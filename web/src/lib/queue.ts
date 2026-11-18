@@ -10,6 +10,8 @@ export interface QueueModel {
   index: number;
   /** Play order when shuffle is on: a permutation of track indices. */
   order?: number[] | null;
+  /** v3 radio queue: endless, topped up from the server. */
+  radio?: boolean;
 }
 
 export const MAX_QUEUES = 20;

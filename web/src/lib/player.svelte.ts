@@ -28,7 +28,8 @@ import {
   type SortKey,
 } from './queue';
 import { session } from './session.svelte';
-import type { CommandAction, ConnectDevice, PlaybackState, Queue, RepeatMode, Track } from './types';
+import type { CommandAction, ConnectDevice, PlaybackState, Queue, RadioSeed, RepeatMode, Track } from './types';
+import { appendNew, needsTopUp } from './v3';
 import { ui } from './ui.svelte';
 
 const LOCAL_KEY = 'nm.player';
@@ -402,7 +403,7 @@ export class Player {
       const q = await session.api.queue(id);
       const tracks = q.tracks ?? [];
       for (const t of tracks) this.trackCache.set(t.id, t);
-      return { id: q.id, name: q.name, slot: q.slot, tracks, index: Math.min(q.currentIndex, Math.max(0, tracks.length - 1)) };
+      return { id: q.id, name: q.name, slot: q.slot, tracks, index: Math.min(q.currentIndex, Math.max(0, tracks.length - 1)), radio: !!q.radio };
     } catch {
       return null;
     }
@@ -474,12 +475,57 @@ export class Player {
     this.loadCurrent(true, startS);
   }
 
+  // ================= radio (v3 §5) =================
+
+  /** Start an endless radio queue ("<seed> radio") and play it here, or on the active device as a remote. */
+  async startRadio(seed: RadioSeed, label = 'Radio') {
+    ui.toast(`Starting ${label}…`);
+    let created: Queue;
+    try {
+      created = await session.api.startRadio(seed);
+    } catch (e) {
+      ui.toast(e instanceof ApiError && (e.status === 404 || e.status === 503) ? 'Radio isn’t available on this server yet' : (e as Error).message);
+      return;
+    }
+    const tracks = created.tracks ?? [];
+    for (const t of tracks) this.trackCache.set(t.id, t);
+    void this.refreshQueues();
+    if (this.isRemote) {
+      this.connect?.command('playQueue', { queueId: created.id, index: 0 });
+      return;
+    }
+    this.queueMeta.set(created.id, { source: 'mix', addedFrom: 'radio' });
+    this.setQueue({ id: created.id, name: created.name, slot: created.slot, tracks, index: 0, radio: true });
+    await this.playIndex(0);
+  }
+
+  private toppingUp = false;
+  private async topUpRadio() {
+    const q = this.queue;
+    if (!q?.radio || this.toppingUp || !needsTopUp(q.tracks.length, q.index)) return;
+    this.toppingUp = true;
+    try {
+      const more = await session.api.radioMore(q.id);
+      const fresh = more.tracks ?? [];
+      for (const t of fresh) this.trackCache.set(t.id, t);
+      if (this.queue?.id !== q.id) return;
+      const tracks = appendNew(this.queue.tracks, fresh);
+      this.queue = { ...this.queue, tracks, order: this.shuffle ? shuffleOrder(tracks.length, this.queue.index) : null };
+      if (this.viewQueue?.id === q.id) this.viewQueue = this.queue;
+    } catch {
+      /* try again on the next track */
+    } finally {
+      this.toppingUp = false;
+    }
+  }
+
   /** Load the current track into <audio>. */
   private loadCurrent(autoplay: boolean, startS = 0) {
     const t = this.current;
     const a = this.audio;
     if (!t || !a) return;
     const token = ++this.loadToken;
+    void this.topUpRadio();
     this.tracker.start(t, this.queue ? (this.queueMeta.get(this.queue.id) ?? {}) : {});
     this.position = startS;
     this.duration = t.durationS;

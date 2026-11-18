@@ -170,6 +170,8 @@ export interface Queue {
   durationS?: number;
   updatedAt?: string;
   tracks?: Track[];
+  /** v3: endless radio queue (client tops it up via POST /radio/{id}/more). */
+  radio?: boolean;
 }
 
 export interface Invite {
@@ -292,3 +294,102 @@ export type ServerMessage =
   | { type: 'queues'; queueId: string }
   | { type: 'pong' }
   | { type: 'error'; detail: string };
+
+// ---- v3 (docs/v3-ux.md) — shapes assumed until api/openapi.yaml defines them ----
+
+export type ItemType = 'album' | 'artist' | 'playlist' | 'mix' | 'radio' | 'queue' | 'track' | 'list' | 'catalog';
+
+/** A card on a shelf / a search hit. `albumId` (or `artIds`) is what the client uses for cover art. */
+export interface ShelfItem {
+  type: ItemType;
+  id: string;
+  title: string;
+  subtitle?: string | null;
+  albumId?: string | null;
+  artIds?: string[];
+  /** Progress for "Continue listening" (0..1). */
+  progress?: number | null;
+  track?: Track;
+  catalog?: CatalogItem;
+}
+
+export type ShelfId =
+  | 'radio'
+  | 'devices'
+  | 'recent'
+  | 'continue'
+  | 'pinned'
+  | 'mixes'
+  | 'radios'
+  | 'because'
+  | 'release_radar'
+  | 'suggestions'
+  | 'toget'
+  | 'blends'
+  | 'wrapped'
+  | string;
+
+export interface Shelf {
+  id: ShelfId;
+  title: string;
+  /** e.g. "because:<trackId>" shelves share kind 'because'. */
+  kind?: string;
+  items: ShelfItem[];
+}
+
+export interface Feed {
+  shelves: Shelf[];
+}
+
+export interface CatalogItem {
+  id: string;
+  type: 'album' | 'track' | 'artist';
+  title: string;
+  artist: string;
+  album?: string | null;
+  year?: number | null;
+  hasCover?: boolean;
+  hasPreview?: boolean;
+  owned: boolean;
+  /** Library id when owned (album/track/artist id). */
+  ownedId?: string | null;
+  mbid?: string | null;
+  inToGet?: boolean;
+}
+
+export interface SearchResults {
+  top?: ShelfItem | null;
+  tracks: Track[];
+  albums: Album[];
+  artists: Artist[];
+  playlists: Playlist[];
+  queues?: Queue[];
+  catalog: CatalogItem[];
+}
+
+export type ToGetStatus = 'want' | 'got' | 'dismissed';
+
+export interface ToGetItem {
+  id: string;
+  type: 'album' | 'track';
+  title: string;
+  artist: string;
+  year?: number | null;
+  catalogId?: string | null;
+  hasCover?: boolean;
+  status: ToGetStatus;
+  note?: string | null;
+  links?: { name: string; url: string }[];
+  createdAt?: string;
+}
+
+export interface Pin {
+  type: 'album' | 'artist' | 'playlist' | 'mix';
+  id: string;
+  title: string;
+  subtitle?: string | null;
+  albumId?: string | null;
+  pinnedAt?: string;
+}
+
+export type RadioSeed = { type: 'random' } | { type: 'track' | 'artist' | 'album' | 'playlist'; id: string };

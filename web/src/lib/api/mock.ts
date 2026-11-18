@@ -3,7 +3,12 @@
 import type { SocketLike } from '../connect';
 import { parseLrc } from '../lyrics';
 import type {
+  CatalogItem,
   ClientMessage,
+  Pin,
+  Shelf,
+  ShelfItem,
+  ToGetItem,
   ConnectDevice,
   Invite,
   PlaybackState,
@@ -55,6 +60,10 @@ export class MockBackend {
   mixes = mockMixes(this.lib.tracks);
   latencyMs = 60;
   hub = new MockHub(this);
+  pinsList: Pin[] = [];
+  toget: ToGetItem[] = [];
+  catalog: CatalogItem[] = [];
+  radioSeen = new Map<string, Set<string>>();
 
   constructor() {
     const t = this.lib.tracks;
@@ -68,6 +77,20 @@ export class MockBackend {
       updatedAt: iso(),
     });
     if (!this.queues[0].trackIds.length) this.queues[0].trackIds = t.slice(0, 3).map((x) => x.id);
+    this.pinsList.push({ type: 'playlist', id: 'p1', title: 'car', subtitle: 'Playlist', albumId: 'al0', pinnedAt: iso() });
+    this.catalog = [
+      ...['Harbor Lights|Undertow|2021', 'Moss & Mortar|Field Notes|2019', 'The Paper Kites|Lantern Days|2018', 'Sable Coast|Night Swimming|2023'].map((x, i) => {
+        const [artist, title, year] = x.split('|');
+        return { id: 'c' + i, type: 'album' as const, title, artist, year: Number(year), hasCover: true, hasPreview: true, owned: false };
+      }),
+      ...['Undertow|Harbor Lights', 'Glass Rivers|Sable Coast', 'Conversations on a Train|Moss & Mortar'].map((x, i) => {
+        const [title, artist] = x.split('|');
+        return { id: 'ct' + i, type: 'track' as const, title, artist, album: null, hasCover: true, hasPreview: true, owned: false };
+      }),
+      // An owned match, to show the "In your library" marking.
+      { id: 'c9', type: 'album' as const, title: t[0].album, artist: t[0].artist, year: t[0].year, hasCover: true, hasPreview: true, owned: true, ownedId: t[0].albumId },
+    ];
+    this.toget.push({ id: 'tg1', type: 'album', title: 'Field Notes', artist: 'Moss & Mortar', year: 2019, catalogId: 'c1', hasCover: true, status: 'want', note: null, links: storeLinks('Moss & Mortar', 'Field Notes'), createdAt: iso() });
     this.queues.push({ id: 'q2', name: 'All songs', slot: 1, currentIndex: 0, positionMs: 0, trackIds: t.slice(0, 25).map((x) => x.id), updatedAt: iso() });
   }
 
@@ -105,6 +128,7 @@ export class MockBackend {
       trackCount: tracks.length,
       durationS: tracks.reduce((s, t) => s + t.durationS, 0),
       updatedAt: q.updatedAt,
+      radio: this.radioSeen?.has(q.id) || undefined,
       ...(withTracks ? { tracks } : {}),
     };
   }
@@ -443,6 +467,67 @@ export class MockBackend {
       return this.plOut(p);
     }
 
+    // ---- v3 ----
+    if (path === '/home') return { shelves: this.homeShelves(who.deviceId) };
+    if (path === '/foryou') return { shelves: this.forYouShelves() };
+    if (path === '/search') return this.search(qs.get('q') ?? '');
+    if ((r = m(/^\/catalog\/([^/]+)\/(cover|preview)$/))) throw new HttpError(404, 'mock media is served by the media resolver');
+    if (path === '/toget') {
+      if (method === 'POST') {
+        const b = body as { catalogId?: string; type: 'album' | 'track'; title: string; artist: string; year?: number; note?: string };
+        const existing = this.toget.find((x) => b.catalogId && x.catalogId === b.catalogId);
+        if (existing) {
+          existing.status = 'want';
+          return existing;
+        }
+        const item: ToGetItem = { id: nid('tg'), type: b.type, title: b.title, artist: b.artist, year: b.year ?? null, catalogId: b.catalogId ?? null, hasCover: !!b.catalogId, status: 'want', note: b.note ?? null, links: storeLinks(b.artist, b.title), createdAt: iso() };
+        this.toget.unshift(item);
+        return item;
+      }
+      return this.toget;
+    }
+    if ((r = m(/^\/toget\/([^/]+)$/))) {
+      const item = this.toget.find((x) => x.id === r![1]);
+      if (!item) throw new HttpError(404, 'not found');
+      if (method === 'DELETE') {
+        this.toget = this.toget.filter((x) => x !== item);
+        return undefined;
+      }
+      if (body.status) item.status = body.status as ToGetItem['status'];
+      if ('note' in body) item.note = (body.note as string) ?? null;
+      return item;
+    }
+    if (path === '/pins') {
+      if (method === 'POST') {
+        const type = body.type as Pin['type'];
+        const id = String(body.id);
+        if (!this.pinsList.some((p) => p.type === type && p.id === id)) this.pinsList.unshift({ ...this.describe(type, id), pinnedAt: iso() });
+        return this.pinsList.find((p) => p.type === type && p.id === id);
+      }
+      return this.pinsList;
+    }
+    if ((r = m(/^\/pins\/([a-z]+)\/([^/]+)$/)) && method === 'DELETE') {
+      this.pinsList = this.pinsList.filter((p) => !(p.type === r![1] && p.id === decodeURIComponent(r![2])));
+      return undefined;
+    }
+    if (path === '/radio' && method === 'POST') {
+      const seed = (body.seed ?? { type: 'random' }) as { type: string; id?: string };
+      const name = seed.type === 'random' ? 'Random radio' : `${this.describe(seed.type as Pin['type'], seed.id ?? '').title} radio`;
+      const picks = this.radioPicks(seed, new Set(), 25);
+      const q = this.createQueue(name, picks, 0);
+      this.radioSeen.set(q.id, new Set(picks));
+      return { ...this.queueOut(q), radio: true };
+    }
+    if ((r = m(/^\/radio\/([^/]+)\/more$/))) {
+      const q = this.getQ(r[1]);
+      const seen = this.radioSeen.get(q.id) ?? new Set(q.trackIds);
+      const more = this.radioPicks({ type: 'track', id: q.trackIds.at(-1) }, seen, 15);
+      more.forEach((id) => seen.add(id));
+      q.trackIds.push(...more);
+      q.updatedAt = iso();
+      return { ...this.queueOut(q), radio: true };
+    }
+
     // admin
     if (path.startsWith('/admin/') && !me.isAdmin) throw new HttpError(403, 'Admins only');
     if (path === '/admin/invites') {
@@ -476,6 +561,117 @@ export class MockBackend {
     throw new HttpError(404, `mock: no route ${method} ${path}`);
   }
 
+  private item(type: ShelfItem['type'], id: string): ShelfItem {
+    const d = this.describe(type as Pin['type'], id);
+    return { type, id, title: d.title, subtitle: d.subtitle, albumId: d.albumId };
+  }
+
+  describe(type: Pin['type'] | string, id: string): Pin {
+    const L = this.lib;
+    if (type === 'album') {
+      const a = L.albums.find((x) => x.id === id);
+      return { type: 'album', id, title: a?.title ?? id, subtitle: a ? `Album · ${a.artist}` : 'Album', albumId: id };
+    }
+    if (type === 'artist') {
+      const a = L.artists.find((x) => x.id === id);
+      return { type: 'artist', id, title: a?.name ?? id, subtitle: 'Artist', albumId: L.albums.find((x) => x.artistId === id)?.id ?? null };
+    }
+    if (type === 'playlist') {
+      const p = this.playlists.find((x) => x.id === id);
+      return { type: 'playlist', id, title: p?.name ?? id, subtitle: 'Playlist', albumId: this.lib.tracks.find((t) => t.id === p?.trackIds[0])?.albumId ?? null };
+    }
+    if (type === 'mix') {
+      const m = this.mixes.find((x) => x.id === id);
+      return { type: 'mix', id, title: m?.title ?? id, subtitle: 'Mix', albumId: m?.tracks[0]?.track.albumId ?? null };
+    }
+    const t = this.lib.tracks.find((x) => x.id === id);
+    return { type: 'album', id, title: t?.title ?? id, subtitle: t?.artist ?? null, albumId: t?.albumId ?? null };
+  }
+
+  private radioPicks(seed: { type: string; id?: string }, seen: Set<string>, n: number): string[] {
+    const L = this.lib.tracks;
+    let genre: string | null | undefined = null;
+    if (seed.type === 'track') genre = L.find((t) => t.id === seed.id)?.genre;
+    else if (seed.type === 'album') genre = L.find((t) => t.albumId === seed.id)?.genre;
+    else if (seed.type === 'artist') genre = L.find((t) => t.artistId === seed.id)?.genre;
+    const pool = L.filter((t) => !seen.has(t.id));
+    const near = pool.filter((t) => !genre || t.genre === genre);
+    const rest = pool.filter((t) => !near.includes(t));
+    const shuffled = [...near.sort(() => Math.random() - 0.5), ...rest.sort(() => Math.random() - 0.5)];
+    return shuffled.slice(0, n).map((t) => t.id);
+  }
+
+  private homeShelves(_deviceId: string): Shelf[] {
+    const L = this.lib;
+    const recent: ShelfItem[] = [
+      this.item('album', L.albums[0].id),
+      { type: 'mix', id: this.mixes[0].id, title: this.mixes[0].title, subtitle: 'Mix', artIds: this.mixes[0].tracks.slice(0, 4).map((x) => x.track.albumId) },
+      this.item('playlist', 'p1'),
+      this.item('album', L.albums[3].id),
+      this.item('album', L.albums[5].id),
+      { type: 'radio', id: 'artist:ar2', title: `${L.artists[2].name} radio`, subtitle: 'Radio', albumId: L.albums[4].id },
+      this.item('playlist', 'p2'),
+      this.item('album', L.albums[8].id),
+    ];
+    const cont: ShelfItem[] = [
+      { ...this.item('album', L.albums[2].id), progress: 0.4 },
+      ...this.queues.filter((q) => q.currentIndex > 0 || q.positionMs > 0).map((q) => ({ type: 'queue' as const, id: q.id, title: q.name, subtitle: 'Queue', albumId: L.tracks.find((t) => t.id === q.trackIds[q.currentIndex])?.albumId, progress: q.trackIds.length ? q.currentIndex / q.trackIds.length : 0 })),
+    ];
+    return [
+      { id: 'radio', title: 'Start radio', items: [] },
+      { id: 'devices', title: 'Your devices', items: [] },
+      { id: 'recent', title: 'Recently played', items: recent },
+      { id: 'continue', title: 'Continue listening', items: cont },
+      { id: 'pinned', title: 'Pinned', items: this.pinsList.map((p) => ({ type: p.type, id: p.id, title: p.title, subtitle: p.subtitle, albumId: p.albumId })) },
+    ];
+  }
+
+  private forYouShelves(): Shelf[] {
+    const L = this.lib;
+    const seed = L.tracks[4];
+    const similar = L.tracks.filter((t) => t.genre === seed.genre && t.id !== seed.id).slice(0, 10);
+    return [
+      { id: 'mixes', title: 'Your mixes', items: this.mixes.map((m) => ({ type: 'mix' as const, id: m.id, title: m.title, subtitle: `${m.tracks.length} songs`, artIds: m.tracks.slice(0, 4).map((x) => x.track.albumId) })) },
+      {
+        id: 'radios',
+        title: 'Radio',
+        items: [
+          { type: 'radio', id: `track:${seed.id}`, title: `${seed.title} radio`, subtitle: 'Song radio', albumId: seed.albumId },
+          ...L.artists.slice(0, 5).map((a) => ({ type: 'radio' as const, id: `artist:${a.id}`, title: `${a.name} radio`, subtitle: 'Artist radio', albumId: L.albums.find((x) => x.artistId === a.id)?.id })),
+        ],
+      },
+      { id: `because:${seed.id}`, kind: 'because', title: `Because you played ${seed.title}`, items: similar.map((t) => ({ type: 'track' as const, id: t.id, title: t.title, subtitle: t.artist, albumId: t.albumId, track: this.pubTrack(t) })) },
+      { id: 'suggestions', title: 'Suggestions', items: mockSuggestions.filter((x) => x.status === 'new').map((x) => ({ type: 'catalog' as const, id: x.id, title: x.album, subtitle: x.artist, catalog: { id: x.id, type: 'album' as const, title: x.album, artist: x.artist, year: x.year, hasCover: true, hasPreview: true, owned: false } })) },
+      { id: 'toget', title: 'To get', items: this.toget.filter((x) => x.status === 'want').map((x) => ({ type: 'catalog' as const, id: x.id, title: x.title, subtitle: x.artist, catalog: { id: x.catalogId ?? x.id, type: x.type, title: x.title, artist: x.artist, hasCover: x.hasCover, hasPreview: !!x.catalogId, owned: false, inToGet: true } })) },
+    ];
+  }
+
+  pubTrack(t: TrackInfo): Track {
+    return this.pub(t);
+  }
+
+  private search(q: string) {
+    const term = q.toLowerCase().trim();
+    const L = this.lib;
+    const tracks = L.tracks.filter((t) => t.title.toLowerCase().includes(term) || t.artist.toLowerCase().includes(term)).slice(0, 20).map((t) => this.pub(t));
+    const albums = L.albums.filter((a) => a.title.toLowerCase().includes(term) || a.artist.toLowerCase().includes(term));
+    const artists = L.artists.filter((a) => a.name.toLowerCase().includes(term));
+    const playlists = this.playlists.filter((p) => p.name.toLowerCase().includes(term)).map((p) => this.plOut(p, false));
+    const queues = this.queues.filter((x) => x.name.toLowerCase().includes(term)).map((x) => this.queueOut(x, false));
+    const getIds = new Set(this.toget.filter((x) => x.status === 'want').map((x) => x.catalogId));
+    const catalog = this.catalog
+      .filter((c) => c.title.toLowerCase().includes(term) || c.artist.toLowerCase().includes(term))
+      .map((c) => ({ ...c, inToGet: getIds.has(c.id) }));
+    const top: ShelfItem | null = artists[0]
+      ? { type: 'artist', id: artists[0].id, title: artists[0].name, subtitle: 'Artist', albumId: L.albums.find((a) => a.artistId === artists[0].id)?.id }
+      : albums[0]
+        ? { type: 'album', id: albums[0].id, title: albums[0].title, subtitle: `Album · ${albums[0].artist}`, albumId: albums[0].id }
+        : tracks[0]
+          ? { type: 'track', id: tracks[0].id, title: tracks[0].title, subtitle: tracks[0].artist, albumId: tracks[0].albumId, track: tracks[0] }
+          : null;
+    return { top, tracks, albums, artists, playlists, queues, catalog };
+  }
+
   // ---- media ----
   private streams = new Map<string, string>();
   media: MediaResolver = {
@@ -493,6 +689,8 @@ export class MockBackend {
       return u;
     },
     suggestionCover: async (id) => artSvg(id, mockSuggestions.find((s) => s.id === id)?.album ?? '?'),
+    catalogCover: async (id) => artSvg(id, this.catalog.find((c) => c.id === id)?.title ?? mockSuggestions.find((s) => s.id === id)?.album ?? '?'),
+    catalogPreview: async (id) => URL.createObjectURL(toneWav(id, 30)),
   };
 
   /** WebSocket replacement for Connect. */
@@ -500,6 +698,14 @@ export class MockBackend {
     const token = new URL(url, 'ws://mock').searchParams.get('token');
     return this.hub.connect(token);
   };
+}
+
+function storeLinks(artist: string, title: string) {
+  const q = encodeURIComponent(`${artist} ${title}`);
+  return [
+    { name: 'Bandcamp', url: `https://bandcamp.com/search?q=${q}` },
+    { name: 'Qobuz', url: `https://www.qobuz.com/search?q=${q}` },
+  ];
 }
 
 function hashSource(id: string) {
@@ -627,7 +833,13 @@ export class MockHub {
           return;
         }
         if (target === PHONE) this.phoneCommand(msg.action, msg.args ?? {});
-        else this.socketOf(target)?.deliver({ type: 'command', action: msg.action, args: msg.args ?? {}, fromDeviceId: s.deviceId });
+        else if (msg.action === 'playTracks') {
+          // Like the real server: create the queue, deliver playQueue to the active device.
+          const a = msg.args ?? {};
+          const nq = this.backend.createQueue(String(a.queueName ?? 'Now playing'), a.trackIds as string[], Number(a.index ?? 0));
+          this.broadcast({ type: 'queues', queueId: nq.id });
+          this.socketOf(target)?.deliver({ type: 'command', action: 'playQueue', args: { queueId: nq.id, index: nq.currentIndex }, fromDeviceId: s.deviceId });
+        } else this.socketOf(target)?.deliver({ type: 'command', action: msg.action, args: msg.args ?? {}, fromDeviceId: s.deviceId });
         break;
       }
     }
