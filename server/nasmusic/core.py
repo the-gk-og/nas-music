@@ -31,7 +31,10 @@ def open_db(cfg: Config) -> sqlite3.Connection:
 def init_db(cfg: Config) -> None:
     conn = open_db(cfg)
     try:
-        db.init(conn)
+        db.init(conn, cfg.admin_username, cfg.admin_password_hash)
+        from nasmusic.auth import users
+
+        users.ensure_admin(conn, cfg.admin_username, cfg.admin_password_hash)
         server_id(conn)
     finally:
         conn.close()

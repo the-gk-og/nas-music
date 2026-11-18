@@ -1,4 +1,5 @@
-"""HTTP API under /api/v1 — implements api/openapi.yaml."""
+"""Library, audio and listening endpoints under /api/v1 (api/openapi.yaml). Everything is per user:
+starred/rating, favourites, mixes, events, suggestions, lyrics edits and the manifest are the caller's."""
 from __future__ import annotations
 
 import logging
@@ -9,12 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from nasmusic import auth
-from nasmusic.ai import api as ai
+from nasmusic.app import ai_adapter, mixes, suggestions
 from nasmusic.app import events as events_mod
-from nasmusic.app import mixes, suggestions
 from nasmusic.app.context import AppContext, ctx, db, device
-from nasmusic.core import ai_config
+from nasmusic.auth import Device
+from nasmusic.core import ai_config, now_iso
 from nasmusic.library import art, lyrics, queries
 from nasmusic.stream import clamp_bitrate, media_type
 from nasmusic.stream.transcode import TranscodeError
@@ -26,13 +26,12 @@ public = APIRouter()
 router = APIRouter(dependencies=[Depends(device)])
 
 Conn = sqlite3.Connection
+Limit = Query(200, ge=1, le=1000)
+Offset = Query(0, ge=0)
 
 
 def _404(what: str = "not found"):
     raise HTTPException(404, what)
-
-
-# ---------- public ----------
 
 
 @public.get("/health")
@@ -40,25 +39,11 @@ def health(c: AppContext = Depends(ctx)):
     return {"status": "ok", "serverId": c.server_id, "version": c.version}
 
 
-class PairRequest(BaseModel):
-    pairCode: str = Field(min_length=1, max_length=64)
-    deviceName: str = Field(min_length=1, max_length=200)
-
-
-@public.post("/pair")
-def pair(body: PairRequest, conn: Conn = Depends(db)):
-    res = auth.pair_device(conn, body.pairCode, body.deviceName)
-    if res is None:
-        raise HTTPException(403, "pair code invalid or expired")
-    device_id, token = res
-    return {"deviceId": device_id, "deviceToken": token}
-
-
 # ---------- library ----------
 
 
 @router.get("/library/artists")
-def list_artists(offset: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000), conn: Conn = Depends(db)):
+def list_artists(offset: int = Offset, limit: int = Limit, conn: Conn = Depends(db)):
     return queries.artists(conn, offset, limit)
 
 
@@ -68,44 +53,66 @@ def get_artist(artist_id: str, conn: Conn = Depends(db), c: AppContext = Depends
 
 
 @router.get("/library/albums")
-def list_albums(
-    artistId: str | None = None,
-    sort: Literal["name", "year", "added"] = "name",
-    offset: int = Query(0, ge=0),
-    limit: int = Query(200, ge=1, le=1000),
-    conn: Conn = Depends(db),
-    c: AppContext = Depends(ctx),
-):
+def list_albums(artistId: str | None = None, sort: Literal["name", "year", "added"] = "name",
+                offset: int = Offset, limit: int = Limit, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
     return queries.albums(conn, c.data_dir, artistId, sort, offset, limit)
 
 
 @router.get("/library/albums/{album_id}")
-def get_album(album_id: str, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
-    return queries.album(conn, album_id, c.data_dir) or _404()
+def get_album(album_id: str, me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    return queries.album(conn, me.user_id, album_id, c.data_dir) or _404()
+
+
+@router.get("/library/tracks")
+def all_tracks(sort: Literal["title", "added", "year"] = "title", offset: int = Offset, limit: int = Limit,
+               me: Device = Depends(device), conn: Conn = Depends(db)):
+    return queries.all_tracks(conn, me.user_id, sort, offset, limit)
 
 
 @router.get("/library/tracks/{track_id}")
-def get_track(track_id: str, conn: Conn = Depends(db)):
-    return queries.track(conn, track_id) or _404()
+def get_track(track_id: str, me: Device = Depends(device), conn: Conn = Depends(db)):
+    return queries.track(conn, me.user_id, track_id) or _404()
+
+
+@router.get("/library/tracks/{track_id}/info")
+def track_info(track_id: str, me: Device = Depends(device), conn: Conn = Depends(db)):
+    return queries.track_info(conn, me.user_id, track_id) or _404()
+
+
+@router.get("/library/folders")
+def folders(path: str = Query("", max_length=4096), me: Device = Depends(device), conn: Conn = Depends(db)):
+    return queries.folders(conn, me.user_id, path) or _404("no such folder")
+
+
+@router.get("/library/genres")
+def genres(conn: Conn = Depends(db)):
+    return queries.genres(conn)
+
+
+@router.get("/library/genres/{genre:path}/tracks")
+def genre_tracks(genre: str, offset: int = Offset, limit: int = Limit, me: Device = Depends(device),
+                 conn: Conn = Depends(db)):
+    return queries.genre_tracks(conn, me.user_id, genre, offset, limit)
 
 
 @router.get("/library/search")
-def search(q: str = Query(..., max_length=200), limit: int = Query(50, ge=1, le=500), conn: Conn = Depends(db),
-           c: AppContext = Depends(ctx)):
-    return queries.search(conn, q, limit, c.data_dir)
+def search(q: str = Query(..., max_length=200), limit: int = Query(50, ge=1, le=500), me: Device = Depends(device),
+           conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    return queries.search(conn, me.user_id, q, limit, c.data_dir)
+
+
+@router.get("/lists/{kind}")
+def smart_list(kind: Literal["favourites", "recently_added", "recently_played", "most_played", "not_played"],
+               offset: int = Offset, limit: int = Limit, me: Device = Depends(device), conn: Conn = Depends(db)):
+    return queries.smart_list(conn, me.user_id, kind, offset, limit)
 
 
 # ---------- audio + art ----------
 
 
 @router.get("/stream/{track_id}")
-def stream(
-    track_id: str,
-    format: Literal["opus", "flac"] = "opus",
-    bitrate: int = Query(160, ge=1, le=1000),
-    conn: Conn = Depends(db),
-    c: AppContext = Depends(ctx),
-):
+def stream(track_id: str, format: Literal["opus", "flac"] = "opus", bitrate: int = Query(160, ge=1, le=1000),
+           conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
     row = queries.track_file(conn, track_id)
     if row is None:
         _404()
@@ -141,20 +148,20 @@ def album_art(album_id: str, size: int = Query(512, ge=16, le=4096), conn: Conn 
 
 
 @router.get("/favourites")
-def favourites(conn: Conn = Depends(db)):
-    return queries.favourites(conn)
+def favourites(me: Device = Depends(device), conn: Conn = Depends(db)):
+    return queries.favourites(conn, me.user_id)
 
 
 @router.put("/favourites/{track_id}", status_code=204)
-def put_favourite(track_id: str, conn: Conn = Depends(db)):
-    if not events_mod.star(conn, track_id):
+def put_favourite(track_id: str, me: Device = Depends(device), conn: Conn = Depends(db)):
+    if not events_mod.star(conn, me.user_id, track_id):
         _404()
     return Response(status_code=204)
 
 
 @router.delete("/favourites/{track_id}", status_code=204)
-def delete_favourite(track_id: str, conn: Conn = Depends(db)):
-    if not events_mod.unstar(conn, track_id):
+def delete_favourite(track_id: str, me: Device = Depends(device), conn: Conn = Depends(db)):
+    if not events_mod.unstar(conn, me.user_id, track_id):
         _404()
     return Response(status_code=204)
 
@@ -163,22 +170,22 @@ def delete_favourite(track_id: str, conn: Conn = Depends(db)):
 
 
 @router.get("/mixes/today")
-def mixes_today(conn: Conn = Depends(db)):
-    return mixes.today(conn)
+def mixes_today(me: Device = Depends(device), conn: Conn = Depends(db)):
+    return mixes.today(conn, me.user_id)
 
 
 @router.get("/mixes/{mix_id}")
-def get_mix(mix_id: str, conn: Conn = Depends(db)):
-    return mixes.get(conn, mix_id) or _404()
+def get_mix(mix_id: str, me: Device = Depends(device), conn: Conn = Depends(db)):
+    return mixes.get(conn, me.user_id, mix_id) or _404()
 
 
 @router.post("/mixes/more-like/{track_id}")
-def more_like(track_id: str, minutes: int = Query(40, ge=10, le=240), conn: Conn = Depends(db),
-              c: AppContext = Depends(ctx)):
-    if queries.track(conn, track_id) is None:
+def more_like(track_id: str, minutes: int = Query(40, ge=10, le=240), me: Device = Depends(device),
+              conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    if queries.track(conn, me.user_id, track_id) is None:
         _404()
     try:
-        mix_id = ai.more_like(conn, ai_config(c.cfg), track_id, minutes)
+        mix_id = ai_adapter.more_like(conn, ai_config(c.cfg), me.user_id, track_id, minutes)
     except NotImplementedError as e:
         raise HTTPException(503, "recommender not available yet") from e
     except KeyError as e:  # the AI's signal for "unknown or not analysed yet"
@@ -186,62 +193,114 @@ def more_like(track_id: str, minutes: int = Query(40, ge=10, le=240), conn: Conn
     except Exception as e:
         log.exception("more_like failed for %s", track_id)
         raise HTTPException(500, "could not build mix") from e
-    mix = mixes.get(conn, mix_id)
+    mix = mixes.get(conn, me.user_id, mix_id)
     if mix is None:
-        log.error("more_like returned %r but no such mix exists", mix_id)
+        log.error("more_like returned %r but the user has no such mix", mix_id)
         raise HTTPException(500, "could not build mix")
     return mix
 
 
 @router.get("/tracks/{track_id}/why")
-def why(track_id: str, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
-    if queries.track(conn, track_id) is None:
+def why(track_id: str, me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    if queries.track(conn, me.user_id, track_id) is None:
         _404()
     try:
-        reason, similar_ids = ai.explain(conn, ai_config(c.cfg), track_id)
+        reason, similar_ids = ai_adapter.explain(conn, ai_config(c.cfg), me.user_id, track_id)
     except NotImplementedError as e:
         raise HTTPException(503, "recommender not available yet") from e
     except Exception as e:
         log.exception("explain failed for %s", track_id)
         raise HTTPException(500, "could not explain track") from e
-    similar = queries.tracks_by_ids(conn, list(similar_ids)[:3])
+    similar = queries.tracks_by_ids(conn, me.user_id, list(similar_ids)[:3])
     return {"reason": reason, "similarTo": [similar[i] for i in similar_ids[:3] if i in similar]}
 
 
-@router.get("/tracks/{track_id}/lyrics")
-def track_lyrics(track_id: str, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+# ---------- lyrics ----------
+
+
+def _lyrics_options(conn: Conn, c: AppContext, uid: str, track_id: str) -> dict[str, lyrics.Lyrics]:
     row = queries.track_file(conn, track_id)
     if row is None:
         _404()
+    opts: dict[str, lyrics.Lyrics] = {}
+    ov = conn.execute("SELECT raw FROM lyrics_overrides WHERE user_id = ? AND track_id = ?",
+                      (uid, track_id)).fetchone()
+    if ov:
+        parsed = lyrics.from_raw(ov[0], "user")
+        if parsed:
+            opts["user"] = parsed
     src = c.cfg.library_root / row["path"]
-    if not src.is_file():
-        _404("file missing")
-    found = lyrics.read(src)
-    if found is None:
+    if src.is_file():
+        opts.update(lyrics.read_all(src))
+    return opts
+
+
+def _lyrics_response(track_id: str, chosen: lyrics.Lyrics, opts: dict) -> dict:
+    return {**chosen.as_api(track_id), "sources": list(opts), "canEdit": True}
+
+
+@router.get("/tracks/{track_id}/lyrics")
+def track_lyrics(track_id: str, source: Literal["user", "embedded", "lrc_file"] | None = None,
+                 me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    opts = _lyrics_options(conn, c, me.user_id, track_id)
+    if source is not None:
+        chosen = opts.get(source)
+    elif "user" in opts:
+        chosen = opts["user"]
+    else:
+        files = [o for k, o in opts.items() if k != "user"]
+        synced = [o for o in files if o.synced]
+        chosen = (synced or files or [None])[0]
+    if chosen is None:
         _404("no lyrics")
-    return found.as_api(track_id)
+    return _lyrics_response(track_id, chosen, opts)
+
+
+class LyricsBody(BaseModel):
+    raw: str = Field(max_length=200_000)
+
+
+@router.put("/tracks/{track_id}/lyrics")
+def put_lyrics(track_id: str, body: LyricsBody, me: Device = Depends(device), conn: Conn = Depends(db),
+               c: AppContext = Depends(ctx)):
+    if queries.track_file(conn, track_id) is None:
+        _404()
+    parsed = lyrics.from_raw(body.raw, "user")
+    if parsed is None:
+        raise HTTPException(422, "lyrics are empty")
+    conn.execute("INSERT INTO lyrics_overrides (user_id, track_id, raw, updated_at) VALUES (?, ?, ?, ?) "
+                 "ON CONFLICT(user_id, track_id) DO UPDATE SET raw = excluded.raw, updated_at = excluded.updated_at",
+                 (me.user_id, track_id, body.raw, now_iso()))
+    return _lyrics_response(track_id, parsed, _lyrics_options(conn, c, me.user_id, track_id))
+
+
+@router.delete("/tracks/{track_id}/lyrics", status_code=204)
+def delete_lyrics(track_id: str, me: Device = Depends(device), conn: Conn = Depends(db)):
+    conn.execute("DELETE FROM lyrics_overrides WHERE user_id = ? AND track_id = ?", (me.user_id, track_id))
+    return Response(status_code=204)
 
 
 # ---------- sync + events ----------
 
 
 @router.get("/sync/manifest")
-def sync_manifest(favouritesFormat: Literal["opus", "flac"] = "opus", conn: Conn = Depends(db),
-                  c: AppContext = Depends(ctx)):
-    return build_manifest(conn, favouritesFormat, opus=c.opus)
+def sync_manifest(favouritesFormat: Literal["opus", "flac"] = "opus", me: Device = Depends(device),
+                  conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    return build_manifest(conn, me.user_id, favouritesFormat, opus=c.opus)
 
 
 @router.post("/events")
-def post_events(batch: events_mod.EventBatch, conn: Conn = Depends(db), dev: auth.Device = Depends(device)):
-    return events_mod.ingest(conn, batch.events, dev.id)
+def post_events(batch: events_mod.EventBatch, me: Device = Depends(device), conn: Conn = Depends(db),
+                c: AppContext = Depends(ctx)):
+    return events_mod.ingest(conn, batch.events, me.id, me.user_id, weather=c.weather)
 
 
 # ---------- suggestions ----------
 
 
 @router.get("/suggestions")
-def list_suggestions(conn: Conn = Depends(db)):
-    return suggestions.list_all(conn)
+def list_suggestions(me: Device = Depends(device), conn: Conn = Depends(db)):
+    return suggestions.list_all(conn, me.user_id)
 
 
 class SuggestionAnswer(BaseModel):
@@ -249,20 +308,21 @@ class SuggestionAnswer(BaseModel):
 
 
 @router.post("/suggestions/{suggestion_id}", status_code=204)
-def post_suggestion(suggestion_id: str, body: SuggestionAnswer, conn: Conn = Depends(db)):
-    if not suggestions.answer(conn, suggestion_id, body.status):
+def post_suggestion(suggestion_id: str, body: SuggestionAnswer, me: Device = Depends(device),
+                    conn: Conn = Depends(db)):
+    if not suggestions.answer(conn, me.user_id, suggestion_id, body.status):
         _404()
     return Response(status_code=204)
 
 
 @router.get("/suggestions/{suggestion_id}/preview")
-async def suggestion_preview(suggestion_id: str, request: Request, conn: Conn = Depends(db),
-                             c: AppContext = Depends(ctx)):
-    return await suggestions.preview(c, conn, suggestion_id, request.headers.get("range"))
+async def suggestion_preview(suggestion_id: str, request: Request, me: Device = Depends(device),
+                             conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    return await suggestions.preview(c, conn, me.user_id, suggestion_id, request.headers.get("range"))
 
 
 @router.get("/suggestions/{suggestion_id}/cover")
-def suggestion_cover(suggestion_id: str, size: int = Query(512, ge=16, le=4096), conn: Conn = Depends(db),
-                     c: AppContext = Depends(ctx)):
-    out = suggestions.cover(c, conn, suggestion_id, size)
+def suggestion_cover(suggestion_id: str, size: int = Query(512, ge=16, le=4096), me: Device = Depends(device),
+                     conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    out = suggestions.cover(c, conn, me.user_id, suggestion_id, size)
     return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})

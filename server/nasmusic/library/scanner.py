@@ -207,14 +207,21 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool) -> ScanResult:
             prev = existing.get(f.rel)
             conn.execute(
                 "INSERT INTO tracks (id, path, album_id, artist_id, title, track_no, disc_no, year, genre, "
-                "duration_s, flac_bytes, mtime, mbid, added_at, missing) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0) "
+                "duration_s, flac_bytes, mtime, mbid, added_at, missing, composer, lyricist, comment, album_artist, "
+                "codec, bitrate, sample_rate, bits_per_sample, channels, folder) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET album_id = excluded.album_id, artist_id = excluded.artist_id, "
                 "title = excluded.title, track_no = excluded.track_no, disc_no = excluded.disc_no, "
                 "year = excluded.year, genre = excluded.genre, duration_s = excluded.duration_s, "
-                "flac_bytes = excluded.flac_bytes, mtime = excluded.mtime, mbid = excluded.mbid, missing = 0",
+                "flac_bytes = excluded.flac_bytes, mtime = excluded.mtime, mbid = excluded.mbid, missing = 0, "
+                "composer = excluded.composer, lyricist = excluded.lyricist, comment = excluded.comment, "
+                "album_artist = excluded.album_artist, codec = excluded.codec, bitrate = excluded.bitrate, "
+                "sample_rate = excluded.sample_rate, bits_per_sample = excluded.bits_per_sample, "
+                "channels = excluded.channels, folder = excluded.folder",
                 (tid, f.rel, al_id, ta_id, t.title or Path(f.rel).stem, t.track_no, t.disc_no, t.year,
-                 t.genre, t.duration_s, f.size, f.mtime, t.mb_track, now),
+                 t.genre, t.duration_s, f.size, f.mtime, t.mb_track, now, t.composer, t.lyricist, t.comment,
+                 t.albumartist, t.codec, t.bitrate, t.sample_rate, t.bits_per_sample, t.channels,
+                 "" if rel_dir in ("", ".") else rel_dir),
             )
             if prev is None:
                 res.added += 1

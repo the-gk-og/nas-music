@@ -42,30 +42,31 @@ def to_dict(r: sqlite3.Row) -> dict:
     }
 
 
-def list_all(conn: sqlite3.Connection) -> list[dict]:
-    return [to_dict(r) for r in conn.execute(f"SELECT * FROM suggestions {ORDER}")]
+def list_all(conn: sqlite3.Connection, uid: str) -> list[dict]:
+    return [to_dict(r) for r in conn.execute(f"SELECT * FROM suggestions WHERE user_id = ? {ORDER}", (uid,))]
 
 
-def answer(conn: sqlite3.Connection, suggestion_id: str, status: str) -> bool:
+def answer(conn: sqlite3.Connection, uid: str, suggestion_id: str, status: str) -> bool:
     return conn.execute(
-        "UPDATE suggestions SET status = ?, answered_at = ? WHERE id = ?", (status, now_iso(), suggestion_id)
+        "UPDATE suggestions SET status = ?, answered_at = ? WHERE id = ? AND user_id = ?",
+        (status, now_iso(), suggestion_id, uid),
     ).rowcount == 1
 
 
-def _row(conn: sqlite3.Connection, suggestion_id: str) -> sqlite3.Row | None:
+def _row(conn: sqlite3.Connection, uid: str, suggestion_id: str) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT id, cover_url, preview_url FROM suggestions WHERE id = ?", (suggestion_id,)
+        "SELECT id, cover_url, preview_url FROM suggestions WHERE id = ? AND user_id = ?", (suggestion_id, uid)
     ).fetchone()
 
 
 # ---------- preview ----------
 
 
-async def preview(c: AppContext, conn: sqlite3.Connection, suggestion_id: str,
+async def preview(c: AppContext, conn: sqlite3.Connection, uid: str, suggestion_id: str,
                   range_header: str | None) -> StreamingResponse:
     """Stream the 30 s preview through. The Deezer link is resolved fresh on every request (its signed
     MP3 URLs expire within minutes) and the audio is never written to disk."""
-    row = _row(conn, suggestion_id)
+    row = _row(conn, uid, suggestion_id)
     if row is None or not row["preview_url"]:
         raise HTTPException(404, "no preview")
     client = upstream.async_client(c.http_transport)
@@ -105,9 +106,9 @@ def cover_dir(data_dir: Path) -> Path:
     return art.art_dir(data_dir) / "suggestions"
 
 
-def cover(c: AppContext, conn: sqlite3.Connection, suggestion_id: str, size: int) -> Path:
+def cover(c: AppContext, conn: sqlite3.Connection, uid: str, suggestion_id: str, size: int) -> Path:
     """Return a cached, resized JPEG of the suggestion's cover, fetching it if needed (blocking)."""
-    row = _row(conn, suggestion_id)
+    row = _row(conn, uid, suggestion_id)
     if row is None or not row["cover_url"]:
         raise HTTPException(404, "no cover")
     b = art.bucket(size)
