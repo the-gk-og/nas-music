@@ -42,6 +42,22 @@ interface DownloadDao {
 }
 
 @Dao
+interface LyricsDao : org.nasmusic.app.lyrics.LyricsCacheStore {
+    @Query("SELECT * FROM lyrics WHERE trackId = :trackId")
+    override suspend fun get(trackId: String): LyricsEntity?
+
+    @Upsert
+    override suspend fun put(entity: LyricsEntity)
+
+    @Query("DELETE FROM lyrics WHERE trackId = :trackId")
+    override suspend fun delete(trackId: String)
+
+    /** Drops on-demand (streamed) entries older than [cutoffMs]; lyrics of downloaded tracks are kept. */
+    @Query("DELETE FROM lyrics WHERE fetchedAtMs < :cutoffMs AND trackId NOT IN (SELECT trackId FROM downloads)")
+    suspend fun pruneStreamed(cutoffMs: Long)
+}
+
+@Dao
 interface CacheDao {
     @Upsert
     suspend fun put(c: CacheEntity)

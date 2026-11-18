@@ -12,6 +12,7 @@ import org.nasmusic.app.data.api.Track
 import org.nasmusic.app.data.db.DownloadEntity
 import org.nasmusic.app.data.prefs.AppSettings
 import org.nasmusic.app.feedback.EventUploader
+import org.nasmusic.app.lyrics.LyricsRepository
 import org.nasmusic.app.net.RouteSelector
 
 /**
@@ -63,9 +64,12 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                 LocalTrack(it.trackId, if (it.format == "flac") AudioFormat.FLAC else AudioFormat.OPUS, it.bytes, it.complete)
             })
 
+            val lyrics = LyricsRepository(c.db.lyrics(), { api.lyrics(it) }, org.nasmusic.app.data.api.ApiFactory.json)
             for (id in plan.toDelete) {
                 downloader.deleteAll(id)
                 dao.delete(id)
+                lyrics.drop(id)
+                c.lyrics.drop(id) // also clears the app-wide in-memory copy
             }
 
             val keptBytes = plan.keep.sumOf { k -> local.firstOrNull { it.trackId == k.trackId }?.bytes ?: 0L }
@@ -115,6 +119,15 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                         trackJson = known[k.trackId]?.let { LibraryRepository.encodeTrack(it) } ?: d.trackJson))
                 }
             }
+            // Lyrics for everything the phone should hold, so they work offline. 404s are stored as
+            // "none" markers; already-cached tracks are not asked again.
+            setProgress(workDataOf(KEY_STATUS to "Fetching lyrics"))
+            for (id in manifest.items.map { it.trackId }.distinct()) {
+                if (isStopped) break
+                lyrics.prefetch(id)
+            }
+            c.db.lyrics().pruneStreamed(System.currentTimeMillis() - 30L * 24 * 3600 * 1000)
+
             val skipped = plan.toDownload.size - chosen.size
             val summary = "Synced $done, failed $failed" + if (skipped > 0) ", $skipped over storage limit" else ""
             if (failed > 0 && !manual) Result.retry() else Result.success(workDataOf(KEY_STATUS to summary))

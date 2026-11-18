@@ -97,6 +97,18 @@ data class Mix(
 )
 
 @Serializable
+data class LyricLine(val timeMs: Long? = null, val text: String)
+
+@Serializable
+data class Lyrics(
+    val trackId: String,
+    val synced: Boolean,
+    val source: String,
+    val lines: List<LyricLine> = emptyList(),
+    val text: String = "",
+)
+
+@Serializable
 data class WhyResponse(val reason: String, val similarTo: List<Track> = emptyList())
 
 @Serializable

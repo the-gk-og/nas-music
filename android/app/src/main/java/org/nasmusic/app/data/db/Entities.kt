@@ -35,6 +35,15 @@ data class DownloadEntity(
     val updatedAtMs: Long = System.currentTimeMillis(),
 )
 
+/** Cached lyrics. [status] is "found" (with [json]) or "none" (server said 404, don't keep asking). */
+@Entity(tableName = "lyrics")
+data class LyricsEntity(
+    @PrimaryKey val trackId: String,
+    val status: String,
+    val json: String? = null,
+    val fetchedAtMs: Long = System.currentTimeMillis(),
+)
+
 /** Last known server responses (today's mixes, favourites) for offline display. */
 @Entity(tableName = "cache")
 data class CacheEntity(

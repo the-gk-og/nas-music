@@ -10,6 +10,7 @@ import org.nasmusic.app.data.api.ApiFactory
 import org.nasmusic.app.data.db.AppDatabase
 import org.nasmusic.app.data.prefs.SettingsRepository
 import org.nasmusic.app.feedback.EventRecorder
+import org.nasmusic.app.lyrics.LyricsRepository
 import org.nasmusic.app.net.HttpClients
 import org.nasmusic.app.net.Route
 import org.nasmusic.app.net.RoutedCallFactory
@@ -56,5 +57,6 @@ class AppContainer(val context: Context) {
     )
 
     val library = LibraryRepository(api, db, ApiFactory.json)
+    val lyrics = LyricsRepository(db.lyrics(), { api.lyrics(it) }, ApiFactory.json)
     val player = PlayerConnection(context)
 }
