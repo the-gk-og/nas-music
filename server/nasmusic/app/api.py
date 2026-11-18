@@ -15,7 +15,7 @@ from nasmusic.app import events as events_mod
 from nasmusic.app import mixes, suggestions
 from nasmusic.app.context import AppContext, ctx, db, device
 from nasmusic.core import ai_config
-from nasmusic.library import art, queries
+from nasmusic.library import art, lyrics, queries
 from nasmusic.stream import clamp_bitrate, media_type
 from nasmusic.stream.transcode import TranscodeError
 from nasmusic.sync import manifest as build_manifest
@@ -206,6 +206,20 @@ def why(track_id: str, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
         raise HTTPException(500, "could not explain track") from e
     similar = queries.tracks_by_ids(conn, list(similar_ids)[:3])
     return {"reason": reason, "similarTo": [similar[i] for i in similar_ids[:3] if i in similar]}
+
+
+@router.get("/tracks/{track_id}/lyrics")
+def track_lyrics(track_id: str, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    row = queries.track_file(conn, track_id)
+    if row is None:
+        _404()
+    src = c.cfg.library_root / row["path"]
+    if not src.is_file():
+        _404("file missing")
+    found = lyrics.read(src)
+    if found is None:
+        _404("no lyrics")
+    return found.as_api(track_id)
 
 
 # ---------- sync + events ----------
