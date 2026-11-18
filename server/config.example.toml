@@ -1,0 +1,24 @@
+# nas-music server configuration. Copy to config.toml (gitignored) or /data/config.toml in Docker,
+# and point NASMUSIC_CONFIG (or `nasmusic --config PATH`) at it. Relative paths are relative to this file.
+
+library_root = "/music"            # read-only music library
+data_dir = "/data"                 # database, TLS cert, Opus + art caches, AI models
+
+lan_host = "192.168.1.50"          # the NAS's static LAN IP (cert SAN + pairing QR)
+https_port = 8443                  # LAN HTTPS, self-signed cert pinned by the app
+http_port = 8080                   # plain HTTP for cloudflared only; never publish this port
+# bind_host = "0.0.0.0"
+server_name = "Home NAS"           # shown in the app after pairing
+
+# Cloudflare Tunnel + Access service token. Only ever handed to the app inside the pairing QR.
+tunnel_url = ""                    # e.g. "https://music.example.com"
+cf_access_client_id = ""
+cf_access_client_secret = ""
+
+# Web admin password: run `nasmusic hash-password` and paste the output here.
+admin_password_hash = ""
+
+timezone = "Europe/London"         # nightly mixes run at 02:00, discovery Sunday 03:00 in this zone
+opus_cache_gb = 20                 # LRU limit for transcoded Opus files
+# lastfm_api_key = ""              # optional, used by weekly discovery
+# scan_interval_minutes = 5
