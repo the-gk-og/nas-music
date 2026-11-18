@@ -53,7 +53,9 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.nasmusic.app.AppContainer
+import org.nasmusic.app.data.api.ApiUrls
 import org.nasmusic.app.data.api.WhyResponse
+import retrofit2.HttpException
 import org.nasmusic.app.feedback.EventType
 import org.nasmusic.app.playback.MediaItems
 import org.nasmusic.app.playback.PlaySource
@@ -77,6 +79,7 @@ fun NowPlayingScreen(c: AppContainer, onClose: () -> Unit) {
     var thumb by remember(trackId) { mutableIntStateOf(0) }
     var rating by remember(trackId) { mutableIntStateOf(0) }
     var moreLikeBusy by remember { mutableStateOf(false) }
+    var moreLikeMessage by remember(trackId) { mutableStateOf<String?>(null) }
     var seeking by remember { mutableStateOf<Float?>(null) }
     LaunchedEffect(trackId) { why = runCatching { c.api.why(trackId) }.getOrNull() }
 
@@ -124,7 +127,8 @@ fun NowPlayingScreen(c: AppContainer, onClose: () -> Unit) {
         }
 
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            IconToggleButton(thumb == -1, { if (thumb != -1) { thumb = -1; record(EventType.THUMB_DOWN) } }) {
+            // Tapping the active thumb again clears it (thumb_clear).
+            IconToggleButton(thumb == -1, { if (thumb == -1) { thumb = 0; record(EventType.THUMB_CLEAR) } else { thumb = -1; record(EventType.THUMB_DOWN) } }) {
                 Icon(if (thumb == -1) Icons.Filled.ThumbDown else Icons.Outlined.ThumbDown, "Thumbs down")
             }
             IconToggleButton(starred, { on ->
@@ -134,7 +138,7 @@ fun NowPlayingScreen(c: AppContainer, onClose: () -> Unit) {
             }) {
                 Icon(if (starred) Icons.Filled.Star else Icons.Filled.StarBorder, if (starred) "Unstar" else "Star")
             }
-            IconToggleButton(thumb == 1, { if (thumb != 1) { thumb = 1; record(EventType.THUMB_UP) } }) {
+            IconToggleButton(thumb == 1, { if (thumb == 1) { thumb = 0; record(EventType.THUMB_CLEAR) } else { thumb = 1; record(EventType.THUMB_UP) } }) {
                 Icon(if (thumb == 1) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp, "Thumbs up")
             }
         }
@@ -156,14 +160,20 @@ fun NowPlayingScreen(c: AppContainer, onClose: () -> Unit) {
             enabled = !moreLikeBusy,
             onClick = {
                 moreLikeBusy = true
+                moreLikeMessage = null
                 scope.launch {
-                    runCatching { c.api.moreLike(trackId) }.onSuccess { mix ->
-                        c.player.play(mix.tracks.map { it.track }, 0, PlaySource.MORE_LIKE, mix.id, mix.tracks.map { it.reason })
-                    }
+                    runCatching { c.api.moreLike(trackId) }
+                        .onSuccess { mix ->
+                            c.player.play(mix.tracks.map { it.track }, 0, PlaySource.MORE_LIKE, mix.id, mix.tracks.map { it.reason })
+                        }
+                        .onFailure { e -> moreLikeMessage = ApiUrls.moreLikeError((e as? HttpException)?.code()) }
                     moreLikeBusy = false
                 }
             },
         ) { Icon(Icons.Default.AutoAwesome, null); Text(" More like this") }
+        moreLikeMessage?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        }
     }
 }
 

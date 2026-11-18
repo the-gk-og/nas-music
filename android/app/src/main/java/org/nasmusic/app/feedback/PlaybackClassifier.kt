@@ -3,7 +3,7 @@ package org.nasmusic.app.feedback
 /** Event types from the API's Event schema. */
 enum class EventType(val wire: String) {
     PLAY("play"), SKIP("skip"), STAR("star"), UNSTAR("unstar"), RATE("rate"),
-    THUMB_UP("thumb_up"), THUMB_DOWN("thumb_down"),
+    THUMB_UP("thumb_up"), THUMB_DOWN("thumb_down"), THUMB_CLEAR("thumb_clear"),
 }
 
 /** Why playback left a track. */

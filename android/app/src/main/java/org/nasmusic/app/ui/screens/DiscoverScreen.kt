@@ -33,7 +33,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import org.nasmusic.app.data.api.ApiUrls
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import org.nasmusic.app.AppContainer
@@ -52,14 +55,19 @@ fun DiscoverScreen(c: AppContainer) {
     LaunchedEffect(Unit) {
         list = runCatching { c.api.suggestions() }.onFailure { error = true }.getOrNull()
     }
-    // A separate, throwaway player for previews so the main queue is left alone.
-    val preview = remember { ExoPlayer.Builder(c.context).build() }
+    // A separate, throwaway player for previews so the main queue is left alone. It goes through the
+    // routed, authenticated client: previews are proxied by our server, never fetched from third parties.
+    val preview = remember {
+        ExoPlayer.Builder(c.context)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(c.callFactory)))
+            .build()
+    }
     DisposableEffect(Unit) { onDispose { preview.release() } }
 
     fun togglePreview(s: Suggestion) {
         if (previewing == s.id) { preview.stop(); previewing = null; return }
-        val url = s.previewUrl ?: return
-        preview.setMediaItem(MediaItem.fromUri(url))
+        if (!s.hasPreview) return
+        preview.setMediaItem(MediaItem.fromUri(ApiUrls.suggestionPreview(s.id)))
         preview.prepare(); preview.play()
         previewing = s.id
     }
@@ -80,7 +88,7 @@ fun DiscoverScreen(c: AppContainer) {
                 Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
                     Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         AsyncImage(
-                            model = s.coverUrl, contentDescription = null, contentScale = ContentScale.Crop,
+                            model = if (s.hasCover) ApiUrls.suggestionCover(s.id) else null, contentDescription = null, contentScale = ContentScale.Crop,
                             modifier = Modifier.size(88.dp).clip(RoundedCornerShape(6.dp)),
                         )
                         Column(Modifier.weight(1f)) {
@@ -88,7 +96,7 @@ fun DiscoverScreen(c: AppContainer) {
                             Text(listOfNotNull(s.artist, s.year?.toString()).joinToString(" · "))
                             Text(s.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (s.previewUrl != null) {
+                        if (s.hasPreview) {
                             IconButton(onClick = { togglePreview(s) }) {
                                 Icon(if (previewing == s.id) Icons.Default.Stop else Icons.Default.PlayArrow, "Preview")
                             }

@@ -113,6 +113,11 @@ data class ManifestItem(
     val format: AudioFormat,
     val why: String,
     val mixIds: List<String> = emptyList(),
+    val durationS: Double? = null,
+    /** Size of the file /stream returns for this format. */
+    val bytes: Long? = null,
+    /** false = [bytes] is an estimate (Opus not transcoded yet): plan with it, never verify against it. */
+    val bytesExact: Boolean = false,
 )
 
 @Serializable
@@ -149,6 +154,9 @@ data class Suggestion(
     val year: Int? = null,
     val artistMbid: String? = null,
     val releaseGroupMbid: String? = null,
+    val hasCover: Boolean = false,
+    val hasPreview: Boolean = false,
+    /** Upstream sources the server proxies; the app must never fetch these. */
     val coverUrl: String? = null,
     val previewUrl: String? = null,
     val buyLinks: List<BuyLink> = emptyList(),

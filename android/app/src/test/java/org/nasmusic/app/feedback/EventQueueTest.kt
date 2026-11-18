@@ -99,8 +99,10 @@ class EventQueueTest {
         rec.record(EventType.SKIP, "t1", positionS = 12.5, durationS = 200.0, source = "mix", mixId = "m1")
         online = true
         rec.record(EventType.THUMB_UP, "t2")
+        rec.record(EventType.THUMB_CLEAR, "t2")
         advanceUntilIdle()
-        val (a, b) = q.rows.values.toList()
+        val (a, b, clear) = q.rows.values.toList()
+        assertEquals("thumb_clear", clear.type)
         assertTrue(a.offline)
         assertEquals("skip", a.type)
         assertEquals(12.5, a.positionS!!, 0.0)
@@ -108,6 +110,6 @@ class EventQueueTest {
         assertEquals("2026-11-18T03:00:00Z", a.at)
         assertFalse(b.offline)
         assertTrue(a.id != b.id)
-        assertEquals(1, uploads)
+        assertEquals(2, uploads)
     }
 }

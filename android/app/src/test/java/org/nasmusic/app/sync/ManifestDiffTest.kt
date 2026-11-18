@@ -66,6 +66,22 @@ class ManifestDiffTest {
         assertEquals(4_120_000L, ManifestDiff.estimateBytes(OPUS, 200.0, null, 160))
     }
 
+    @Test fun `planning uses manifest sizes and subtracts partial downloads`() {
+        val exact = ManifestItem("a", FLAC, "favourite", durationS = 200.0, bytes = 30_000_000, bytesExact = true)
+        assertEquals(30_000_000L, ManifestDiff.plannedBytes(exact, 0, 160))
+        assertEquals(29_000_000L, ManifestDiff.plannedBytes(exact, 1_000_000, 160))
+        val noSize = ManifestItem("b", OPUS, "mix", durationS = 200.0)
+        assertEquals(4_120_000L, ManifestDiff.plannedBytes(noSize, 0, 160)) // falls back to duration x bitrate
+    }
+
+    @Test fun `only exact sizes are used to verify a finished download`() {
+        val exact = ManifestItem("a", FLAC, "favourite", bytes = 100, bytesExact = true)
+        val estimate = ManifestItem("b", OPUS, "mix", bytes = 100, bytesExact = false)
+        assertTrue(ManifestDiff.sizeMismatch(exact, 99))
+        assertFalse(ManifestDiff.sizeMismatch(exact, 100))
+        assertFalse(ManifestDiff.sizeMismatch(estimate, 57))
+    }
+
     @Test fun `night window`() {
         assertTrue(SyncScheduler.inWindow(3, 0, 3, 2))
         assertTrue(SyncScheduler.inWindow(4, 59, 3, 2))

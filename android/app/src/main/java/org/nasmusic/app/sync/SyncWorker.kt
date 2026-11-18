@@ -70,9 +70,7 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
 
             val keptBytes = plan.keep.sumOf { k -> local.firstOrNull { it.trackId == k.trackId }?.bytes ?: 0L }
             val sized = plan.toDownload.map { item ->
-                val t = known[item.trackId] ?: runCatching { api.track(item.trackId) }.getOrNull()?.also { known[it.id] = it }
-                val est = ManifestDiff.estimateBytes(item.format, t?.durationS, t?.flacBytes, settings.streamBitrate)
-                item to (est - downloader.partialBytes(item.trackId, item.format)).coerceAtLeast(0)
+                item to ManifestDiff.plannedBytes(item, downloader.partialBytes(item.trackId, item.format), settings.streamBitrate)
             }
             val limit = settings.storageLimitMb.toLong() * 1024 * 1024
             val chosen = ManifestDiff.fitToLimit(sized, keptBytes, limit)
@@ -88,6 +86,10 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                 }
                 try {
                     val f = downloader.download(item.trackId, item.format, settings.streamBitrate)
+                    if (ManifestDiff.sizeMismatch(item, f.length())) {
+                        f.delete()
+                        throw java.io.IOException("Size mismatch for ${item.trackId}")
+                    }
                     dao.upsert(
                         DownloadEntity(
                             trackId = item.trackId,
