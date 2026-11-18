@@ -82,26 +82,26 @@ missing means unknown.
 * **Listening-detail signals.** `repeatOfPrevious` (or the same track replayed within 30 minutes) is
   +1.5, a strong like. Seeking through the track (forward seeks covering more than 30 % of it, or 3+
   forward seeks) is −0.5, a mild dislike. Seeking back to re-hear a part is +0.3. Turning the volume
-  up is +0.2, and turning it well down is −0.2.
-* **Switches.** If `user_settings[<switch>]` is `false`, the fields it covers are ignored, even in old
-  events. Assumed keys: `context.listening_details`, `context.audio_output`, `context.device_network`,
-  `context.movement`, `context.location`, `context.weather`, `context.time` (see Spec gaps).
+  up between `volumeChanges` levels is +0.2, and turning it well down or muting is −0.2. A watch's
+  `workout` field (health signal) also marks the Workout context.
+* **Switches** are the contract's `/me/settings` keys: `context.listening`, `context.output`,
+  `context.device`, `context.motion`, `context.location`, `context.weather`, `context.search`,
+  `context.time`, `context.health`. The server already drops switched-off fields on ingest, including
+  per-device overrides (`device.<deviceId>.context.<signal>`). The engine also ignores a signal in
+  *stored* events once its user-level switch is `false`, so turning it off takes effect at once,
+  without erasing anything.
 
-### Spec gaps (assumptions the AI engine made; to settle in docs/v2.md)
+### Contract details the engine relies on (api/openapi.yaml `EventContext`, schema.sql v2)
 
-1. `mixes.kind` must allow `'context'`. If the CHECK refuses it, context mixes are skipped with a warning
-   and the other mixes are still written.
-2. `user_settings`: primary key `(user_id, key)` and JSON `value`. The switch key names above and the
-   `timezone` key are not in the spec.
-3. `events.context` sub-formats:
-   * `seeks[]` items `{from, to}` in seconds (or `fromMs`/`toMs`);
-   * `volumeChanges[]` items `{from, to}` on a 0–1 scale, `{delta}`, or a bare number;
-   * `weather` `{condition, tempC}` or a plain condition string;
-   * `output` `"<kind>"` or `"bluetooth:<name>"`.
-4. `user_tracks.play_count` must be kept up to date by server core: it drives the popularity prior.
-   Same for `last_played`, which mixes use for "nothing played in the last 3 days".
-5. An index on `events(user_id, at)`.
-6. `DELETE /me/data?signal=all` should also delete that user's `taste_snapshots` (they encode taste).
+* `mixes.kind` allows `'context'`. On an older schema whose CHECK refuses it, context mixes are skipped
+  with a warning and the other mixes are still written.
+* `user_settings(user_id, key, value JSON)`. A user's `ai.*` keys and a `timezone` key are honoured
+  too; these are the engine's own additions, not yet in the contract.
+* `seeks[]` `{fromMs, toMs}`; `volumeChanges[]` `{atMs, volume}` (levels 0–1); `weekday` ISO (1 = Monday);
+  `weather` `{condition, tempC, code}`; `output` `"<kind>"` or `"bluetooth:<name>"`.
+* Server core maintains `user_tracks.play_count` / `last_played`, which drive the popularity prior and
+  the 3-day rule.
+* `DELETE /me/data?signal=all` deletes the user's `taste_snapshots` too.
 
 ## Models and `model_version`
 
