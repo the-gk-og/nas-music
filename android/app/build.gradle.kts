@@ -43,6 +43,7 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
     }
     // F-Droid reproducibility: no dependency-info blob signed with a Google key.
     dependenciesInfo {
@@ -97,4 +98,6 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.okhttp.tls)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

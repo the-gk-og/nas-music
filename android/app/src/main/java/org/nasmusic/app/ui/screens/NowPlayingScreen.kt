@@ -54,6 +54,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.nasmusic.app.AppContainer
 import org.nasmusic.app.data.api.ApiUrls
+import org.nasmusic.app.data.api.Lyrics
+import org.nasmusic.app.lyrics.LyricsResult
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.filled.Lyrics
 import org.nasmusic.app.data.api.WhyResponse
 import retrofit2.HttpException
 import org.nasmusic.app.feedback.EventType
@@ -65,7 +73,9 @@ import org.nasmusic.app.ui.formatDuration
 @Composable
 fun NowPlayingScreen(c: AppContainer, onClose: () -> Unit) {
     val s by c.player.state.collectAsStateWithLifecycle()
-    LaunchedEffect(Unit) { while (true) { c.player.refresh(); delay(500) } }
+    var showLyrics by remember { mutableStateOf(false) }
+    // Faster position updates while the lyrics sheet is open so the highlighted line keeps up.
+    LaunchedEffect(showLyrics) { while (true) { c.player.refresh(); delay(if (showLyrics) 150 else 500) } }
     val item = s.item ?: return Message("Nothing playing")
     val trackId = item.mediaId
     val extras = item.mediaMetadata.extras
@@ -82,6 +92,9 @@ fun NowPlayingScreen(c: AppContainer, onClose: () -> Unit) {
     var moreLikeMessage by remember(trackId) { mutableStateOf<String?>(null) }
     var seeking by remember { mutableStateOf<Float?>(null) }
     LaunchedEffect(trackId) { why = runCatching { c.api.why(trackId) }.getOrNull() }
+    var lyrics by remember(trackId) { mutableStateOf<LyricsResult?>(null) }
+    LaunchedEffect(trackId) { lyrics = c.lyrics.get(trackId) }
+    val found = (lyrics as? LyricsResult.Found)?.lyrics
 
     fun record(type: EventType, rate: Int? = null) = c.events.record(
         type, trackId, positionS = s.positionMs / 1000.0, durationS = durationS.takeIf { it > 0 },
@@ -144,6 +157,9 @@ fun NowPlayingScreen(c: AppContainer, onClose: () -> Unit) {
         }
         RatingBar(rating) { r -> rating = r; record(EventType.RATE, r) }
 
+        if (found != null) {
+            OutlinedButton(onClick = { showLyrics = true }) { Icon(Icons.Default.Lyrics, null); Text(" Lyrics") }
+        }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Why this song?", style = MaterialTheme.typography.titleSmall)
@@ -174,6 +190,20 @@ fun NowPlayingScreen(c: AppContainer, onClose: () -> Unit) {
         moreLikeMessage?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         }
+    }
+    if (showLyrics && found != null) {
+        LyricsSheet(found, s.positionMs, onSeek = c.player::seekTo, onDismiss = { showLyrics = false })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LyricsSheet(lyrics: Lyrics, positionMs: Long, onSeek: (Long) -> Unit, onDismiss: () -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        LyricsView(lyrics, positionMs, onSeek, Modifier.fillMaxHeight(0.9f))
     }
 }
 
