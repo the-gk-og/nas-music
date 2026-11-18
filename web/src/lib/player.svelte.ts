@@ -450,7 +450,8 @@ export class Player {
 
   private setQueue(q: QueueModel) {
     this.queue = this.shuffle ? { ...q, order: shuffleOrder(q.tracks.length, q.index) } : q;
-    if (!this.viewQueue || this.viewQueue.id === q.id || this.viewQueue.id === this.queue.id) this.viewQueue = this.queue;
+    // The Queues tab follows the queue that starts playing.
+    this.viewQueue = this.queue;
     this.ab = { a: null, b: null };
   }
 

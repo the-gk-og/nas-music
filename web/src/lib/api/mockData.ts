@@ -50,7 +50,7 @@ export function buildLibrary(): MockLibrary {
         const id = `t${albumNo}_${n}`;
         const d = 60 + (h % 150);
         dur += d;
-        const ttl = `${TITLE_A[h % TITLE_A.length]} ${TITLE_B[(h >> 5) % TITLE_B.length]}`;
+        const ttl = `${TITLE_A[h % TITLE_A.length]} ${TITLE_B[(h >>> 5) % TITLE_B.length]}`;
         const folder = `${name}/${year} - ${title}`;
         const fileName = `${String(n).padStart(2, '0')} ${ttl}.flac`;
         tracks.push({
@@ -142,14 +142,14 @@ export const mockSuggestions: Suggestion[] = [
 export function artSvg(albumId: string, title: string): string {
   const h = hash(albumId);
   const c1 = `hsl(${h % 360} 65% 45%)`;
-  const c2 = `hsl(${(h >> 9) % 360} 70% 22%)`;
+  const c2 = `hsl(${(h >>> 9) % 360} 70% 22%)`;
   const initials = title
     .split(/\s+/)
     .map((w) => w[0])
     .join('')
     .slice(0, 3)
     .replace(/[<&>"]/g, '');
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs><rect width="256" height="256" fill="url(#g)"/><circle cx="${60 + (h % 140)}" cy="${60 + ((h >> 4) % 140)}" r="${30 + (h % 50)}" fill="rgba(255,255,255,.18)"/><text x="20" y="232" font-family="sans-serif" font-size="44" font-weight="700" fill="rgba(255,255,255,.9)">${initials}</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs><rect width="256" height="256" fill="url(#g)"/><circle cx="${60 + (h % 140)}" cy="${60 + ((h >>> 4) % 140)}" r="${30 + (h % 50)}" fill="rgba(255,255,255,.18)"/><text x="20" y="232" font-family="sans-serif" font-size="44" font-weight="700" fill="rgba(255,255,255,.9)">${initials}</text></svg>`;
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
