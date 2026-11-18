@@ -43,7 +43,8 @@ import org.nasmusic.app.ui.TrackRow
 import org.nasmusic.app.ui.formatDuration
 
 @Composable
-fun TodayScreen(c: AppContainer, onOpenPlayer: () -> Unit) {
+fun TodayScreen(c: AppContainer) {
+    val ui = org.nasmusic.app.ui.LocalUi.current
     var mixes by remember { mutableStateOf<List<Mix>?>(null) }
     var online by remember { mutableStateOf(true) }
     var expanded by remember { mutableStateOf<String?>(null) }
@@ -84,14 +85,14 @@ fun TodayScreen(c: AppContainer, onOpenPlayer: () -> Unit) {
                                 )
                             }
                             IconButton(onClick = {
-                                c.player.play(mix.tracks.map { it.track }, 0, PlaySource.MIX, mix.id, mix.tracks.map { it.reason })
-                                onOpenPlayer()
+                                c.player.play(mix.tracks.map { it.track }, 0, PlaySource.MIX, mix.title, mix.id, mix.tracks.map { it.reason })
+                                ui.go("now")
                             }) { Icon(Icons.Default.PlayArrow, "Play ${mix.title}") }
                         }
                         if (expanded == mix.id) {
                             mix.tracks.forEachIndexed { i, mt ->
                                 TrackRow(mt.track, subtitle = mt.reason, offline = mt.track.id in offlineIds) {
-                                    c.player.play(mix.tracks.map { it.track }, i, PlaySource.MIX, mix.id, mix.tracks.map { it.reason })
+                                    c.player.play(mix.tracks.map { it.track }, i, PlaySource.MIX, mix.title, mix.id, mix.tracks.map { it.reason })
                                 }
                             }
                         }
