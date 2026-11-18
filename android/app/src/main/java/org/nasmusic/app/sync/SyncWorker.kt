@@ -25,8 +25,10 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
         val c = applicationContext.container
         val cfg = c.secureStore.config.value ?: return Result.success()
         if (!cfg.isPaired) return Result.success()
-        val settings = c.settings.settings.value
+        val settings = c.settings.current()
         val manual = inputData.getBoolean(KEY_MANUAL, false)
+        // v2: streaming by default; nothing is downloaded unless "Offline favourites" is on.
+        if (!settings.offlineFavourites) return Result.success(workDataOf(KEY_STATUS to "Offline favourites is off"))
 
         if (!manual) {
             val now = LocalTime.now()

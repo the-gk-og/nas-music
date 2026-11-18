@@ -4,24 +4,36 @@ import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import java.util.UUID
+import org.nasmusic.app.context.ContextCollector
+import org.nasmusic.app.context.ListeningDetails
 import org.nasmusic.app.feedback.EventRecorder
 import org.nasmusic.app.feedback.EventType
 import org.nasmusic.app.feedback.LeaveReason
 import org.nasmusic.app.feedback.PlaybackClassifier
 
 /**
- * Watches the player and turns transitions into play/skip events via [PlaybackClassifier].
- * Polls position once a second while playing so the 80 % mark is caught even if the user then
- * pauses forever.
+ * Watches the player and turns transitions into play/skip events via [PlaybackClassifier], with the
+ * opt-in listening context (seeks, volume changes, sessions…) attached. Only the device that
+ * actually plays audio records these (docs/v2.md §5).
  */
 class FeedbackTracker(
     private val player: Player,
     private val recorder: EventRecorder,
+    private val contextCollector: ContextCollector? = null,
 ) : Player.Listener {
     private val handler = Handler(Looper.getMainLooper())
     private var current: MediaItem? = null
     private var counted = false
     private var lastPositionMs = 0L
+
+    // Listening details for the current track
+    private val seeks = mutableListOf<Pair<Long, Long>>()
+    private val volumes = mutableListOf<Float>()
+    private var previousTrackId: String? = null
+    private var sessionId: String = UUID.randomUUID().toString()
+    private var sessionPosition = 0
+    private var lastPlayEndMs = 0L
 
     private val poll = object : Runnable {
         override fun run() {
@@ -57,12 +69,26 @@ class FeedbackTracker(
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
         handler.removeCallbacks(poll)
-        if (isPlaying) handler.post(poll)
+        if (isPlaying) {
+            // A new listening session starts after 30 minutes without music.
+            if (lastPlayEndMs > 0 && System.currentTimeMillis() - lastPlayEndMs > 30 * 60_000L) {
+                sessionId = UUID.randomUUID().toString(); sessionPosition = 0
+            }
+            handler.post(poll)
+        } else {
+            lastPlayEndMs = System.currentTimeMillis()
+        }
     }
+
+    override fun onVolumeChanged(volume: Float) { volumes += volume }
+    override fun onDeviceVolumeChanged(volume: Int, muted: Boolean) { volumes += if (muted) 0f else volume.toFloat() }
 
     override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
         val leaving = old.mediaItem ?: return
-        if (leaving.mediaId == new.mediaItem?.mediaId && old.mediaItemIndex == new.mediaItemIndex) return
+        if (leaving.mediaId == new.mediaItem?.mediaId && old.mediaItemIndex == new.mediaItemIndex) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) seeks += old.positionMs to new.positionMs
+            return
+        }
         val why = when (reason) {
             Player.DISCONTINUITY_REASON_AUTO_TRANSITION -> LeaveReason.ENDED
             Player.DISCONTINUITY_REASON_SEEK, Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT -> LeaveReason.USER_SKIP
@@ -73,7 +99,6 @@ class FeedbackTracker(
     }
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-        // Queue replaced (setMediaItems) does not always report a discontinuity.
         if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && mediaItem?.mediaId != current?.mediaId) {
             current?.let { leave(it, lastPositionMs, LeaveReason.OTHER) }
             startTracking(mediaItem)
@@ -93,6 +118,7 @@ class FeedbackTracker(
         current = item
         counted = false
         lastPositionMs = 0
+        seeks.clear(); volumes.clear()
     }
 
     private fun leave(item: MediaItem, positionMs: Long, reason: LeaveReason) {
@@ -101,17 +127,29 @@ class FeedbackTracker(
             emit(it, item, positionMs)
         }
         counted = true
+        previousTrackId = item.mediaId
     }
 
     private fun emit(type: EventType, item: MediaItem, positionMs: Long) {
         val x = item.mediaMetadata.extras
+        val source = x?.getString(MediaItems.EXTRA_SOURCE)
+        if (type == EventType.PLAY || type == EventType.SKIP) sessionPosition++
+        val details = ListeningDetails(
+            seeks = seeks.toList(),
+            volumeChanges = volumes.toList(),
+            repeatOfPrevious = previousTrackId == item.mediaId,
+            addedFrom = source,
+            sessionId = sessionId,
+            sessionPosition = sessionPosition,
+        )
         recorder.record(
             type = type,
             trackId = item.mediaId,
             positionS = positionMs / 1000.0,
             durationS = durationS(item).takeIf { it > 0 },
-            source = x?.getString(MediaItems.EXTRA_SOURCE),
+            source = source,
             mixId = x?.getString(MediaItems.EXTRA_MIX_ID),
+            context = contextCollector?.snapshot(details, x?.getString(MediaItems.EXTRA_SEARCH_QUERY)),
         )
     }
 }

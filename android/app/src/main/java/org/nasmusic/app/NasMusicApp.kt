@@ -5,6 +5,9 @@ import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import org.nasmusic.app.sync.EventUploadWorker
 import org.nasmusic.app.sync.SyncScheduler
 
@@ -16,7 +19,16 @@ class NasMusicApp : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         container = AppContainer(this)
         container.router.start()
-        SyncScheduler.scheduleNight(this, container.settings.settings.value.syncHour)
+        container.eq.start()
+        container.contextCollector.start()
+        container.connect.start()
+        container.startServerInfoRefresh()
+        // Streaming is the default; the nightly download only exists while "Offline favourites" is on.
+        container.scope.launch {
+            container.settings.settings.map { it.offlineFavourites to it.syncHour }.distinctUntilChanged().collect { (on, hour) ->
+                if (on) SyncScheduler.scheduleNight(this@NasMusicApp, hour) else SyncScheduler.cancelNight(this@NasMusicApp)
+            }
+        }
         EventUploadWorker.enqueue(this)
     }
 
