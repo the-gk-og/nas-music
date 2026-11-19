@@ -1,7 +1,7 @@
 # nas-music relay client — lives on the NAS at /data/relay/frpc.toml (inside the nasmusic data volume).
 # Replace FRIEND_ADDRESS (friend's DDNS name or public IP) and FRP_TOKEN (same as the friend's stack).
 
-serverAddr = "FRIEND_ADDRESS"
+serverAddr = "FRIEND_ADDRESS"   # e.g. server.example.com
 serverPort = 2333
 auth.method = "token"
 auth.token = "FRP_TOKEN"

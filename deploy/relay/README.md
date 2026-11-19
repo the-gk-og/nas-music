@@ -8,7 +8,7 @@ phone ──HTTPS──▶ friend's router :80/:443 ─▶ friend's server (frps
 ```
 
 - **Your home router: nothing to forward.** The NAS connects out.
-- **Friend's router (TCP):** public **80 → server 18080**, public **443 → server 18443**, public **2333 → server 2333** (the server's own 80/443 stay free for the friend's services).
+- **Friend's router (TCP):** public **80 → server 8080**, public **443 → server 8043**, public **2333 → server 2333**. Explicit forwards win over a DMZ setting, and the server's own 80/443 stay free for the friend's services.
 - HTTPS is end-to-end: only Caddy on your NAS can decrypt. The friend's server just passes bytes.
 - Real visitor IPs reach the server (PROXY protocol), so login rate-limiting works per person.
 
