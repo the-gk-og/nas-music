@@ -63,6 +63,7 @@ jobs:
         run: |
           ./gradlew assembleRelease
           mv app/build/outputs/apk/release/app-release.apk "nas-music-v0.1.${VERSION_CODE}.apk"
+          mv wear/build/outputs/apk/release/wear-release.apk "nasmusic-wear-v0.1.${VERSION_CODE}.apk"
           rm -f "$RUNNER_TEMP/release.jks"
 
       - name: Build debug APK (pull requests)
@@ -75,7 +76,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v0.1.${VERSION_CODE}"
-          gh release create "$tag" "nas-music-${tag}.apk" \
+          gh release create "$tag" "nas-music-${tag}.apk" "nasmusic-wear-${tag}.apk" \
             --target "${{ github.sha }}" \
             --title "nas-music ${tag}" \
             --notes "Android app build ${tag} from ${GITHUB_SHA::7}. Installs as an update over any earlier release." \
