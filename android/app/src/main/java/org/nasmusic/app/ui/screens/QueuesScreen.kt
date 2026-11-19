@@ -63,7 +63,14 @@ import org.nasmusic.app.ui.formatDuration
 
 /** Musicolet-style queues: the playing queue (reorderable) plus up to 20 named queues from the server. */
 @Composable
-fun QueuesScreen(c: AppContainer) {
+fun QueuesScreen(c: AppContainer) = QueuePanel(c)
+
+/**
+ * The queue UI, shared by the Queue tab and the queue popup on Now Playing (same rows, reorder,
+ * removal and selector, so the two can't drift apart). [onOpenFull] adds "Open full queue".
+ */
+@Composable
+fun QueuePanel(c: AppContainer, onOpenFull: (() -> Unit)? = null) {
     val ui = LocalUi.current
     val scope = rememberCoroutineScope()
     val now by c.player.state.collectAsStateWithLifecycle()
@@ -109,10 +116,14 @@ fun QueuesScreen(c: AppContainer) {
                     }
                 }
             }
-            IconButton(onClick = {
+            // In the popup an ✕ would read as "close the popup"; deleting stays in the ⋯ menu there.
+            if (onOpenFull == null) IconButton(onClick = {
                 val id = viewing ?: currentId ?: return@IconButton
                 scope.launch { c.queueSync.delete(id); viewing = null }
             }) { Icon(Icons.Default.Close, "Close queue") }
+        }
+        if (onOpenFull != null) {
+            TextButton(onClick = onOpenFull, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Open full queue") }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = {
@@ -160,7 +171,7 @@ fun QueuesScreen(c: AppContainer) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         if (tracks.isEmpty()) Message("The queue is empty. Tap a song anywhere to start one.")
-        else ReorderableQueue(c, tracks, playingIndex, enabled = showingCurrent) { i ->
+        else ReorderableQueue(c, tracks, playingIndex, enabled = showingCurrent, modifier = Modifier.weight(1f)) { i ->
             if (showingCurrent) c.player.skipTo(i) else viewed?.let { c.player.playQueue(it, i) }
         }
     }
@@ -188,21 +199,25 @@ fun QueuesScreen(c: AppContainer) {
 
 /** Queue list with a drag handle (☰) per row. Dropping commits one move to the player + server. */
 @Composable
-private fun ReorderableQueue(c: AppContainer, tracks: List<Track>, playing: Int, enabled: Boolean, onPlay: (Int) -> Unit) {
+private fun ReorderableQueue(c: AppContainer, tracks: List<Track>, playing: Int, enabled: Boolean, modifier: Modifier = Modifier, onPlay: (Int) -> Unit) {
     // Local copy so rows move under the finger; keys are positions at load time.
     var order by remember(tracks) { mutableStateOf(tracks.indices.toList()) }
     var dragKey by remember { mutableStateOf<Int?>(null) }
     var dragStart by remember { mutableStateOf(-1) }
     var offset by remember { mutableFloatStateOf(0f) }
     val state = rememberLazyListState()
+    // Open with the current track in view (a couple of rows of context above it).
+    LaunchedEffect(Unit) { if (playing in tracks.indices) state.scrollToItem((playing - 2).coerceAtLeast(0)) }
 
-    LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
+    LazyColumn(state = state, modifier = modifier.fillMaxWidth()) {
         itemsIndexed(order, key = { _, k -> k }) { i, k ->
-            val t = tracks[k]
+            val t = tracks.getOrNull(k) ?: return@itemsIndexed
             val isPlaying = k == playing
             val dragging = dragKey == k
+            SwipeToRemove(enabled = enabled, onRemove = { c.player.removeItem(order.indexOf(k)) }) {
             SongRow(
                 c, t, onClick = { onPlay(i) }, highlighted = isPlaying,
+                menuTarget = if (enabled) org.nasmusic.app.ui.SongMenuTarget(t, queueIndex = order.indexOf(k)) else null,
                 modifier = Modifier
                     .padding(horizontal = 6.dp, vertical = 2.dp)
                     .then(if (isPlaying) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)) else Modifier)
@@ -238,6 +253,29 @@ private fun ReorderableQueue(c: AppContainer, tracks: List<Track>, playing: Int,
                     )
                 },
             )
+            }
         }
     }
+}
+
+/** Swipe a queue row sideways to remove it (only for the queue that is playing here). */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeToRemove(enabled: Boolean, onRemove: () -> Unit, content: @Composable () -> Unit) {
+    if (!enabled) { content(); return }
+    val state = androidx.compose.material3.rememberSwipeToDismissBoxState(
+        confirmValueChange = { v -> if (v != androidx.compose.material3.SwipeToDismissBoxValue.Settled) { onRemove(); true } else false },
+    )
+    androidx.compose.material3.SwipeToDismissBox(
+        state = state,
+        backgroundContent = {
+            Row(
+                Modifier.fillMaxSize().padding(horizontal = 24.dp),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Close, "Remove", tint = MaterialTheme.colorScheme.error)
+                Icon(Icons.Default.Close, "Remove", tint = MaterialTheme.colorScheme.error)
+            }
+        },
+    ) { content() }
 }

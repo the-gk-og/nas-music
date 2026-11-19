@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SpeakerGroup
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -148,6 +149,7 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                 s.remote?.let {
                     Text("Playing on ${it.deviceName}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f).padding(start = 8.dp))
                 } ?: Spacer(Modifier.weight(1f))
+                IconButton(onClick = { ui.queueSheet = true }) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "Queue") }
                 IconButton(onClick = { ui.devicesOpen = true }) {
                     Icon(Icons.Default.SpeakerGroup, "Devices", tint = if (s.remote != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
@@ -239,15 +241,15 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                 IconButton(onClick = c.player::next, modifier = Modifier.size(56.dp)) { Icon(Icons.Default.SkipNext, "Next", Modifier.size(40.dp)) }
                 IconButton(onClick = { ui.go("equalizer") }) { Icon(Icons.Default.Equalizer, "Equalizer", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
-            // "Up next" peek; tap or swipe up → Queue.
+            // "Up next" peek; tap or swipe up → queue popup (the Queue tab is one tap further).
             s.queue.getOrNull(s.index + 1)?.let { next ->
                 var up by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
                 Row(
                     Modifier.fillMaxWidth().padding(bottom = 8.dp)
                         .pointerInput(Unit) {
-                            detectVerticalDragGestures(onDragEnd = { if (up < -40) ui.go("queue"); up = 0f }) { ch, d -> ch.consume(); up += d }
+                            detectVerticalDragGestures(onDragEnd = { if (up < -40) ui.queueSheet = true; up = 0f }) { ch, d -> ch.consume(); up += d }
                         }
-                        .clickable { ui.go("queue") }.padding(vertical = 6.dp),
+                        .clickable { ui.queueSheet = true }.padding(vertical = 6.dp),
                     horizontalArrangement = Arrangement.Center,
                 ) {
                     Text("Up next: ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

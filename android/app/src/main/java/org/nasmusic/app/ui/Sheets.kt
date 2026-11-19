@@ -3,11 +3,18 @@ package org.nasmusic.app.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -22,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QuestionMark
@@ -85,6 +93,7 @@ fun GlobalSheets(c: AppContainer) {
     if (ui.devicesOpen) DevicesSheet(c) { ui.devicesOpen = false }
     if (ui.speedOpen) SpeedPitchDialog(c) { ui.speedOpen = false }
     if (ui.abOpen) AbRepeatDialog(c) { ui.abOpen = false }
+    if (ui.queueSheet) QueueSheet(c) { ui.queueSheet = false }
     ui.bugReport?.let { afterCrash -> BugReportDialog(c, afterCrash) { ui.bugReport = null } }
 }
 
@@ -107,6 +116,9 @@ private fun SongMenuSheet(c: AppContainer, target: SongMenuTarget, onDismiss: ()
                 MenuItem(Icons.Default.Repeat, "A-B repeat") { close { ui.abOpen = true } }
                 MenuItem(Icons.Default.Speed, "Play speed and pitch") { close { ui.speedOpen = true } }
                 HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
+            }
+            target.queueIndex?.let { idx ->
+                MenuItem(Icons.Default.Close, "Remove from queue") { close { c.player.removeItem(idx) } }
             }
             MenuItem(Icons.AutoMirrored.Filled.PlaylistPlay, "Play next") { close { c.player.playNext(listOf(t)); ui.toast = "Playing next" } }
             MenuItem(Icons.AutoMirrored.Filled.QueueMusic, "Add to a queue") { close { ui.addToQueue = listOf(t) } }
@@ -362,5 +374,48 @@ private fun DevicesSheet(c: AppContainer, onDismiss: () -> Unit) {
             }
             if (devices.none { it.online }) Row(Modifier.padding(24.dp)) { Icon(Icons.Default.Devices, null); Text("  Sign in on another device to control it from here.") }
         }
+    }
+}
+
+/**
+ * The queue popup from Now Playing: a bottom sheet in portrait; in landscape or on wide screens a
+ * full-height panel on the right, so it never squeezes or covers the player controls awkwardly.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QueueSheet(c: AppContainer, onDismiss: () -> Unit) {
+    val ui = LocalUi.current
+    val conf = androidx.compose.ui.platform.LocalConfiguration.current
+    val openFull = { onDismiss(); ui.go("queue") }
+    if (QueueSheetStyle.of(conf.screenWidthDp, conf.screenHeightDp) == QueueSheetStyle.SIDE) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = onDismiss,
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().clickable(onClick = onDismiss)) {
+                androidx.compose.material3.Surface(
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
+                        .width(minOf(460, (conf.screenWidthDp * 0.55f).toInt()).dp)
+                        // Swallow taps so they don't reach the dismiss area behind the panel.
+                        .pointerInput(Unit) { detectTapGestures { } },
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                ) {
+                    Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) { org.nasmusic.app.ui.screens.QueuePanel(c, onOpenFull = openFull) }
+                }
+            }
+        }
+    } else {
+        ModalBottomSheet(onDismissRequest = onDismiss) {
+            Column(Modifier.fillMaxHeight(0.85f)) { org.nasmusic.app.ui.screens.QueuePanel(c, onOpenFull = openFull) }
+        }
+    }
+}
+
+enum class QueueSheetStyle {
+    BOTTOM, SIDE;
+
+    companion object {
+        /** Side panel when wider than tall (phone landscape) or on tablet widths. */
+        fun of(widthDp: Int, heightDp: Int): QueueSheetStyle = if (widthDp > heightDp || widthDp >= 600) SIDE else BOTTOM
     }
 }
