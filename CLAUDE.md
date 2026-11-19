@@ -6,6 +6,9 @@ Replaces LatentJam. Design doc: https://claude.ai/artifact/PAiW16UTjDX9JSseBPeqn
 ## Hard rules
 - Everything must be free and open source; the repo is AGPL-3.0. Do not add closed-source or
   paid dependencies (no Google ML Kit, no Firebase, no Play Services). Check licences of new deps.
+  **One owner-approved exception:** the Android `full` build flavour may use the Google Cast SDK
+  (play-services-cast-framework) for a built-in Cast button. It must stay isolated to the `full`
+  source set / dependency configuration; the `foss` flavour must build and run with no Google code.
 - `api/openapi.yaml` is THE contract between server and app. Change it only deliberately, and
   update both sides (or note the change for the other side in the PR/commit message).
 - `server/nasmusic/db/schema.sql` is the shared database contract between server core and the AI.
