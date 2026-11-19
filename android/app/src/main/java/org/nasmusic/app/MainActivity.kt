@@ -3,13 +3,13 @@ package org.nasmusic.app
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import org.nasmusic.app.ui.NasMusicRoot
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() { // FragmentActivity: the Cast button's picker is a DialogFragment
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 

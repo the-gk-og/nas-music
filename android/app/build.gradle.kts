@@ -57,6 +57,11 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Installs next to the real (release-signed) app, so a test build never replaces it or its data.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             // No R8 shrinking: keeps reflection/serialization behaviour identical to the tested debug build.
             isMinifyEnabled = false
@@ -127,6 +132,8 @@ dependencies {
 
     // Google Cast SDK: `full` flavour ONLY. Never add Google Play Services to `implementation`.
     "fullImplementation"(libs.play.services.cast.framework)
+    // MainActivity is a FragmentActivity so the full flavour's Cast button can open its device picker dialog.
+    implementation(libs.androidx.fragment)
     "fullImplementation"(libs.androidx.mediarouter)
     "fullImplementation"(libs.androidx.appcompat)
 

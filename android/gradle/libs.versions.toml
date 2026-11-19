@@ -37,6 +37,7 @@ androidxTestCore = "1.6.1"
 playServicesCast = "22.3.1"
 mediarouter = "1.8.1"
 appcompat = "1.7.1"
+fragment = "1.8.5"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -79,6 +80,7 @@ androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTes
 play-services-cast-framework = { module = "com.google.android.gms:play-services-cast-framework", version.ref = "playServicesCast" }
 androidx-mediarouter = { module = "androidx.mediarouter:mediarouter", version.ref = "mediarouter" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
+androidx-fragment = { module = "androidx.fragment:fragment-ktx", version.ref = "fragment" }  # Apache-2.0
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
