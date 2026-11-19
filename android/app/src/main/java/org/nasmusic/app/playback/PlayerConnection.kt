@@ -64,8 +64,9 @@ class PlayerConnection(
     private val pending = mutableListOf<(MediaController) -> Unit>()
     private var localQueueCache: List<MediaItem> = emptyList()
 
-    private val trackCache = HashMap<String, Track>()
-    private var remoteQueue: Pair<String, List<MediaItem>>? = null
+    // Touched from the main thread and from flow collectors on Dispatchers.Default.
+    private val trackCache = java.util.concurrent.ConcurrentHashMap<String, Track>()
+    @Volatile private var remoteQueue: Pair<String, List<MediaItem>>? = null
 
     init {
         scope.launch { combine(_local, _remote) { l, r -> r ?: l }.collect { _state.value = it } }

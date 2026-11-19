@@ -70,7 +70,7 @@ class LyricsRepository(
         val resp = try { fetch(trackId) } catch (e: Exception) { return LyricsResult.Unavailable }
         return when {
             resp.isSuccessful && resp.body() != null -> {
-                val l = resp.body()!!
+                val l = resp.body() ?: return LyricsResult.Unavailable
                 store.put(LyricsEntity(trackId, STATUS_FOUND, json.encodeToString(Lyrics.serializer(), l), now()))
                 LyricsResult.Found(l)
             }

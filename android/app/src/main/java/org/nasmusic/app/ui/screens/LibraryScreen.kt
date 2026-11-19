@@ -86,12 +86,12 @@ fun LibraryScreen(c: AppContainer) {
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CHIPS.forEach { (k, label) -> FilterChip(chip == k, { chip = k }, label = { Text(label) }) }
             }
-            if (SORTS[chip] != null) Box {
+            SORTS[chip]?.let { sorts -> Box {
                 IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort") }
                 DropdownMenu(sortMenu, { sortMenu = false }) {
-                    SORTS[chip]!!.forEach { (k, label) -> DropdownMenuItem({ Text(if (k == sort) "✓ $label" else label) }, { sort = k; sortMenu = false }) }
+                    sorts.forEach { (k, label) -> DropdownMenuItem({ Text(if (k == sort) "✓ $label" else label) }, { sort = k; sortMenu = false }) }
                 }
-            }
+            } }
             if (chip != "folders" && chip != "songs") IconButton(onClick = {
                 scope.launch { c.settings.setLibraryView(chip, if (view == "grid") "list" else "grid") }
             }) { Icon(if (view == "grid") Icons.AutoMirrored.Filled.List else Icons.Default.GridView, if (view == "grid") "List view" else "Grid view") }

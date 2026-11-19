@@ -17,6 +17,7 @@ class NasMusicApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        org.nasmusic.app.diag.CrashLog.install(this)
         container = AppContainer(this)
         container.router.start()
         container.eq.start()

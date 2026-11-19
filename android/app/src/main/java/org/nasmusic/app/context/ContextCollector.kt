@@ -44,7 +44,7 @@ class ContextCollector(private val context: Context, private val scope: Coroutin
     val enabled: StateFlow<Set<ContextSignal>> = _enabled.asStateFlow()
 
     private val clusterer = PlaceClusterer(
-        runCatching { json.decodeFromString(ListSerializer(PlaceCluster.serializer()), prefs.getString("places", "[]")!!) }.getOrDefault(emptyList()),
+        runCatching { json.decodeFromString(ListSerializer(PlaceCluster.serializer()), prefs.getString("places", null) ?: "[]") }.getOrDefault(emptyList()),
     )
     private val _places = MutableStateFlow(clusterer.all)
     val places: StateFlow<List<PlaceCluster>> = _places.asStateFlow()
