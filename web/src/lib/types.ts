@@ -257,13 +257,18 @@ export interface PlaybackState {
   rev: number;
 }
 
+/** Server-side cast target types (api/openapi.yaml ConnectDevice.castType). */
+export type CastType = 'chromecast' | 'dlna' | 'homeassistant' | 'snapcast';
+
 export interface ConnectDevice {
   id: string;
   name: string;
-  kind: DeviceKind;
+  /** A DeviceKind, or 'speaker' for a speaker the server plays on (Chromecast, DLNA, Home Assistant, Snapcast). */
+  kind: DeviceKind | 'speaker';
   canPlay: boolean;
   online: boolean;
   isActive: boolean;
+  castType?: CastType | null;
 }
 
 export type CommandAction =
@@ -336,7 +341,7 @@ export interface ShelfItem {
   queue?: Queue;
   mix?: { kind?: string; trackCount?: number; durationS?: number };
   seed?: RadioSeed;
-  device?: { kind?: DeviceKind; canPlay?: boolean; isActive?: boolean; playing?: boolean; nowPlaying?: Track | null };
+  device?: { kind?: ConnectDevice['kind']; canPlay?: boolean; isActive?: boolean; playing?: boolean; nowPlaying?: Track | null };
   progress?: { index?: number; count?: number; positionMs?: number; queueId?: string | null };
   catalog?: CatalogItem;
   suggestion?: Suggestion;

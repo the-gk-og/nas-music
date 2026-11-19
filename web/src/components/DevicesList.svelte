@@ -1,17 +1,22 @@
 <script lang="ts">
-  import { Laptop, Monitor, Smartphone, Speaker } from '@lucide/svelte';
+  import { Cast, Laptop, Monitor, Smartphone, Speaker } from '@lucide/svelte';
+  import type { ConnectDevice } from '../lib/types';
   import { player } from '../lib/player.svelte';
 
   let { onpick }: { onpick?: () => void } = $props();
-  const kindIcon = (k: string) => (k === 'android' || k === 'watch' ? Smartphone : k === 'desktop' ? Laptop : k === 'web' ? Monitor : Speaker);
-  const list = $derived(player.devices.filter((x) => x.online || x.isActive));
+  const kindIcon = (d: ConnectDevice) =>
+    d.castType === 'chromecast' ? Cast : d.kind === 'android' || d.kind === 'watch' ? Smartphone : d.kind === 'desktop' ? Laptop : d.kind === 'web' ? Monitor : Speaker;
+  const CAST_LABEL: Record<string, string> = { chromecast: 'Google Cast', dlna: 'DLNA', homeassistant: 'Home Assistant', snapcast: 'Snapcast' };
+  const isSpeaker = (d: ConnectDevice) => d.kind === 'speaker';
+  // Your own devices first, then speakers.
+  const list = $derived(player.devices.filter((x) => x.online || x.isActive).sort((a, b) => Number(isSpeaker(a)) - Number(isSpeaker(b))));
 </script>
 
 {#if player.connectStatus !== 'open'}
   <p class="muted small">{player.connectStatus === 'reconnecting' ? 'Connecting to the server…' : 'Not connected'}</p>
 {/if}
 {#each list as dev (dev.id)}
-  {@const Icon = kindIcon(dev.kind)}
+  {@const Icon = kindIcon(dev)}
   {@const active = player.remoteState?.activeDeviceId === dev.id}
   <button
     class="dev"
@@ -25,7 +30,10 @@
     <Icon size={26} />
     <div class="grow">
       <div class="ellipsis">{dev.name}{dev.id === player.myDeviceId ? ' (this device)' : ''}</div>
-      <div class="sub">{active ? (player.remoteState?.playing ? 'Playing' : 'Active') : dev.canPlay ? 'Tap to play here' : 'Remote only'}</div>
+      <div class="sub">
+        {active ? (player.remoteState?.playing ? 'Playing' : 'Active') : dev.canPlay ? (isSpeaker(dev) ? 'Tap to play on this speaker' : 'Tap to play here') : 'Remote only'}{#if isSpeaker(dev)}
+          · {CAST_LABEL[dev.castType ?? ''] ?? 'Speaker'}{/if}
+      </div>
     </div>
     {#if active && player.remoteState?.playing}<span class="eq"><i></i><i></i><i></i></span>{/if}
   </button>
