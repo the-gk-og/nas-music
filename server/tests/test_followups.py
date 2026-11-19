@@ -255,7 +255,7 @@ def test_manifest_sizes_estimate_then_exact(client, conn, app, cfg):
 def test_nightly_triggers_pretranscode(cfg, monkeypatch):
     jobs = Jobs(cfg)
     started = []
-    monkeypatch.setattr(jobs, "trigger", lambda name: started.append(name) or True)
+    monkeypatch.setattr(jobs, "trigger", lambda name, how="manual": started.append(name) or True)
     monkeypatch.setattr(ai, "run_nightly", lambda conn, c: ["m"])
     assert jobs.run("nightly")["ok"]
     assert started == ["pretranscode", "lyrics"]

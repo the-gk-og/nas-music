@@ -33,15 +33,25 @@ def create(conn: sqlite3.Connection, uid: str, device_id: str | None, body: dict
     return rid
 
 
-_SELECT = ("SELECT b.*, u.username, d.name AS device_name FROM bug_reports b JOIN users u ON u.id = b.user_id "
-           "LEFT JOIN devices d ON d.id = b.device_id")
+_SELECT = ("SELECT b.*, u.username, d.name AS device_name, d.kind AS device_kind FROM bug_reports b "
+           "JOIN users u ON u.id = b.user_id LEFT JOIN devices d ON d.id = b.device_id")
+
+
+def title(r: sqlite3.Row) -> str:
+    """First line of the description (<= 80 chars), else the first line of the crash, else a generic one."""
+    for text in (r["description"], r["crash"]):
+        line = next((ln.strip() for ln in (text or "").splitlines() if ln.strip()), "")
+        if line:
+            return line if len(line) <= 80 else line[:79] + "…"
+    return f"Report from {r['device_name'] or r['username']}"
 
 
 def _summary(r: sqlite3.Row) -> dict:
     created = datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
-    return {"id": r["id"], "user": {"id": r["user_id"], "username": r["username"]}, "deviceId": r["device_id"],
-            "deviceName": r["device_name"], "createdAt": r["created_at"], "appVersion": r["app_version"],
-            "platform": r["platform"], "description": r["description"], "hasCrash": bool(r["crash"]),
+    return {"id": r["id"], "title": title(r), "status": r["status"], "username": r["username"],
+            "user": {"id": r["user_id"], "username": r["username"]}, "deviceId": r["device_id"],
+            "deviceName": r["device_name"], "kind": r["device_kind"], "createdAt": r["created_at"],
+            "appVersion": r["app_version"], "platform": r["platform"], "hasCrash": bool(r["crash"]),
             "bytes": r["bytes"], "expiresAt": iso(created + timedelta(days=KEEP_DAYS))}
 
 
@@ -59,7 +69,12 @@ def get(conn: sqlite3.Connection, rid: str) -> dict | None:
         extra = json.loads(r["extra"]) if r["extra"] else None
     except ValueError:
         extra = None
-    return {**_summary(r), "logs": r["logs"], "crash": r["crash"], "extra": extra}
+    return {**_summary(r), "description": r["description"] or "", "logs": r["logs"], "crash": r["crash"],
+            "context": extra}
+
+
+def set_status(conn: sqlite3.Connection, rid: str, status: str) -> bool:
+    return conn.execute("UPDATE bug_reports SET status = ? WHERE id = ?", (status, rid)).rowcount == 1
 
 
 def delete(conn: sqlite3.Connection, rid: str) -> bool:

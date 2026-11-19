@@ -286,7 +286,8 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     logs        TEXT NOT NULL,
     crash       TEXT,
     extra       TEXT,                  -- JSON
-    bytes       INTEGER NOT NULL
+    bytes       INTEGER NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed'))
 );
 CREATE INDEX IF NOT EXISTS bug_reports_created ON bug_reports(created_at);
 

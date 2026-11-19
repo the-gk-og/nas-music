@@ -20,7 +20,7 @@ from nasmusic.stream.transcode import OpusCache
 
 log = logging.getLogger(__name__)
 
-JOB_NAMES = ("scan", "full_scan", "analyse", "nightly", "pretranscode", "lyrics", "discovery", "cleanup")
+JOB_NAMES = ("scan", "full_scan", "analyse", "nightly", "pretranscode", "lyrics", "discovery", "cleanup", "backup")
 HISTORY = 20
 LYRICS_PER_RUN = 200
 
@@ -112,6 +112,11 @@ class Jobs:
         return {"bugReportsDeleted": conn.execute("DELETE FROM bug_reports WHERE created_at < ?",
                                                   (cutoff,)).rowcount}
 
+    def _backup(self, conn):
+        from nasmusic.app import backups
+
+        return backups.create(self.cfg, conn, "manual")
+
     def _discovery(self, conn):
         return {"newSuggestions": ai_adapter.run_weekly_discovery(conn, ai_config(self.cfg))}
 
@@ -125,6 +130,7 @@ class Jobs:
             "discovery": self._discovery,
             "lyrics": self._lyrics,
             "cleanup": self._cleanup,
+            "backup": self._backup,
         }[name]
 
     # ----- running -----
@@ -132,14 +138,15 @@ class Jobs:
     def is_running(self, name: str) -> bool:
         return self._locks[name].locked()
 
-    def run(self, name: str) -> dict | None:
-        """Run a job now in this thread. Returns its record, or None if it was already running."""
+    def run(self, name: str, trigger: str = "manual") -> dict | None:
+        """Run a job now in this thread. Returns its record, or None if it was already running.
+        `trigger` (schedule / manual / chained) is kept in the job history."""
         lock = self._locks[name]
         if not lock.acquire(blocking=False):
             log.info("job %s already running; skipped", name)
             return None
         conn = open_db(self.cfg)
-        rec: dict = {"startedAt": now_iso()}
+        rec: dict = {"startedAt": now_iso(), "trigger": trigger}
         t0 = time.monotonic()
         try:
             rec["result"] = self._body(name)(conn)
@@ -161,17 +168,17 @@ class Jobs:
                 conn.close()
                 lock.release()
         if name in ("scan", "full_scan") and rec["ok"]:
-            self.trigger("analyse")
+            self.trigger("analyse", "chained")
         if name == "nightly" and rec["ok"]:
-            self.trigger("pretranscode")
-            self.trigger("lyrics")
+            self.trigger("pretranscode", "chained")
+            self.trigger("lyrics", "chained")
         return rec
 
-    def trigger(self, name: str) -> bool:
+    def trigger(self, name: str, how: str = "manual") -> bool:
         """Start a job in a background thread unless it is already running."""
         if self.is_running(name):
             return False
-        threading.Thread(target=self.run, args=(name,), name=f"job-{name}", daemon=True).start()
+        threading.Thread(target=self.run, args=(name, how), name=f"job-{name}", daemon=True).start()
         return True
 
     def last(self, conn, name: str) -> dict | None:
@@ -185,12 +192,12 @@ class Jobs:
         tz = ZoneInfo(self.cfg.timezone)
         sched = BackgroundScheduler(timezone=tz, job_defaults={"coalesce": True, "max_instances": 1,
                                                                "misfire_grace_time": 3600})
-        sched.add_job(self.run, "interval", args=["scan"], id="scan",
+        sched.add_job(self.run, "interval", args=["scan", "schedule"], id="scan",
                       minutes=self.cfg.scan_interval_minutes,
                       next_run_time=datetime.now(tz) if initial_scan else None)
-        sched.add_job(self.run, "cron", args=["nightly"], id="nightly", hour=2, minute=0)
-        sched.add_job(self.run, "cron", args=["discovery"], id="discovery", day_of_week="sun", hour=3, minute=0)
-        sched.add_job(self.run, "cron", args=["cleanup"], id="cleanup", hour=4, minute=30)
+        sched.add_job(self.run, "cron", args=["nightly", "schedule"], id="nightly", hour=2, minute=0)
+        sched.add_job(self.run, "cron", args=["discovery", "schedule"], id="discovery", day_of_week="sun", hour=3, minute=0)
+        sched.add_job(self.run, "cron", args=["cleanup", "schedule"], id="cleanup", hour=4, minute=30)
         sched.start()
         self.scheduler = sched
         return sched
@@ -205,12 +212,21 @@ class Jobs:
                            ("cleanup", {"hour": 4, "minute": 30})):
             self.scheduler.reschedule_job(job_id, trigger="cron", timezone=tz, **kw)
 
-    def next_runs(self) -> dict[str, str | None]:
+    def next_runs(self, iso_format: bool = False) -> dict[str, str | None]:
+        """Next scheduled run per job id: "YYYY-MM-DD HH:MM" in the server timezone, or ISO-8601 UTC."""
         if self.scheduler is None:
             return {}
         out = {}
         for job in self.scheduler.get_jobs():
-            out[job.id] = job.next_run_time.strftime("%Y-%m-%d %H:%M") if job.next_run_time else None
+            t = job.next_run_time
+            if t is None:
+                out[job.id] = None
+            elif iso_format:
+                from nasmusic.core import iso
+
+                out[job.id] = iso(t)
+            else:
+                out[job.id] = t.strftime("%Y-%m-%d %H:%M")
         return out
 
     def shutdown(self):

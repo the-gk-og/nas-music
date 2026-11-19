@@ -14,7 +14,7 @@ from nasmusic.core import get_setting, set_setting
 
 # API key -> Config field
 FIELDS = {"serverName": "server_name", "lanUrl": "lan_public_url", "tunnelUrl": "tunnel_url",
-          "timezone": "timezone", "opusCacheGb": "opus_cache_gb", "lrclibEnabled": "lrclib_enabled"}
+          "timezone": "timezone", "opusCacheMaxGb": "opus_cache_gb", "lrclib": "lrclib_enabled"}
 PREFIX = "server."
 
 
@@ -62,13 +62,13 @@ def validate(key: str, value: Any) -> Any:
         except (ZoneInfoNotFoundError, ValueError) as e:
             raise ValueError("timezone must be an IANA zone like Europe/London") from e
         return str(value)
-    if key == "opusCacheGb":
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.5 <= value <= 10000:
-            raise ValueError("opusCacheGb must be a number between 0.5 and 10000")
+    if key == "opusCacheMaxGb":
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 1 <= value <= 2000:
+            raise ValueError("opusCacheMaxGb must be a number between 1 and 2000")
         return float(value)
-    if key == "lrclibEnabled":
+    if key == "lrclib":
         if not isinstance(value, bool):
-            raise ValueError("lrclibEnabled must be true or false")
+            raise ValueError("lrclib must be true or false")
         return value
     raise ValueError(key)
 
@@ -91,12 +91,15 @@ def apply(base: Config, ov: dict[str, Any]) -> Config:
     return replace(base, **vals) if vals else base
 
 
+def values(cfg: Config) -> dict:
+    return {"lanUrl": cfg.lan_url, "tunnelUrl": cfg.tunnel_url, "timezone": cfg.timezone,
+            "opusCacheMaxGb": cfg.opus_cache_gb, "lrclib": cfg.lrclib_enabled, "serverName": cfg.server_name}
+
+
 def view(base: Config, ov: dict[str, Any]) -> dict:
-    eff = apply(base, ov)
-    def values(cfg: Config) -> dict:
-        return {"serverName": cfg.server_name, "lanUrl": cfg.lan_url, "tunnelUrl": cfg.tunnel_url,
-                "timezone": cfg.timezone, "opusCacheGb": cfg.opus_cache_gb, "lrclibEnabled": cfg.lrclib_enabled}
-    return {"values": values(eff), "overrides": ov, "fromConfig": values(base)}
+    """GET /admin/settings: the effective values flat at the top level (AdminSettings), plus `overrides`
+    (keys set in the database) and `fromConfig` (config.toml, what a null resets to)."""
+    return {**values(apply(base, ov)), "overrides": ov, "fromConfig": values(base)}
 
 
 def put(conn: sqlite3.Connection, changes: dict[str, Any]) -> dict[str, Any]:
