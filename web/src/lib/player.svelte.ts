@@ -894,6 +894,7 @@ export class Player {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => this.connect?.kick());
       document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && this.connect?.kick());
+      window.addEventListener('focus', () => this.connect?.kick());
     }
   }
 

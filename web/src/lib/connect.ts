@@ -156,10 +156,19 @@ export class ConnectClient {
     ws.onerror = () => {
       /* onclose follows */
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       this.ws = null;
       this.clearTimers();
-      if (!this.stopped) this.scheduleReconnect();
+      if (this.stopped) return;
+      // 4000 = another tab/window signed in as this same device took over. Reconnecting straight away
+      // would knock that one off in turn and the two would flip-flop forever, so wait until this tab is
+      // used again (kick() on focus / visibility).
+      if ((ev as { code?: number } | null)?.code === 4000) {
+        this.attempt = 0;
+        this.setStatus('closed');
+        return;
+      }
+      this.scheduleReconnect();
     };
   }
 
@@ -196,7 +205,7 @@ export class ConnectClient {
         this.pongTimer = this.timers.setTimeout(() => {
           // Dead connection (e.g. tunnel dropped silently): reconnect.
           this.pongTimer = null;
-          this.ws?.close(4000, 'pong timeout');
+          this.ws?.close(4008, 'pong timeout');
         }, this.opts.pongTimeoutMs);
     }, this.opts.pingMs);
   }

@@ -13,9 +13,9 @@ class FakeSocket implements SocketLike {
   send(d: string) {
     this.sent.push(JSON.parse(d));
   }
-  close() {
+  close(code?: number) {
     this.readyState = 3;
-    this.onclose?.({});
+    this.onclose?.({ code });
   }
   // test helpers
   open() {
@@ -182,6 +182,16 @@ describe('ConnectClient', () => {
     s3.recv({ type: 'welcome', deviceId: 'me', devices: [], state: st({ activeDeviceId: 'me', playing: false, rev: 4 }) });
     expect(s3.sent.map((m) => m.type)).toEqual(['hello', 'state']);
     expect(s3.sent[1]).toMatchObject({ positionMs: 5000, playing: true });
+  });
+
+  it('does not fight another tab that replaced this device; reconnects only on kick()', () => {
+    const s = connect();
+    s.close(4000); // server: "replaced by a newer connection"
+    expect(c.status).toBe('closed');
+    vi.advanceTimersByTime(60000);
+    expect(sockets).toHaveLength(1);
+    c.kick(); // this tab is used again
+    expect(sockets).toHaveLength(2);
   });
 
   it('stop() closes without reconnecting', () => {
