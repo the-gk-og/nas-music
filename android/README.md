@@ -7,9 +7,19 @@ minSdk 26, targetSdk 35 (compileSdk 36 because current AndroidX needs it).
 
 ```bash
 cd android
-./gradlew assembleDebug testDebugUnitTest
-# APK: app/build/outputs/apk/debug/app-debug.apk
+./gradlew assembleFossDebug testFossDebugUnitTest        # default: no Google code
+./gradlew assembleFullDebug testFullDebugUnitTest        # + Google Cast button
+# APKs: app/build/outputs/apk/{foss,full}/debug/app-{foss,full}-debug.apk
+scripts/check-no-gms.sh app/build/outputs/apk/foss/debug/app-foss-debug.apk
 ```
+
+Two product flavours, same applicationId (either installs as an update over the other):
+- `foss` (default): no Google Play Services. Speakers (Chromecast, DLNA, Home Assistant, Snapcast) come from
+  the server and show in the Devices sheet as Connect devices; the server plays on them.
+- `full`: adds `play-services-cast-framework` (the one owner-approved non-free exception, `fullImplementation`
+  only, code in `app/src/full/`) for a Google Cast button in the Devices sheet. It casts the phone's queue
+  straight to a Chromecast with signed URLs from `POST /cast/sign`; this is outside Connect. Pinned to Cast
+  22.3.1: 23.x pulls mediarouter 1.9, which needs AGP 9.1 / compileSdk 37.
 
 Needs the Android SDK (platform 36 + build-tools) at `ANDROID_HOME` or `sdk.dir` in `local.properties`.
 Gradle runs its daemon on JDK 21 (`gradle/gradle-daemon-jvm.properties`) and compiles with a JDK 21

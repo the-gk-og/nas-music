@@ -62,7 +62,7 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
     from nasmusic.library.lrclib import Lrclib
     from nasmusic.app.weather import Weather
 
-    return AppContext(
+    c = AppContext(
         cfg=cfg,
         server_id=sid,
         cert_sha256=tls.fingerprint(files.cert),
@@ -77,9 +77,13 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
         lrclib=Lrclib(VERSION),
         started_at=time.time(),
     )
+    from nasmusic.app.cast_api import make_registry
+
+    c.hub.attach_speakers(make_registry(c))
+    return c
 
 
-_TOKEN_RE = re.compile(r"([?&]token=)[^&\s\"]+")
+_TOKEN_RE = re.compile(r"([?&](?:token|sig)=)[^&\s\"]+")
 
 
 class _RedactTokens(logging.Filter):
@@ -109,7 +113,8 @@ PLAYER_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-i
 
 def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None = None) -> FastAPI:
     from nasmusic import web
-    from nasmusic.app import account_api, admin_api, api, collections_api, connect_api, discover_api, logbuffer
+    from nasmusic.app import (account_api, admin_api, api, cast_api, collections_api, connect_api, discover_api,
+                              logbuffer)
     from nasmusic.web import spa
 
     install_token_redaction()
@@ -117,7 +122,8 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
     app = FastAPI(title="nas-music", version=VERSION, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.ctx = context or build_context(cfg, jobs)
     for r in (api.public, account_api.public, api.router, account_api.router, account_api.admin,
-              collections_api.router, discover_api.router, admin_api.router, connect_api.router):
+              collections_api.router, discover_api.router, admin_api.router, connect_api.router,
+              cast_api.media_router, cast_api.router):
         app.include_router(r, prefix="/api/v1")
     app.include_router(web.router)
     app.include_router(spa.router_for(cfg, web.render_join))  # catch-all: must stay last

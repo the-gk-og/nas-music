@@ -131,6 +131,8 @@ def offline(app):
     from nasmusic.library.lrclib import Lrclib
 
     app.state.ctx.lrclib = Lrclib("test", httpx.MockTransport(refuse), min_interval_s=0)
+    if getattr(app.state.ctx.hub, "speakers", None) is not None:
+        app.state.ctx.hub.speakers.discoverers = []  # no mDNS/SSDP/HA/Snapcast from tests
     if app.state.ctx.jobs is not None:
         app.state.ctx.jobs.lrclib = app.state.ctx.lrclib
     return app

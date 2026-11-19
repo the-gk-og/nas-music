@@ -47,7 +47,11 @@ data class ConnectDevice(
     val canPlay: Boolean = true,
     val online: Boolean = true,
     val isActive: Boolean = false,
-)
+    /** Speakers only (kind "speaker"): chromecast, dlna, homeassistant, snapcast. The server plays on them. */
+    val castType: String? = null,
+) {
+    val isSpeaker: Boolean get() = kind == "speaker"
+}
 
 sealed interface ConnectMessage {
     data class Welcome(val deviceId: String, val devices: List<ConnectDevice>, val state: PlaybackState?) : ConnectMessage
@@ -58,6 +62,8 @@ sealed interface ConnectMessage {
     data object Release : ConnectMessage
     data class QueuesChanged(val queueId: String?) : ConnectMessage
     data object Pong : ConnectMessage
+    /** `source` "speaker": a speaker problem worth showing (others are protocol noise). */
+    data class Error(val detail: String, val source: String? = null) : ConnectMessage
     data class Unknown(val type: String?) : ConnectMessage
 }
 
@@ -85,6 +91,7 @@ object ConnectProtocol {
             "release" -> ConnectMessage.Release
             "queues" -> ConnectMessage.QueuesChanged(o["queueId"]?.jsonPrimitive?.contentOrNull)
             "pong" -> ConnectMessage.Pong
+            "error" -> ConnectMessage.Error(o["detail"]?.jsonPrimitive?.contentOrNull.orEmpty(), o["source"]?.jsonPrimitive?.contentOrNull)
             else -> ConnectMessage.Unknown(type)
         }
     }

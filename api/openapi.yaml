@@ -796,11 +796,98 @@ paths:
         Client → server: `hello`, `state` (PlaybackState, active device only), `command`, `transfer`, `ping`.
         Server → client: `welcome {deviceId, devices, state}`, `devices {devices}`, `state` (PlaybackState),
         `command {action, args, fromDeviceId}`, `takeover {state}`, `release`, `queues {queueId}`, `pong`,
-        `error {detail}`. The server sends WebSocket protocol pings every 20 s (keeps the Cloudflare tunnel open);
+        `error {detail, source?}` (`source: speaker` = a speaker problem worth showing the user). Speakers (`kind: speaker`, see /cast/speakers) are listed as devices too; the server
+        plays on their behalf. The server sends WebSocket protocol pings every 20 s (keeps the Cloudflare tunnel open);
         clients still send `ping` every 25 s. A newer socket from the same device replaces the older one.
       responses:
         '101': { description: switching protocols }
         '403': { description: bad token (the socket is closed with code 4401) }
+  /cast/speakers:
+    get:
+      summary: |
+        Speakers this server can cast to (Chromecast/Google Cast, DLNA renderers, Home Assistant media players,
+        Snapcast groups). They also appear in every user's Connect device list with `kind: speaker`; to play on
+        one, `transfer` to its id (or send a `playTracks`/`playQueue` command with `targetDeviceId` = its id).
+        The server then plays the queue on the speaker and reports PlaybackState like an active phone.
+        404 when casting is disabled (`cast_enabled = false`).
+      responses:
+        '200':
+          description: current speakers
+          content: { application/json: { schema: { $ref: '#/components/schemas/SpeakerList' } } }
+        '404': { description: casting disabled }
+  /cast/speakers/refresh:
+    post:
+      summary: Admin only. Re-run discovery now (it also runs every 5 minutes).
+      responses:
+        '200':
+          description: speakers after the refresh
+          content: { application/json: { schema: { $ref: '#/components/schemas/SpeakerList' } } }
+        '403': { description: not an admin }
+  /cast/sign:
+    post:
+      summary: |
+        Short-lived signed media + art URLs for tracks, for a client that casts by itself (the Android `full`
+        flavour's Google Cast button). URLs point at the server's cast base URL (plain HTTP on the LAN), are
+        scoped to one track and format, expire after the track's duration + `cast_url_ttl_s`, and carry no
+        session token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackIds]
+              properties:
+                trackIds: { type: array, items: { type: string }, minItems: 1, maxItems: 500 }
+                format: { type: string, enum: [original, opus, mp3], default: original }
+      responses:
+        '200':
+          description: one item per known track, in request order (unknown ids are skipped)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [trackId, url, artUrl, contentType, expiresAt]
+                      properties:
+                        trackId: { type: string }
+                        url: { type: string }
+                        artUrl: { type: string }
+                        contentType: { type: string }
+                        expiresAt: { type: integer, description: unix seconds }
+  /cast/media/{trackId}:
+    get:
+      summary: |
+        Audio for speakers. No session auth: the HMAC `sig` over (track, format, exp) is the credential.
+        Also served alone on the plain-HTTP `cast_port`. `original` and `opus`/`mp3` (cached transcodes) support Range.
+      security: []
+      parameters:
+        - { name: trackId, in: path, required: true, schema: { type: string } }
+        - { name: f, in: query, schema: { type: string, enum: [original, opus, mp3], default: original } }
+        - { name: exp, in: query, required: true, schema: { type: integer } }
+        - { name: sig, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: audio, content: { audio/*: { schema: { type: string, format: binary } } } }
+        '206': { description: partial content }
+        '403': { description: bad or expired signature }
+        '404': { description: not found }
+  /cast/art/{albumId}:
+    get:
+      summary: Album art (512 px JPEG) for speakers. Signed like /cast/media.
+      security: []
+      parameters:
+        - { name: albumId, in: path, required: true, schema: { type: string } }
+        - { name: exp, in: query, required: true, schema: { type: integer } }
+        - { name: sig, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: JPEG, content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        '403': { description: bad or expired signature }
+        '404': { description: not found }
   /admin/invites:
     get:
       summary: Admin only.
@@ -1798,12 +1885,37 @@ components:
       type: object
       required: [id, name, kind, canPlay, online, isActive]
       properties:
-        id: { type: string }
+        id: { type: string, description: 'speakers: `spk:<castType>:<id>`' }
         name: { type: string }
-        kind: { $ref: '#/components/schemas/DeviceKind' }
+        kind:
+          type: string
+          enum: [android, web, desktop, watch, other, speaker]
+          description: a DeviceKind, or `speaker` for a server-side cast target (clients must accept unknown kinds)
         canPlay: { type: boolean }
         online: { type: boolean }
         isActive: { type: boolean }
+        castType:
+          type: [string, 'null']
+          enum: [chromecast, dlna, homeassistant, snapcast, null]
+          description: speakers only
+    Speaker:
+      type: object
+      required: [id, name, castType, kind, canPlay, online, busy]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        castType: { type: string, enum: [chromecast, dlna, homeassistant, snapcast] }
+        kind: { type: string, enum: [speaker] }
+        canPlay: { type: boolean }
+        online: { type: boolean }
+        busy: { type: boolean, description: playing for some user right now }
+    SpeakerList:
+      type: object
+      required: [speakers, mediaBaseUrl]
+      properties:
+        speakers: { type: array, items: { $ref: '#/components/schemas/Speaker' } }
+        mediaBaseUrl: { type: string, description: where speakers fetch audio (cast_media_url or http://lan_host:cast_port) }
+        errors: { type: object, additionalProperties: { type: string }, description: discovery errors per backend }
     UserSettings:
       type: object
       required: [settings]

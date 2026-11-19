@@ -164,6 +164,10 @@ interface NasMusicApi {
     @POST("playlists/{id}/move")
     suspend fun movePlaylistTrack(@Path("id") id: String, @Body body: MoveBody): Response<Unit>
 
+    /** Signed, short-lived media URLs for casting natively (full flavour's Google Cast button). */
+    @POST("cast/sign")
+    suspend fun castSign(@Body body: CastSignRequest): CastSignResponse
+
     @GET("queues")
     suspend fun queues(): List<Queue>
 

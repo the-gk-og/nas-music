@@ -96,3 +96,65 @@ machine, and as GitHub Actions secrets). Back it up: without it, future builds c
 installed app.
 
 To install, allow "Install unknown apps" for your browser or file manager on the phone.
+
+## Casting to speakers
+
+The server can play on Chromecast / Google Cast speakers, DLNA (UPnP AV) renderers, Home Assistant
+`media_player` entities and Snapcast groups. They show up in every user's Devices list (phone, web, desktop)
+as speakers; picking one hands the queue to the server, which plays it there. Picking a phone or browser
+again brings it back at the same position.
+
+**How speakers get the audio.** Speakers fetch tracks from short-lived signed URLs
+(`/api/v1/cast/media/<track>?f=…&exp=…&sig=…`). Each URL is an HMAC over that one track, format and expiry
+(track length + 1 h), so no login token is ever in a URL. They're served over **plain HTTP on `cast_port`
+(8090)**, because DLNA renderers and Snapcast can't do a self-signed HTTPS certificate. That port serves
+nothing but those signed URLs. Publish it on the LAN only (never forward it from the internet):
+
+```yaml
+    ports:
+      - "8443:8443"
+      - "127.0.0.1:8080:8080"
+      - "8090:8090"            # casting: speakers fetch signed media URLs here (LAN only)
+```
+
+If speakers should use another address (a reverse proxy, another port), set `cast_media_url`.
+
+**Finding speakers (Docker networking).** Chromecast discovery uses mDNS and DLNA discovery uses SSDP. Both
+are multicast, so neither gets through Docker's default bridge network. Choose one of these:
+- `network_mode: host` on the nasmusic service. Discovery then just works. Remove the `ports:` block, because
+  the ports are bound on the host directly. Check that 8443/8090 (and 8080 if you use it) are free on the NAS.
+- Keep bridge networking and list the speakers by hand in `config.toml`: `chromecast_hosts = ["<ip>", …]`
+  (Cast port 8009 is polled directly) and `dlna_renderers = ["http://<ip>:<port>/<description>.xml"]`.
+  Your renderer's app or a UPnP browser shows its description URL. Give these speakers DHCP reservations.
+  Set `cast_discovery = false` to stop the (useless) multicast attempts.
+
+Home Assistant and Snapcast need no multicast; they work on any networking.
+
+**Home Assistant.** Set `homeassistant_url` and `homeassistant_token` (HA → your profile → Security →
+Long-lived access tokens) in `/data/config.toml`. Never put the token in the repo. Optionally limit the list
+with `homeassistant_entities`. If HA also exposes a Chromecast the server finds directly, it appears twice.
+List only the entities you want, or turn off `cast_discovery`.
+
+**Snapcast.** Add a TCP source to `snapserver.conf` and point nasmusic at the server:
+
+```ini
+[stream]
+source = tcp://0.0.0.0:4953?name=nasmusic&mode=server&sampleformat=48000:16:2
+```
+
+```toml
+snapcast_host = "192.168.1.20"
+```
+
+Every Snapcast group with a connected client becomes a speaker. Playing on one switches that group to the
+`nasmusic` stream. The server decodes the track with ffmpeg in real time and feeds PCM to that source. There
+is a single feed, so two groups playing at once hear the same thing. Group the rooms in Snapcast for
+multi-room.
+
+**Check it.** `GET /api/v1/cast/speakers` (any signed-in device) lists what was found, plus discovery errors
+for each backend. An admin can force a rediscovery with `POST /api/v1/cast/speakers/refresh`. Otherwise it
+runs when the first device connects and then every 5 minutes. Set `cast_enabled = false` to turn it all off.
+
+**Android.** The `foss` APK uses only the above. The `full` APK also has a Google Cast button in the Devices
+sheet, which casts the phone's queue straight to a Chromecast. It still uses the server's signed URLs, so
+port 8090 must be reachable from the Chromecast.

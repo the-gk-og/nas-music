@@ -32,7 +32,7 @@ export interface ConnectHandlers {
   onDevices?(devices: ConnectDevice[]): void;
   onQueueChanged?(queueId: string): void;
   onStatus?(status: ConnectStatus): void;
-  onError?(detail: string): void;
+  onError?(detail: string, source?: string): void;
 }
 
 export interface ConnectOptions {
@@ -270,7 +270,7 @@ export class ConnectClient {
         this.handlers.onQueueChanged?.(msg.queueId);
         break;
       case 'error':
-        this.handlers.onError?.(msg.detail);
+        this.handlers.onError?.(msg.detail, msg.source);
         break;
       case 'pong':
         if (this.pongTimer) this.timers.clearTimeout(this.pongTimer);

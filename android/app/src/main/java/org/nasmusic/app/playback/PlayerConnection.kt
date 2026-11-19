@@ -275,6 +275,17 @@ class PlayerConnection(
         val playing = _state.value.isPlaying
         remoteOr(if (playing) "pause" else "play") { if (it.isPlaying) it.pause() else it.play() }
     }
+    fun pause() = remoteOr("pause") { it.pause() }
+
+    /** Put local playback at a queue position (after a native Cast session ends). No-op as a remote. */
+    fun resumeAt(index: Int, positionMs: Long, play: Boolean) {
+        if (connect.isRemote) return
+        withController { c ->
+            if (index in 0 until c.mediaItemCount) c.seekTo(index, positionMs.coerceAtLeast(0)) else c.seekTo(positionMs)
+            if (play) c.play()
+        }
+    }
+
     fun next() = remoteOr("next") { it.seekToNext() }
     fun previous() = remoteOr("prev") { it.seekToPrevious() }
     fun seekTo(ms: Long) = remoteOr("seek", mapOf("positionMs" to JsonPrimitive(ms))) { it.seekTo(ms) }

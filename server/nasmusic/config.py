@@ -36,11 +36,34 @@ class Config:
     scan_interval_minutes: int = 5
     lrclib_enabled: bool = True                 # lyrics fallback from lrclib.net when a file has none
     lan_public_url: str | None = None           # public LAN address incl. port, if not https://lan_host:https_port
+    # ---- casting to speakers (nasmusic/cast, deploy/README.md "Casting") ----
+    cast_enabled: bool = True
+    cast_port: int = 8090                       # plain-HTTP port serving ONLY signed /cast/ media URLs to speakers
+    cast_media_url: str | None = None           # base URL speakers fetch from; default http://lan_host:cast_port
+    cast_discovery: bool = True                 # mDNS (Chromecast) + SSDP (DLNA); needs host networking in Docker
+    cast_url_ttl_s: int = 3600                  # signed URL lifetime on top of the track's duration
+    chromecast_hosts: list[str] = field(default_factory=list)   # manual IPs when mDNS can't reach the LAN
+    dlna_renderers: list[str] = field(default_factory=list)     # manual device description URLs (http://ip:port/x.xml)
+    homeassistant_url: str | None = None        # e.g. http://192.168.1.10:8123
+    homeassistant_token: str | None = None      # long-lived access token (config.toml only, never the repo)
+    homeassistant_entities: list[str] = field(default_factory=list)  # media_player.* to offer; empty = all
+    snapcast_host: str | None = None            # snapserver host (JSON-RPC on snapcast_control_port)
+    snapcast_control_port: int = 1705
+    snapcast_stream_port: int = 4953            # snapserver `tcp://...?mode=server` source the server feeds PCM to
+    snapcast_stream_id: str = "nasmusic"        # that source's name= in snapserver.conf
     source_path: Path | None = field(default=None, compare=False)
 
     @property
     def db_path(self) -> Path:
         return self.data_dir / "nasmusic.db"
+
+    @property
+    def cast_base_url(self) -> str:
+        """Where speakers fetch signed media URLs (plain HTTP: DLNA/Snapcast can't do self-signed TLS)."""
+        if self.cast_media_url:
+            return self.cast_media_url.rstrip("/")
+        host = f"[{self.lan_host}]" if ":" in self.lan_host else self.lan_host
+        return f"http://{host}:{self.cast_port}"
 
     @property
     def lan_url(self) -> str:
@@ -95,7 +118,8 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
         pth = Path(vals[key]).expanduser()
         vals[key] = pth if pth.is_absolute() else (base / pth).resolve()
     for key in ("tunnel_url", "cf_access_client_id", "cf_access_client_secret", "admin_password_hash",
-                "lastfm_api_key", "lan_public_url"):
+                "lastfm_api_key", "lan_public_url", "cast_media_url", "homeassistant_url", "homeassistant_token",
+                "snapcast_host"):
         if vals.get(key) == "":
             vals[key] = None
     if vals.get("tunnel_url"):

@@ -28,6 +28,8 @@ class TranscodeError(Exception):
 
 
 class OpusCache:
+    EXT = "opus"
+
     def __init__(self, directory: Path, max_bytes: int, ffmpeg: str = "ffmpeg"):
         self.dir = directory
         self.max_bytes = max_bytes
@@ -38,7 +40,7 @@ class OpusCache:
         self.transcodes = 0  # counter, for tests/metrics
 
     def path_for(self, track_id: str, kbps: int, mtime: float) -> Path:
-        return self.dir / f"{track_id}_{kbps}_{int(mtime)}.opus"
+        return self.dir / f"{track_id}_{kbps}_{int(mtime)}.{self.EXT}"
 
     def _lock_for(self, key: tuple[str, int]) -> threading.Lock:
         with self._guard:
@@ -57,7 +59,7 @@ class OpusCache:
             if self._hit(out):
                 return out
             self._transcode(src, out, kbps, low_priority)
-            for old in self.dir.glob(f"{track_id}_{kbps}_*.opus"):
+            for old in self.dir.glob(f"{track_id}_{kbps}_*.{self.EXT}"):
                 if old != out:
                     old.unlink(missing_ok=True)
         self.evict()
@@ -76,14 +78,17 @@ class OpusCache:
                 pass
         return True
 
+    def _codec_args(self, kbps: int) -> list[str]:
+        return ["-c:a", "libopus", "-b:a", f"{kbps}k", "-vbr", "on", "-application", "audio",
+                "-map_metadata", "0", "-f", "opus"]
+
     def _transcode(self, src: Path, out: Path, kbps: int, low_priority: bool = False) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
         tmp = out.with_name(f".{out.name}.{threading.get_ident()}.tmp")
         cmd = [
             self.ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
             "-i", str(src), "-map", "0:a:0", "-vn", "-ac", "2",
-            "-c:a", "libopus", "-b:a", f"{kbps}k", "-vbr", "on", "-application", "audio",
-            "-map_metadata", "0", "-f", "opus", str(tmp),
+            *self._codec_args(kbps), str(tmp),
         ]
         t0 = time.monotonic()
         try:
@@ -109,7 +114,7 @@ class OpusCache:
             try:
                 with os.scandir(self.dir) as it:
                     for e in it:
-                        if e.is_file() and e.name.endswith(".opus") and not e.name.startswith("."):
+                        if e.is_file() and e.name.endswith(f".{self.EXT}") and not e.name.startswith("."):
                             st = e.stat()
                             entries.append((st.st_mtime, st.st_size, e.path))
                             total += st.st_size
@@ -134,6 +139,16 @@ class OpusCache:
 
     def size_bytes(self) -> int:
         try:
-            return sum(e.stat().st_size for e in os.scandir(self.dir) if e.name.endswith(".opus"))
+            return sum(e.stat().st_size for e in os.scandir(self.dir) if e.name.endswith(f".{self.EXT}"))
         except FileNotFoundError:
             return 0
+
+
+class Mp3Cache(OpusCache):
+    """Same cache, MP3 output: for DLNA renderers / speakers that can't play the original or Opus."""
+
+    EXT = "mp3"
+
+    def _codec_args(self, kbps: int) -> list[str]:
+        return ["-c:a", "libmp3lame", "-b:a", f"{kbps}k", "-map_metadata", "0", "-id3v2_version", "3",
+                "-f", "mp3"]

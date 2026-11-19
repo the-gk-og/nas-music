@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Computer
@@ -340,6 +341,14 @@ private fun AbRepeatDialog(c: AppContainer, onDismiss: () -> Unit) {
     )
 }
 
+internal fun castLabel(castType: String?): String = when (castType) {
+    "chromecast" -> "Google Cast"
+    "dlna" -> "DLNA"
+    "homeassistant" -> "Home Assistant"
+    "snapcast" -> "Snapcast"
+    else -> "Speaker"
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DevicesSheet(c: AppContainer, onDismiss: () -> Unit) {
@@ -351,7 +360,8 @@ private fun DevicesSheet(c: AppContainer, onDismiss: () -> Unit) {
         Column(Modifier.navigationBarsPadding().padding(bottom = 16.dp)) {
             Text("Devices", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
             if (!connected) Text("Not connected to the server. Devices appear when you're online.", modifier = Modifier.padding(horizontal = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            devices.filter { it.online }.sortedByDescending { it.id == me }.forEach { d ->
+            // This phone first, then your other devices, then speakers the server can cast to.
+            devices.filter { it.online }.sortedWith(compareBy({ it.id != me }, { it.isSpeaker })).forEach { d ->
                 val active = state?.activeDeviceId == d.id
                 Row(
                     Modifier.fillMaxWidth().clickable(enabled = d.canPlay && !active) { c.connect.transfer(d.id, true); onDismiss() }
@@ -359,19 +369,32 @@ private fun DevicesSheet(c: AppContainer, onDismiss: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        when (d.kind) { "android" -> Icons.Default.PhoneAndroid; "desktop" -> Icons.Default.Computer; "web" -> Icons.Default.Language; "watch" -> Icons.Default.Watch; else -> Icons.Default.Speaker },
+                        when {
+                            d.castType == "chromecast" -> Icons.Default.Cast
+                            d.isSpeaker -> Icons.Default.Speaker
+                            else -> when (d.kind) { "android" -> Icons.Default.PhoneAndroid; "desktop" -> Icons.Default.Computer; "web" -> Icons.Default.Language; "watch" -> Icons.Default.Watch; else -> Icons.Default.Speaker }
+                        },
                         null, tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     )
                     Spacer(Modifier.width(20.dp))
                     Column(Modifier.weight(1f)) {
                         Text(d.name + if (d.id == me) " (this phone)" else "", color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                        val status = when {
+                            active && state?.playing == true -> "Playing"
+                            active -> "Active"
+                            !d.canPlay -> "Remote only"
+                            d.isSpeaker -> "Tap to play on this speaker"
+                            else -> "Tap to play here"
+                        }
                         Text(
-                            when { active && state?.playing == true -> "Playing"; active -> "Active"; !d.canPlay -> "Remote only"; else -> "Tap to play here" },
+                            if (d.isSpeaker) "$status · ${castLabel(d.castType)}" else status,
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
             }
+            // Google Cast straight from the phone (full build only; the FOSS build has no Google code).
+            org.nasmusic.app.cast.NativeCast.DevicesRow(c)
             if (devices.none { it.online }) Row(Modifier.padding(24.dp)) { Icon(Icons.Default.Devices, null); Text("  Sign in on another device to control it from here.") }
         }
     }

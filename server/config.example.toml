@@ -32,3 +32,18 @@ opus_cache_gb = 20                 # LRU limit for transcoded Opus files
 # model_version = "effnet-discogs-1"  # analysis model; "basic-1" = ffmpeg-only fallback
 # lastfm_api_key = ""              # optional, used by weekly discovery
 # scan_interval_minutes = 5
+
+# ---- Casting to speakers (deploy/README.md "Casting to speakers") ----
+# cast_enabled = true
+# cast_port = 8090                 # plain HTTP, serves ONLY signed /api/v1/cast/media|art URLs; publish on the LAN
+# cast_media_url = ""              # what speakers fetch from; default http://<lan_host>:<cast_port>
+# cast_discovery = true            # mDNS (Chromecast) + SSDP (DLNA): needs network_mode: host in Docker
+# chromecast_hosts = ["192.168.1.40"]                         # manual Chromecast IPs (bridge networking)
+# dlna_renderers = ["http://192.168.1.41:49152/description.xml"] # manual DLNA description URLs
+# homeassistant_url = "http://192.168.1.10:8123"
+# homeassistant_token = ""         # HA profile -> Security -> Long-lived access token. Keep it out of git.
+# homeassistant_entities = ["media_player.kitchen"]           # empty = every available media_player
+# snapcast_host = "192.168.1.20"   # snapserver; JSON-RPC on snapcast_control_port
+# snapcast_control_port = 1705
+# snapcast_stream_port = 4953      # snapserver source: tcp://0.0.0.0:4953?name=nasmusic&mode=server&sampleformat=48000:16:2
+# snapcast_stream_id = "nasmusic"

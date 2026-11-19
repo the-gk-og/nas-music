@@ -151,3 +151,20 @@ data class ToGetPatch(val status: String? = null, val note: String? = null)
 @Serializable
 data class NewPin(val type: String, val id: String, val position: Int? = null)
 
+
+// ---------- casting (api/openapi.yaml /cast/*) ----------
+
+@Serializable
+data class CastSignRequest(val trackIds: List<String>, val format: String = "original")
+
+@Serializable
+data class CastSignedItem(
+    val trackId: String,
+    val url: String,
+    val artUrl: String? = null,
+    val contentType: String = "audio/flac",
+    val expiresAt: Long = 0,
+)
+
+@Serializable
+data class CastSignResponse(val items: List<CastSignedItem> = emptyList())

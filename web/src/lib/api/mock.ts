@@ -920,7 +920,10 @@ export class MockHub {
   devices(): ConnectDevice[] {
     const online = new Set([...this.sockets].map((s) => s.deviceId).filter(Boolean));
     online.add(PHONE);
-    return [...this.known].map(([id, d]) => ({ id, name: d.name, kind: d.kind, canPlay: true, online: online.has(id), isActive: this.state.activeDeviceId === id }));
+    const devs: ConnectDevice[] = [...this.known].map(([id, d]) => ({ id, name: d.name, kind: d.kind, canPlay: true, online: online.has(id), isActive: this.state.activeDeviceId === id }));
+    // A server-side speaker, so the picker can be tried in mock mode (it doesn't play anything).
+    devs.push({ id: 'spk:chromecast:mock', name: 'Living room speaker', kind: 'speaker', castType: 'chromecast', canPlay: true, online: true, isActive: this.state.activeDeviceId === 'spk:chromecast:mock' });
+    return devs;
   }
 
   private broadcast(msg: unknown) {

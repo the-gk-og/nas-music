@@ -6,6 +6,10 @@
 #   zxing-android-embedded (and ZXing core) - Apache-2.0
 #   Tink (pulls protobuf-javalite, BSD-3-Clause) - Apache-2.0
 #   JUnit 4 - EPL-1.0, Robolectric - MIT, androidx.test - Apache-2.0 (test only)
+#   androidx.mediarouter, androidx.appcompat - Apache-2.0 (`full` flavour only)
+# The ONE owner-approved exception (CLAUDE.md): Google Cast SDK, play-services-cast-framework, which is
+# proprietary. It is a `fullImplementation` dependency only; the default `foss` APK contains no Google
+# Play Services code (CI checks the APK with scripts/check-no-gms.sh).
 [versions]
 agp = "8.13.2"
 kotlin = "2.2.21"
@@ -30,6 +34,9 @@ palette = "1.0.0"
 junit = "4.13.2"
 robolectric = "4.16"
 androidxTestCore = "1.6.1"
+playServicesCast = "22.3.1"
+mediarouter = "1.8.1"
+appcompat = "1.7.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -69,6 +76,9 @@ tink-android = { module = "com.google.crypto.tink:tink-android", version.ref = "
 junit = { module = "junit:junit", version.ref = "junit" }
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTestCore" }
+play-services-cast-framework = { module = "com.google.android.gms:play-services-cast-framework", version.ref = "playServicesCast" }
+androidx-mediarouter = { module = "androidx.mediarouter:mediarouter", version.ref = "mediarouter" }
+androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

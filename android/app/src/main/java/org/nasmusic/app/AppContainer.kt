@@ -85,7 +85,7 @@ class AppContainer(val context: Context) {
     }
     val abRepeat = AbRepeat()
     /** Messages from background parts (playback service, workers) to show as a snackbar. */
-    val ui = UiMessages()
+    val ui = UiMessages().also { u -> connect.onSpeakerError = { u.toast(it) } }
     val eq = EqRepository(context)
     val contextCollector = ContextCollector(context, scope)
     val feeds = org.nasmusic.app.data.FeedRepository(api)
