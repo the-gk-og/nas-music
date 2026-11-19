@@ -194,6 +194,12 @@ export class ApiClient {
     return this.mode === 'cookie' ? Promise.resolve(this.base + path) : this.blobUrl(path);
   }
 
+  /** A URL for a file download: plain in cookie mode, a blob fetched with the header in bearer mode. */
+  downloadUrl(path: string): Promise<string> {
+    if (this.media && /\/admin\/backups\//.test(path)) return Promise.resolve(URL.createObjectURL(new Blob(['mock backup'], { type: 'application/gzip' })));
+    return this.mode === 'cookie' ? Promise.resolve(this.base + path) : this.blobUrl(path);
+  }
+
   blobUrlPublic(path: string) {
     return this.blobUrl(path);
   }
