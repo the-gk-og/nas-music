@@ -13,6 +13,25 @@ class LibraryStore {
   playlists = $state<Playlist[]>([]);
   pins = $state<ShelfItem[]>([]);
 
+  /** Live playlist pushes (Connect `playlist`): screens showing that playlist watch `changed`. */
+  changed = $state<{ id: string; rev: number | null; deleted: boolean; n: number } | null>(null);
+  private changes = 0;
+
+  /** Bumped after an admin tag edit so open views reload. */
+  tagsRev = $state(0);
+
+  tagsChanged(oldAlbum: string | null, newAlbum: string | null) {
+    this.tagsRev++;
+    if (oldAlbum && newAlbum && oldAlbum !== newAlbum && ui.route.name === 'album' && ui.route.param === oldAlbum) {
+      ui.go('album', newAlbum);
+    }
+  }
+
+  playlistChanged(id: string, rev: number | null, deleted: boolean) {
+    this.changed = { id, rev, deleted, n: ++this.changes };
+    void this.refreshPlaylists();
+  }
+
   async refreshPlaylists() {
     try {
       this.playlists = await session.api.playlists();

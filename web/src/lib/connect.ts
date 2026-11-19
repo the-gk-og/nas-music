@@ -31,6 +31,8 @@ export interface ConnectHandlers {
   onState?(state: PlaybackState): void;
   onDevices?(devices: ConnectDevice[]): void;
   onQueueChanged?(queueId: string): void;
+  /** v5: a playlist you own or are a member of changed (deleted = gone or access removed). */
+  onPlaylistChanged?(playlistId: string, rev: number | null, deleted: boolean): void;
   onStatus?(status: ConnectStatus): void;
   onError?(detail: string): void;
 }
@@ -259,6 +261,9 @@ export class ConnectClient {
         break;
       case 'queues':
         this.handlers.onQueueChanged?.(msg.queueId);
+        break;
+      case 'playlist':
+        this.handlers.onPlaylistChanged?.(msg.playlistId, msg.rev ?? null, !!msg.deleted);
         break;
       case 'error':
         this.handlers.onError?.(msg.detail);

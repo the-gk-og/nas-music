@@ -139,7 +139,7 @@ export class MockBackend {
   }
   private plOut(p: MockBackend['playlists'][number], withTracks = true): Playlist {
     const tracks = this.tracksOf(p.trackIds);
-    return { id: p.id, name: p.name, createdAt: p.createdAt, updatedAt: p.updatedAt, trackCount: tracks.length, durationS: tracks.reduce((s, t) => s + t.durationS, 0), ...(withTracks ? { tracks } : {}) };
+    return { id: p.id, name: p.name, createdAt: p.createdAt, updatedAt: p.updatedAt, trackCount: tracks.length, durationS: tracks.reduce((s, t) => s + t.durationS, 0), role: 'owner', rev: 0, memberCount: 0, collaborative: false, ...(withTracks ? { tracks } : {}) };
   }
   private getQ(id: string) {
     const q = this.queues.find((x) => x.id === id);
@@ -414,6 +414,16 @@ export class MockBackend {
       this.getP(r[1]).trackIds.splice(Number(r[2]), 1);
       return undefined;
     }
+    // v5 collaboration (mock: single-user, owner only)
+    if ((r = m(/^\/playlists\/([^/]+)\/members$/))) {
+      this.getP(r[1]);
+      return [{ userId: me.id, username: me.username, role: 'owner' }];
+    }
+    if ((r = m(/^\/playlists\/([^/]+)\/activity$/))) {
+      this.getP(r[1]);
+      return [];
+    }
+    if (path === '/users') return this.users.filter((u) => u.id !== me.id).map((u) => ({ id: u.id, username: u.username }));
     if ((r = m(/^\/playlists\/([^/]+)\/move$/))) {
       const p = this.getP(r[1]);
       const [x] = p.trackIds.splice(Number(body.from), 1);

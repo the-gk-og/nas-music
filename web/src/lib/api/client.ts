@@ -21,6 +21,8 @@ import type {
   MyDevice,
   PlayEvent,
   Playlist,
+  PlaylistActivity,
+  PlaylistMember,
   Queue,
   ServerInfo,
   Session,
@@ -145,6 +147,31 @@ export class ApiClient {
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
+  /** PUT a raw body (e.g. an image) and parse the JSON reply. */
+  async putRaw<T>(path: string, body: Blob, contentType: string): Promise<T> {
+    const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': contentType };
+    if (this.mode === 'bearer' && this.token) headers.Authorization = `Bearer ${this.token}`;
+    const res = await this.fetchImpl(this.base + path, { method: 'PUT', headers, body, credentials: this.mode === 'cookie' ? 'include' : 'omit' });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const j = await res.json();
+        if (typeof j?.detail === 'string') detail = j.detail;
+      } catch {
+        /* not JSON */
+      }
+      throw new ApiError(res.status, detail);
+    }
+    return (await res.json()) as T;
+  }
+
+  /** Drop cached art URLs for an album (after a cover change); `bust` makes new URLs skip the browser cache. */
+  forgetArt(albumId: string) {
+    for (const k of [...this.artCache.keys()]) if (k.startsWith(`${albumId}@`)) this.artCache.delete(k);
+    this.artBust.set(albumId, Date.now());
+  }
+  private artBust = new Map<string, number>();
+
   get = <T>(p: string, q?: Record<string, unknown>) => this.request<T>('GET', p, undefined, q);
   post = <T>(p: string, b: unknown = {}, q?: Record<string, unknown>) => this.request<T>('POST', p, b, q);
   put = <T>(p: string, b: unknown = {}) => this.request<T>('PUT', p, b);
@@ -159,13 +186,18 @@ export class ApiClient {
     let p = this.artCache.get(key);
     if (!p) {
       if (this.media) p = this.media.art(albumId, size);
-      else if (this.mode === 'cookie') p = Promise.resolve(`${this.base}/art/${encodeURIComponent(albumId)}?size=${size}`);
-      else if (this.token) p = Promise.resolve(`${this.base}/art/${encodeURIComponent(albumId)}?size=${size}&token=${encodeURIComponent(this.token)}`);
+      else if (this.mode === 'cookie') p = Promise.resolve(`${this.base}/art/${encodeURIComponent(albumId)}?size=${size}${this.bustQ(albumId)}`);
+      else if (this.token) p = Promise.resolve(`${this.base}/art/${encodeURIComponent(albumId)}?size=${size}&token=${encodeURIComponent(this.token)}${this.bustQ(albumId)}`);
       else p = this.blobUrl(`/art/${encodeURIComponent(albumId)}?size=${size}`);
       p.catch(() => this.artCache.delete(key));
       this.artCache.set(key, p);
     }
     return p;
+  }
+
+  private bustQ(albumId: string): string {
+    const v = this.artBust.get(albumId);
+    return v ? `&v=${v}` : '';
   }
 
   suggestionCoverSrc(id: string, size = 256): Promise<string> {
@@ -280,6 +312,23 @@ export class ApiClient {
   deletePlaylist = (id: string) => this.del<void>(`/playlists/${encodeURIComponent(id)}`);
   addToPlaylist = (id: string, trackIds: string[], position?: number) =>
     this.post<Playlist | void>(`/playlists/${encodeURIComponent(id)}/tracks`, { trackIds, position });
+  /** v5: insert right after an entry ('' = at the top). */
+  addToPlaylistAfter = (id: string, trackIds: string[], afterEntryId: string) =>
+    this.post<Playlist>(`/playlists/${encodeURIComponent(id)}/tracks`, { trackIds, afterEntryId });
+  removePlaylistEntry = (id: string, entryId: string) =>
+    this.del<Playlist>(`/playlists/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}`);
+  movePlaylistEntry = (id: string, entryId: string, afterEntryId: string | null) =>
+    this.post<Playlist>(`/playlists/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/move`, { afterEntryId });
+  playlistMembers = (id: string) => this.get<PlaylistMember[]>(`/playlists/${encodeURIComponent(id)}/members`);
+  addPlaylistMember = (id: string, b: { userId?: string; username?: string; role: 'editor' | 'viewer' }) =>
+    this.post<PlaylistMember[]>(`/playlists/${encodeURIComponent(id)}/members`, b);
+  setPlaylistMemberRole = (id: string, userId: string, role: 'editor' | 'viewer') =>
+    this.patch<PlaylistMember[]>(`/playlists/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`, { role });
+  removePlaylistMember = (id: string, userId: string) =>
+    this.del<void>(`/playlists/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`);
+  playlistActivity = (id: string, limit = 100) =>
+    this.get<PlaylistActivity[]>(`/playlists/${encodeURIComponent(id)}/activity?limit=${limit}`);
+  userDirectory = () => this.get<{ id: string; username: string }[]>('/users');
   removeFromPlaylist = (id: string, position: number) =>
     this.del<void>(`/playlists/${encodeURIComponent(id)}/tracks/${position}`);
   movePlaylistTrack = (id: string, from: number, to: number) =>

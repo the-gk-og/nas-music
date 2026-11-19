@@ -152,6 +152,16 @@ export interface Genre {
 
 export type SmartListKind = 'favourites' | 'recently_added' | 'recently_played' | 'most_played' | 'not_played';
 
+export type PlaylistRole = 'owner' | 'editor' | 'viewer';
+
+export interface PlaylistEntry {
+  id: string;
+  trackId: string;
+  addedAt: string;
+  addedById?: string | null;
+  addedBy?: string | null;
+}
+
 export interface Playlist {
   id: string;
   name: string;
@@ -160,6 +170,33 @@ export interface Playlist {
   createdAt?: string;
   updatedAt?: string;
   tracks?: Track[];
+  // v5 (collaborative playlists)
+  ownerId?: string;
+  owner?: string | null;
+  role?: PlaylistRole;
+  rev?: number;
+  memberCount?: number;
+  collaborative?: boolean;
+  /** Parallel to `tracks`. */
+  entries?: PlaylistEntry[];
+}
+
+export interface PlaylistMember {
+  userId: string;
+  username: string;
+  role: PlaylistRole;
+  addedAt?: string;
+}
+
+export interface PlaylistActivity {
+  id: number;
+  at: string;
+  userId?: string | null;
+  user?: string | null;
+  action: 'create' | 'rename' | 'add' | 'remove' | 'move' | 'member_add' | 'member_role' | 'member_remove' | 'leave';
+  trackId?: string | null;
+  trackTitle?: string | null;
+  detail: Record<string, unknown>;
 }
 
 export interface Queue {
@@ -295,6 +332,7 @@ export type ServerMessage =
   | { type: 'takeover'; state: PlaybackState }
   | { type: 'release' }
   | { type: 'queues'; queueId: string }
+  | { type: 'playlist'; playlistId: string; rev: number | null; deleted?: boolean }
   | { type: 'pong' }
   | { type: 'error'; detail: string };
 
