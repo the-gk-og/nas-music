@@ -8,44 +8,56 @@
   import TopBar from '../components/TopBar.svelte';
   import { appearance } from '../lib/appearance.svelte';
   import { session } from '../lib/session.svelte';
-  import type { Shelf as ShelfT, ShelfItem, Suggestion, ToGetItem } from '../lib/types';
+  import type { CatalogItem, Shelf as ShelfT, Suggestion, ToGetItem } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
 
+  const KNOWN = new Set(['mixes', 'radio', 'because_you_played', 'release_radar', 'suggestions', 'to_get', 'blends', 'wrapped']);
   let shelves = $state<ShelfT[] | null>(null);
-  let suggestions = $state<Suggestion[]>([]);
-  let toget = $state<ToGetItem[]>([]);
 
-  /** Old servers have no /foryou: build Your mixes from /mixes/today. */
+  /** Older servers have no /foryou: Your mixes from /mixes/today, Suggestions, To get. */
   async function fallback(): Promise<ShelfT[]> {
-    const mixes = await session.api.mixesToday().catch(() => []);
+    const [mixes, sugg, toget] = await Promise.all([
+      session.api.mixesToday().catch(() => []),
+      session.api.suggestions().catch(() => []),
+      session.api.toGet('want').catch(() => []),
+    ]);
     return [
       {
         id: 'mixes',
+        kind: 'mixes',
         title: 'Your mixes',
         items: mixes.map((m) => ({ type: 'mix', id: m.id, title: m.title, subtitle: `${m.tracks.length} songs`, artIds: m.tracks.slice(0, 4).map((x) => x.track.albumId) })),
       },
+      { id: 'suggestions', kind: 'suggestions', title: 'Suggestions', items: sugg.map((x) => ({ type: 'suggestion', id: x.id, title: x.album, subtitle: x.artist, suggestion: x })) },
+      { id: 'to_get', kind: 'to_get', title: 'To get', items: toget.map((x) => ({ type: 'toget', id: x.id, title: x.title, subtitle: x.artist, artUrl: x.artUrl, toget: x })) },
     ];
   }
 
-  $effect(() => {
+  const load = () =>
     session.api
       .forYou()
       .then((f) => (shelves = f.shelves))
       .catch(async () => (shelves = await fallback()));
-    session.api.suggestions().then((s) => (suggestions = s)).catch(() => {});
-    session.api.toGet().then((t) => (toget = t)).catch(() => {});
-  });
+  $effect(() => void load());
 
-  // Suggestions + To get come from their own endpoints (richer than shelf items).
-  const feed = $derived((shelves ?? []).filter((s) => s.items.length && s.id !== 'suggestions' && s.id !== 'toget'));
-  const want = $derived(toget.filter((t) => t.status === 'want'));
-  const toItem = (t: ToGetItem): ShelfItem => ({
-    type: 'catalog',
-    id: t.id,
+  // Unknown kinds are skipped (contract rule); phase-2 kinds render once the server sends them.
+  const feed = $derived((shelves ?? []).filter((s) => KNOWN.has(s.kind) && s.items.length));
+  const asCatalog = (t: ToGetItem): CatalogItem => ({
+    id: t.catalogId ?? t.id,
+    type: t.type,
     title: t.title,
-    subtitle: t.artist,
-    catalog: { id: t.catalogId ?? t.id, type: t.type, title: t.title, artist: t.artist, year: t.year, hasCover: t.hasCover, hasPreview: !!t.catalogId, owned: false, inToGet: true },
+    artist: t.artist,
+    year: t.year,
+    artUrl: t.artUrl,
+    hasPreview: !!t.catalogId && t.hasPreview !== false,
+    owned: t.status === 'got',
+    ownedId: t.ownedId,
+    toGet: { id: t.id, status: t.status },
   });
+  function suggestionChanged(n: Suggestion) {
+    shelves = (shelves ?? []).map((s) => (s.kind === 'suggestions' ? { ...s, items: s.items.map((it) => (it.id === n.id ? { ...it, suggestion: n } : it)) } : s));
+    if (n.status === 'want') void load(); // lands in To get
+  }
 </script>
 
 <div class="page foryou">
@@ -57,29 +69,23 @@
   {#if !shelves}<div class="empty">Loading…</div>{/if}
 
   {#each feed as s (s.id)}
-    <Shelf title={s.title} subtitle={s.kind === 'because' ? 'Because you played' : ''}>
-      {#each s.items as it (it.type + it.id)}<Card item={it} siblings={s.items} wide={s.id === 'mixes'} />{/each}
-    </Shelf>
+    {#if s.kind === 'suggestions'}
+      <Shelf title={s.title} subtitle={s.subtitle ?? 'This week'}>
+        {#each s.items.filter((x) => x.suggestion) as it (it.id)}<SuggestionCard s={it.suggestion!} onchange={suggestionChanged} />{/each}
+      </Shelf>
+    {:else if s.kind === 'to_get'}
+      {@const items = s.items.filter((x) => x.toget)}
+      <section class="toget">
+        <button class="th" onclick={() => ui.go('toget')}><h2>{s.title}</h2><ChevronRight size={22} /></button>
+        {#each items.slice(0, 5) as it (it.id)}<CatalogRow item={asCatalog(it.toget!)} />{/each}
+        {#if items.length > 5}<button class="btn text more" onclick={() => ui.go('toget')}>Show all {items.length}</button>{/if}
+      </section>
+    {:else}
+      <Shelf title={s.title} subtitle={s.subtitle ?? (s.kind === 'because_you_played' ? 'Because you played' : '')}>
+        {#each s.items as it (it.type + it.id)}<Card item={it} siblings={s.items} wide={s.kind === 'mixes'} />{/each}
+      </Shelf>
+    {/if}
   {/each}
-
-  {#if suggestions.length}
-    <Shelf title="Suggestions" subtitle="This week">
-      {#each suggestions as s (s.id)}
-        <SuggestionCard {s} onchange={(n) => {
-          suggestions = suggestions.map((x) => (x.id === n.id ? n : x));
-          if (n.status === 'want') session.api.toGet().then((t) => (toget = t)).catch(() => {});
-        }} />
-      {/each}
-    </Shelf>
-  {/if}
-
-  {#if want.length}
-    <section class="toget">
-      <button class="th" onclick={() => ui.go('toget')}><h2>To get</h2><ChevronRight size={22} /></button>
-      {#each want.slice(0, 5) as t (t.id)}<CatalogRow item={toItem(t).catalog!} />{/each}
-      {#if want.length > 5}<button class="btn text more" onclick={() => ui.go('toget')}>Show all {want.length}</button>{/if}
-    </section>
-  {/if}
 </div>
 
 <style>

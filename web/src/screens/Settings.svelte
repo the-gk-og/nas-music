@@ -112,7 +112,7 @@
       <div>Accent colour</div>
       <div class="swatches">
         {#each Object.entries(ACCENTS) as [name, c]}
-          <button class="sw" class:on={appearance.prefs.accent === name} style:background={c} aria-label={name} title={name} onclick={() => appearance.set('accent', name)}></button>
+          <button class="sw" class:on={appearance.prefs.accent.toLowerCase() === name} style:background={c} aria-label={name} title={name[0].toUpperCase() + name.slice(1)} onclick={() => appearance.set('accent', name)}></button>
         {/each}
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Shelf } from './types';
 import {
+  accentColor,
   appendNew,
   arrangeShelves,
   classifySwipe,
@@ -12,6 +13,7 @@ import {
   moveInList,
   needsTopUp,
   parseRadioId,
+  progressFraction,
   tabletSidePane,
 } from './v3';
 
@@ -43,19 +45,20 @@ describe('motion', () => {
 });
 
 describe('arrangeShelves', () => {
-  const sh = (id: string, n = 1): Shelf => ({ id, title: id, items: Array.from({ length: n }, (_, i) => ({ type: 'album', id: id + i, title: 'x' })) });
-  const all = [sh('radio', 0), sh('devices', 0), sh('recent'), sh('continue', 0), sh('pinned')];
+  const sh = (id: string, n = 1, kind = id): Shelf => ({ id, kind, title: id, items: Array.from({ length: n }, (_, i) => ({ type: 'album', id: id + i, title: 'x' })) });
+  const all = [sh('start_radio', 0), sh('devices', 0), sh('recently_played'), sh('continue_listening', 0), sh('pinned')];
   it('follows the user order, hides hidden and empty shelves', () => {
-    const out = arrangeShelves(all, { order: ['pinned', 'recent', 'radio'], hidden: ['recent'] });
-    expect(out.map((s) => s.id)).toEqual(['pinned', 'radio']);
+    const out = arrangeShelves(all, { order: ['pinned', 'recently_played', 'start_radio'], hidden: ['recently_played'] });
+    expect(out.map((s) => s.id)).toEqual(['pinned', 'start_radio']);
   });
   it('shows the devices shelf only when other devices are online', () => {
     expect(arrangeShelves(all, { order: [], hidden: [] }, new Set(['devices'])).map((s) => s.id)).toContain('devices');
     expect(arrangeShelves(all, { order: [], hidden: [] }).map((s) => s.id)).not.toContain('devices');
   });
-  it('orders "because:" shelves by their kind', () => {
-    const out = arrangeShelves([sh('mixes'), sh('because:t1'), sh('because:t2')], { order: ['because', 'mixes'], hidden: [] });
-    expect(out.map((s) => s.id)).toEqual(['because:t1', 'because:t2', 'mixes']);
+  it('orders "byp:" shelves by their kind', () => {
+    const byp = 'because_you_played';
+    const out = arrangeShelves([sh('mixes'), sh('byp:album:1', 1, byp), sh('byp:track:2', 1, byp)], { order: [byp, 'mixes'], hidden: [] });
+    expect(out.map((s) => s.id)).toEqual(['byp:album:1', 'byp:track:2', 'mixes']);
   });
   it('moves items in a list', () => {
     expect(moveInList(['a', 'b', 'c'], 2, 0)).toEqual(['c', 'a', 'b']);
@@ -73,6 +76,7 @@ describe('radio', () => {
     expect(parseRadioId('track:t0_1')).toEqual({ type: 'track', id: 't0_1' });
     expect(parseRadioId('random')).toEqual({ type: 'random' });
     expect(parseRadioId('weird:x')).toEqual({ type: 'random' });
+    expect(parseRadioId('anything', { type: 'album', id: 'a1' })).toEqual({ type: 'album', id: 'a1' });
   });
   it('appends only the new tracks', () => {
     const a = [{ id: '1' }, { id: '2' }];
@@ -93,6 +97,14 @@ describe('gestures', () => {
     expect(classifySwipe(60, 55, 200)).toBeNull(); // diagonal
     expect(classifySwipe(30, 0, 200)).toBeNull(); // too short
   });
+});
+
+it('resolves accents and progress', () => {
+  expect(accentColor('Teal')).toBe('#2dd4bf');
+  expect(accentColor('#123abc')).toBe('#123abc');
+  expect(accentColor('nope')).toBe('#4ade80');
+  expect(progressFraction({ index: 3, count: 12 })).toBe(0.25);
+  expect(progressFraction(null)).toBeNull();
 });
 
 it('greets by time of day', () => {

@@ -8,11 +8,11 @@
   import Art from './Art.svelte';
 
   let { item }: { item: CatalogItem } = $props();
-  let added = $derived(!!item.inToGet);
+  let added = $derived(!!item.toGet && item.toGet.status !== 'dismissed');
 
   async function add() {
     try {
-      await session.api.addToGet({ catalogId: item.id, type: item.type === 'track' ? 'track' : 'album', title: item.title, artist: item.artist, year: item.year });
+      await session.api.addToGet({ catalogId: item.id });
       added = true;
       ui.toast(`Added "${item.title}" to To get`);
     } catch (e) {
@@ -39,7 +39,7 @@
     <button class="icon-btn" class:on={added} aria-label={added ? 'In To get' : 'Add to To get'} title={added ? 'In To get' : 'Add to To get'} disabled={added} onclick={add}>
       {#if added}<Check size={20} />{:else}<Plus size={20} />{/if}
     </button>
-    <button class="icon-btn" aria-label="Find similar in my library" title="Find similar in my library" onclick={() => ui.go('search', item.artist)}><Library size={20} /></button>
+    <button class="icon-btn" aria-label="Find similar in my library" title="Find similar in my library" onclick={() => ui.go('search', item.artist ?? item.title)}><Library size={20} /></button>
   {/if}
 </div>
 

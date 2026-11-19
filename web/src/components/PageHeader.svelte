@@ -22,7 +22,7 @@
     menu,
   }: {
     item: ShelfItem;
-    kind: 'album' | 'artist' | 'playlist' | 'mix' | 'list';
+    kind: 'album' | 'artist' | 'playlist' | 'mix' | 'smart_list' | 'genre';
     label: string;
     meta?: string;
     onplay?: () => void;
@@ -33,7 +33,7 @@
 
   const styleKind = $derived(kind === 'album' || kind === 'artist' ? kind : 'playlist');
   const style = $derived<PageStyle>(appearance.pageStyle(styleKind));
-  const pinKind = $derived(kind === 'list' ? null : kind);
+  const pinKind = $derived(kind);
   let color = $state('rgb(40,40,40)');
   let menuOpen = $state(false);
 

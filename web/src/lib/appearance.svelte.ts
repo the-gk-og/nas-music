@@ -1,8 +1,9 @@
 // Appearance settings (docs/v3-ux.md §1, §7): animations, default view, album page style, accent, Home
-// shelves. Synced per user via /me/settings (`ui.*` keys); "Only on this device" keeps a local override.
+// shelves. Synced per user via /me/settings (`appearance.*`, `home.shelves`, `home.hidden`); "Only on this
+// device" writes `device.<deviceId>.<key>` overrides instead.
 import { loadJson, saveJson } from './platform';
 import { session } from './session.svelte';
-import { ACCENTS, HOME_SHELVES, effectiveMotion, formFor, type Form, type Motion, type ShelfPrefs } from './v3';
+import { HOME_SHELVES, accentColor, effectiveMotion, formFor, type Form, type Motion, type ShelfPrefs } from './v3';
 
 export type ViewMode = 'grid' | 'list';
 export type PageStyle = 'big' | 'simple';
@@ -19,20 +20,50 @@ const DEFAULTS: AppearancePrefs = {
   animations: 'quick',
   defaultView: 'grid',
   albumStyle: 'big',
-  accent: 'Green',
+  accent: 'green',
   homeShelves: { order: [...HOME_SHELVES], hidden: [] },
 };
 
-const KEYS: Record<keyof AppearancePrefs, string> = {
-  animations: 'ui.animations',
-  defaultView: 'ui.defaultView',
-  albumStyle: 'ui.albumStyle',
-  accent: 'ui.accent',
-  homeShelves: 'ui.homeShelves',
+/** Settings keys (api/openapi.yaml /me/settings). homeShelves is split into order + hidden. */
+const KEYS: Record<Exclude<keyof AppearancePrefs, 'homeShelves'>, string> = {
+  animations: 'appearance.animations',
+  defaultView: 'appearance.defaultView',
+  albumStyle: 'appearance.albumPage',
+  accent: 'appearance.accent',
 };
 
+/** Drop shelf ids from older builds (e.g. "recent") so new ids keep their default order. */
+function sanitize(p: AppearancePrefs): AppearancePrefs {
+  const known = (ids: unknown) => (Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string' && !['radio', 'recent', 'continue'].includes(x)) : []);
+  const order = known(p.homeShelves?.order);
+  const full = [...order, ...HOME_SHELVES.filter((x) => !order.includes(x))];
+  return { ...p, accent: String(p.accent || 'green'), homeShelves: { order: full, hidden: known(p.homeShelves?.hidden) } };
+}
+
+function toSettings(k: keyof AppearancePrefs, v: unknown): Record<string, unknown> {
+  if (k === 'homeShelves') {
+    const p = v as ShelfPrefs;
+    return { 'home.shelves': p.order, 'home.hidden': p.hidden };
+  }
+  return { [KEYS[k]]: v };
+}
+
+function fromSettings(all: Record<string, unknown>, prefix: string, base: AppearancePrefs): AppearancePrefs {
+  const next = { ...base };
+  const get = (k: string) => all[prefix + k];
+  for (const [field, key] of Object.entries(KEYS) as [keyof typeof KEYS, string][]) {
+    const v = get(key);
+    if (v !== undefined && v !== null) (next as Record<string, unknown>)[field] = v;
+  }
+  const order = get('home.shelves');
+  const hidden = get('home.hidden');
+  if (Array.isArray(order) || Array.isArray(hidden))
+    next.homeShelves = { order: Array.isArray(order) ? (order as string[]) : base.homeShelves.order, hidden: Array.isArray(hidden) ? (hidden as string[]) : base.homeShelves.hidden };
+  return next;
+}
+
 class Appearance {
-  prefs = $state<AppearancePrefs>({ ...DEFAULTS, ...loadJson<Partial<AppearancePrefs>>('nm.appearance', {}) });
+  prefs = $state<AppearancePrefs>(sanitize({ ...DEFAULTS, ...loadJson<Partial<AppearancePrefs>>('nm.appearance', {}) }));
   localOnly = $state<boolean>(loadJson('nm.appearance.local', { on: false }).on);
   reducedMotion = $state(false);
   width = $state(typeof window !== 'undefined' ? window.innerWidth : 1280);
@@ -68,6 +99,10 @@ class Appearance {
   setView(section: string, v: ViewMode) {
     this.views = { ...this.views, [section]: v };
     saveJson('nm.views', this.views);
+    // Library chips are remembered per device on the server too (`device.<id>.library.view.<chip>`).
+    const chip = /^lib\.(.+)$/.exec(section)?.[1];
+    const dev = session.saved.deviceId;
+    if (chip && dev) void session.api.putSettings({ settings: { [`device.${dev}.library.view.${chip}`]: v } }).catch(() => {});
   }
 
   pageStyle(kind: 'album' | 'artist' | 'playlist'): PageStyle {
@@ -83,19 +118,28 @@ class Appearance {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
     root.dataset.motion = this.motion;
-    root.style.setProperty('--accent', ACCENTS[this.prefs.accent] ?? ACCENTS.Green);
+    root.style.setProperty('--accent', accentColor(this.prefs.accent));
   }
 
-  /** Server values, unless this device keeps its own. */
+  private get devicePrefix(): string {
+    return session.saved.deviceId ? `device.${session.saved.deviceId}.` : '';
+  }
+
+  /** User values, then this device's overrides when "Only on this device" is on. */
   async load() {
-    if (this.localOnly) return this.apply();
     try {
       const { settings } = await session.api.getSettings();
-      const next = { ...this.prefs };
-      for (const [k, key] of Object.entries(KEYS) as [keyof AppearancePrefs, string][]) {
-        if (settings?.[key] !== undefined && settings[key] !== null) (next as Record<string, unknown>)[k] = settings[key];
+      let next = fromSettings(settings ?? {}, '', { ...DEFAULTS, ...this.prefs });
+      const pre = this.devicePrefix;
+      if (pre) {
+        const hasOverride = Object.keys(settings ?? {}).some((k) => k.startsWith(pre + 'appearance.') || k.startsWith(pre + 'home.'));
+        if (hasOverride) {
+          this.localOnly = true;
+          saveJson('nm.appearance.local', { on: true });
+        }
+        if (this.localOnly) next = fromSettings(settings ?? {}, pre, next);
       }
-      this.prefs = next;
+      this.prefs = sanitize(next);
       saveJson('nm.appearance', this.prefs);
     } catch {
       /* offline: keep local */
@@ -107,18 +151,31 @@ class Appearance {
     this.prefs = { ...this.prefs, [k]: v };
     saveJson('nm.appearance', this.prefs);
     this.apply();
-    if (this.localOnly) return;
+    const body = toSettings(k, v);
+    const pre = this.localOnly ? this.devicePrefix : '';
     try {
-      await session.api.putSettings({ settings: { [KEYS[k]]: v } });
+      await session.api.putSettings({ settings: Object.fromEntries(Object.entries(body).map(([key, val]) => [pre + key, val])) });
     } catch {
       /* saved locally */
     }
   }
 
-  setLocalOnly(on: boolean) {
+  /** On: write this device's overrides. Off: delete them (null) and push the values to the user level. */
+  async setLocalOnly(on: boolean) {
+    const pre = this.devicePrefix;
     this.localOnly = on;
     saveJson('nm.appearance.local', { on });
-    if (!on) for (const k of Object.keys(KEYS) as (keyof AppearancePrefs)[]) void this.set(k, this.prefs[k]);
+    const all: Record<string, unknown> = {};
+    for (const k of Object.keys(DEFAULTS) as (keyof AppearancePrefs)[]) Object.assign(all, toSettings(k, this.prefs[k]));
+    const body: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(all)) {
+      if (on) body[pre + key] = val;
+      else {
+        body[key] = val;
+        if (pre) body[pre + key] = null;
+      }
+    }
+    await session.api.putSettings({ settings: body }).catch(() => {});
   }
 }
 

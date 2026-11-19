@@ -227,6 +227,9 @@
   .side > :global(*) {
     flex: 1;
   }
+  .side :global(.art) {
+    width: min(100%, 38vh);
+  }
   /* desktop: sidebar | main | right panel, player bar along the bottom */
   .shell.desktop {
     grid-template-columns: auto 1fr auto;

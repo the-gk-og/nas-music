@@ -1,6 +1,7 @@
 import type {
   Feed,
-  Pin,
+  PinType,
+  ShelfItem,
   RadioSeed,
   SearchResults,
   ToGetItem,
@@ -159,6 +160,7 @@ export class ApiClient {
     if (!p) {
       if (this.media) p = this.media.art(albumId, size);
       else if (this.mode === 'cookie') p = Promise.resolve(`${this.base}/art/${encodeURIComponent(albumId)}?size=${size}`);
+      else if (this.token) p = Promise.resolve(`${this.base}/art/${encodeURIComponent(albumId)}?size=${size}&token=${encodeURIComponent(this.token)}`);
       else p = this.blobUrl(`/art/${encodeURIComponent(albumId)}?size=${size}`);
       p.catch(() => this.artCache.delete(key));
       this.artCache.set(key, p);
@@ -296,7 +298,20 @@ export class ApiClient {
   // ---- v3: feeds, global search, To get, pins, radio ----
   home = () => this.get<Feed>('/home');
   forYou = () => this.get<Feed>('/foryou');
-  globalSearch = (q: string, limit = 20) => this.get<SearchResults>('/search', { q, limit });
+  globalSearch = (q: string, limit = 20, scope: 'all' | 'library' | 'catalog' = 'all') => this.get<SearchResults>('/search', { q, limit, scope });
+
+  /** Image for a relative `artUrl` ("art/<id>", "catalog/<id>/cover", "suggestions/<id>/cover"). */
+  relArtSrc(rel: string, size = 256): Promise<string> {
+    const clean = rel.replace(/^\/?(api\/v1\/)?/, '').split('?')[0];
+    let m = /^art\/([^/]+)$/.exec(clean);
+    if (m) return this.artSrc(decodeURIComponent(m[1]), size);
+    m = /^catalog\/([^/]+)\/cover$/.exec(clean);
+    if (m) return this.catalogCoverSrc(decodeURIComponent(m[1]), size);
+    m = /^suggestions\/([^/]+)\/cover$/.exec(clean);
+    if (m) return this.suggestionCoverSrc(decodeURIComponent(m[1]), size);
+    const path = `/${clean}?size=${size}`;
+    return this.mode === 'cookie' ? Promise.resolve(this.base + path) : this.blobUrlPublic(path);
+  }
   catalogPreviewSrc = (id: string): Promise<string> => {
     const path = `/catalog/${encodeURIComponent(id)}/preview`;
     if (this.media?.catalogPreview) return this.media.catalogPreview(id);
@@ -307,16 +322,16 @@ export class ApiClient {
     if (this.media?.catalogCover) return this.media.catalogCover(id, size);
     return this.mode === 'cookie' ? Promise.resolve(this.base + path) : this.blobUrlPublic(path);
   };
-  toGet = () => this.get<ToGetItem[]>('/toget');
-  addToGet = (b: { catalogId?: string; type: 'album' | 'track'; title: string; artist: string; year?: number | null; note?: string }) =>
+  toGet = (status: ToGetStatus | 'all' = 'all') => this.get<ToGetItem[]>('/toget', { status });
+  addToGet = (b: { catalogId?: string; type?: 'album' | 'track'; title?: string; artist?: string | null; year?: number | null; mbid?: string | null; note?: string }) =>
     this.post<ToGetItem>('/toget', b);
   patchToGet = (id: string, b: { status?: ToGetStatus; note?: string | null }) => this.patch<ToGetItem>(`/toget/${encodeURIComponent(id)}`, b);
   deleteToGet = (id: string) => this.del<void>(`/toget/${encodeURIComponent(id)}`);
-  pins = () => this.get<Pin[]>('/pins');
-  pin = (type: Pin['type'], id: string) => this.post<Pin>('/pins', { type, id });
-  unpin = (type: Pin['type'], id: string) => this.del<void>(`/pins/${type}/${encodeURIComponent(id)}`);
+  pins = () => this.get<ShelfItem[]>('/pins');
+  pin = (type: PinType, id: string, position?: number) => this.post<ShelfItem[]>('/pins', { type, id, position });
+  unpin = (type: PinType, id: string) => this.del<void>(`/pins/${type}/${encodeURIComponent(id)}`);
   startRadio = (seed: RadioSeed) => this.post<Queue>('/radio', { seed });
-  radioMore = (queueId: string) => this.post<Queue>(`/radio/${encodeURIComponent(queueId)}/more`);
+  radioMore = (queueId: string, count = 25) => this.post<Queue>(`/radio/${encodeURIComponent(queueId)}/more`, { count });
 
   // ---- admin ----
   invites = () => this.get<Invite[]>('/admin/invites');

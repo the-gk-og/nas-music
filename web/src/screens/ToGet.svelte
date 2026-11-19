@@ -47,13 +47,13 @@
   {:else}
     {#each shown as i (i.id)}
       <div class="item">
-        <div class="a"><Art item={{ type: 'catalog', id: i.id, title: i.title, catalog: { id: i.catalogId ?? i.id, type: i.type, title: i.title, artist: i.artist, hasCover: i.hasCover, owned: false } }} size={128} /></div>
+        <div class="a"><Art item={{ type: 'toget', id: i.id, title: i.title, artUrl: i.artUrl, toget: i }} size={128} /></div>
         <div class="grow">
           <b>{i.title}</b>
           <div class="muted small">{i.type === 'album' ? 'Album' : 'Song'} · {i.artist}{i.year ? ` · ${i.year}` : ''}</div>
           {#if i.note}<div class="small note">“{i.note}”</div>{/if}
           <div class="links">
-            {#if i.catalogId}
+            {#if i.catalogId && i.hasPreview !== false}
               <button class="lk" onclick={() => samples.toggle(i.catalogId!)}>{#if samples.playing === i.catalogId}<Pause size={14} /> Stop{:else}<Play size={14} /> Sample{/if}</button>
             {/if}
             {#each i.links ?? [] as l}<a class="lk" href={l.url} target="_blank" rel="noopener noreferrer">{l.name}</a>{/each}

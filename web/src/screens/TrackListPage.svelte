@@ -52,7 +52,7 @@
   });
 
   const item = $derived<ShelfItem>({
-    type: kind === 'mix' ? 'mix' : 'list',
+    type: kind === 'mix' ? 'mix' : kind === 'genre' ? 'genre' : 'smart_list',
     id: param,
     title,
     artIds: (tracks ?? []).slice(0, 4).map((t) => t.albumId),
@@ -66,7 +66,7 @@
   {:else}
     <PageHeader
       {item}
-      kind={kind === 'mix' ? 'mix' : 'list'}
+      kind={kind === 'mix' ? 'mix' : kind === 'genre' ? 'genre' : 'smart_list'}
       label={kind === 'genre' ? 'Genre' : kind === 'mix' ? 'Mix' : 'Playlist'}
       meta="{tracks.length} songs · {fmtTime(tracks.reduce((s, t) => s + t.durationS, 0))}"
       onplay={tracks.length ? () => player.playList(tracks!, 0, title, meta) : undefined}

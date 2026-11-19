@@ -11,7 +11,8 @@
   import { session } from '../lib/session.svelte';
   import type { Shelf as ShelfT } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
-  import { arrangeShelves, greeting } from '../lib/v3';
+  import { arrangeShelves, greeting, parseRadioId } from '../lib/v3';
+  import TopBar from '../components/TopBar.svelte';
 
   let feed = $state<ShelfT[] | null>(null);
   let error = $state<string | null>(null);
@@ -22,23 +23,28 @@
       .then((f) => (feed = f.shelves))
       .catch((e) => {
         error = e.status === 404 ? null : e.message;
+        // Older server without /home: radio button, devices from Connect, pins.
         feed = [
-          { id: 'radio', title: 'Start radio', items: [] },
-          { id: 'devices', title: 'Your devices', items: [] },
-          { id: 'pinned', title: 'Pinned', items: [] },
+          { id: 'start_radio', kind: 'start_radio', title: 'Start radio', items: [] },
+          { id: 'devices', kind: 'devices', title: 'Your devices', items: [] },
+          { id: 'pinned', kind: 'pinned', title: 'Pinned', items: [] },
         ];
       });
     void library.refreshPins();
   });
 
+  /** Pinned follows library.pins, so pinning/unpinning shows up without reloading the feed. */
+  function withPins(f: ShelfT[]): ShelfT[] {
+    if (!feed) return f;
+    const has = f.some((s) => s.kind === 'pinned');
+    const out = f.map((s) => (s.kind === 'pinned' ? { ...s, items: library.pins } : s));
+    return has ? out : [...out, { id: 'pinned', kind: 'pinned', title: 'Pinned', items: library.pins }];
+  }
+
   const others = $derived(player.devices.filter((d) => d.online && d.id !== player.myDeviceId));
   const shelves = $derived(
     arrangeShelves(
-      (feed ?? []).map((s) =>
-        s.id === 'pinned' && !s.items.length
-          ? { ...s, items: library.pins.map((p) => ({ type: p.type, id: p.id, title: p.title, subtitle: p.subtitle, albumId: p.albumId })) }
-          : s,
-      ),
+      withPins(feed ?? []),
       appearance.prefs.homeShelves,
       new Set(others.length ? ['devices'] : []),
     ),
@@ -47,6 +53,7 @@
 </script>
 
 <div class="page home">
+  {#if appearance.form === 'desktop'}<TopBar />{/if}
   <header class="hello">
     <h1>{greeting(new Date().getHours())}{session.saved.username ? `, ${session.saved.username}` : ''}</h1>
     {#if appearance.form === 'phone'}
@@ -57,14 +64,15 @@
   {#if !feed}<div class="empty">Loading…</div>{/if}
 
   {#each shelves as s (s.id)}
-    {#if s.id === 'radio'}
+    {#if s.kind === 'start_radio'}
+      {@const it = s.items[0]}
       <div class="pad">
-        <button class="radio-btn" onclick={() => player.startRadio({ type: 'random' }, 'a random radio')}>
+        <button class="radio-btn" onclick={() => player.startRadio(it ? parseRadioId(it.id, it.seed) : { type: 'random' }, 'a random radio')}>
           <span class="ico"><Radio size={30} /></span>
           <span><b>Start a random radio</b><br /><span class="muted">Endless music picked from your taste</span></span>
         </button>
       </div>
-    {:else if s.id === 'devices'}
+    {:else if s.kind === 'devices'}
       <h2 class="h">Your devices</h2>
       <div class="devices">
         {#each others as d (d.id)}
@@ -80,7 +88,7 @@
           </button>
         {/each}
       </div>
-    {:else if s.id === 'recent'}
+    {:else if s.kind === 'recently_played' || s.layout === 'grid2'}
       <h2 class="h">{s.title}</h2>
       <div class="quick">{#each s.items.slice(0, appearance.form === 'phone' ? 6 : 8) as it (it.type + it.id)}<QuickTile item={it} />{/each}</div>
     {:else}

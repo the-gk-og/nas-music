@@ -37,8 +37,8 @@
   import Art from './Art.svelte';
   import Avatar from './Avatar.svelte';
   import DevicesList from './DevicesList.svelte';
-  import { canPin, openItem, playItem, radioFor } from '../lib/items';
-  import { library } from '../lib/library.svelte';
+  import { isPlayable, openItem, playItem, radioFor } from '../lib/items';
+  import { isPinType, library } from '../lib/library.svelte';
   import { samples } from '../lib/samples.svelte';
 
   const d = $derived(ui.dialog);
@@ -155,7 +155,7 @@
 
   async function addToGet(c: import('../lib/types').CatalogItem) {
     try {
-      await session.api.addToGet({ catalogId: c.id, type: c.type === 'track' ? 'track' : 'album', title: c.title, artist: c.artist, year: c.year });
+      await session.api.addToGet({ catalogId: c.id });
       ui.toast(`Added "${c.title}" to To get`);
       ui.close();
     } catch (e) {
@@ -300,13 +300,14 @@
       <div class="ellipsis"><b class="ellipsis">{it.title}</b>{#if it.subtitle}<div class="muted ellipsis">{it.subtitle}</div>{/if}</div>
     </div>
     <div class="menu">
-      {#if it.type !== 'catalog'}<button onclick={() => { ui.close(); void playItem(it); }}><Play />Play</button>{/if}
+      {#if isPlayable(it)}<button onclick={() => { ui.close(); void playItem(it); }}><Play />Play</button>{/if}
       {#if it.type === 'album' || it.type === 'artist' || it.type === 'playlist' || it.type === 'track'}
         <button onclick={() => { ui.close(); radioFor(it); }}><Radio />Start radio</button>
       {/if}
-      {#if canPin(it)}
-        {@const pinned = library.isPinned(it.type, it.id)}
-        <button onclick={() => { ui.close(); void library.togglePin(it.type, it.id, it.title); }}>{#if pinned}<PinOff />Unpin from Home{:else}<Pin />Pin to Home{/if}</button>
+      {#if isPinType(it.type)}
+        {@const pt = it.type}
+        {@const pinned = library.isPinned(pt, it.id)}
+        <button onclick={() => { ui.close(); void library.togglePin(pt, it.id, it.title); }}>{#if pinned}<PinOff />Unpin from Home{:else}<Pin />Pin to Home{/if}</button>
       {/if}
       {#if it.type === 'album' || it.type === 'artist' || it.type === 'playlist' || it.type === 'mix'}
         <button onclick={() => { ui.close(); openItem(it); }}><Disc3 />Open</button>
@@ -329,8 +330,8 @@
     </div>
     <div class="menu">
       {#if c.hasPreview}<button onclick={() => samples.toggle(c.id)}>{#if samples.playing === c.id}<Pause />Stop sample{:else}<Play />Play 30 s sample{/if}</button>{/if}
-      {#if !c.inToGet && !c.owned}<button onclick={() => addToGet(c)}><Plus />Add to To get</button>{/if}
-      <button onclick={() => { ui.close(); ui.go('search', c.artist); }}><Sparkles />Find similar in my library</button>
+      {#if !c.toGet && !c.owned}<button onclick={() => addToGet(c)}><Plus />Add to To get</button>{/if}
+      <button onclick={() => { ui.close(); ui.go('search', c.artist ?? c.title); }}><Sparkles />Find similar in my library</button>
       <button onclick={() => { ui.close(); ui.go('toget'); }}><ListEnd />Open To get</button>
     </div>
   </Sheet>

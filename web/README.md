@@ -16,6 +16,20 @@ Typing `mock` as the server address on the Connect screen also runs against the 
 The mock includes a fake library, generated cover art and tones, invites (`WELCOME1`), and a Connect hub
 with a simulated phone ("Pixel 8 (mock)") so transfer in/out and remote mode can be exercised.
 
+## v3 layout (docs/v3-ux.md)
+- **Desktop ≥ 1200 px:** sidebar (Home, For You, Search, Library, your playlists), main area with shelves and
+  big headers, right panel (Queue / Lyrics / Devices), player bar; full Now Playing with the blurred cover
+  and big lyrics. Search on `/` or Ctrl+K; Q toggles the queue panel, L the lyrics panel.
+- **Tablet 600–1199 px:** navigation rail; landscape (≥ 900 px wide) shows Now Playing (or the Queue while
+  Now Playing is open) as a side pane.
+- **Phone < 600 px:** five bottom tabs (Home, For You, Search, Library, Queue) + mini player (swipe to skip,
+  tap/swipe up for Now Playing). Now Playing: swipe the cover to skip, down to minimise, long-press for the
+  song menu, tap for lyrics; "Up next" peek.
+- Settings → Appearance: animations Off / Quick / Expressive (OS reduce-motion forces Off), default view,
+  album page style, accent, Home shelf order/visibility, "Only on this device" (`device.<id>.*` overrides).
+- Built against server core's v3 contract (claude/server-core-b7e7a3): typed shelves, `artUrl`, pins as
+  ShelfItems, `/search` with catalogue, `/toget`, `/radio` + `/radio/{id}/more` (topped up when ≤ 5 remain).
+
 ## Layout
 - `src/lib/api/client.ts` – typed client for every v1/v2 endpoint; cookie (same-origin) or bearer auth.
 - `src/lib/api/mock.ts`, `mockData.ts` – mock HTTP API + Connect hub.

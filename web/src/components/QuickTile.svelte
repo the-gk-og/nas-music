@@ -2,7 +2,7 @@
   // Spotify-style compact tile for the 2-row "Recently played" grid.
   import { Play } from '@lucide/svelte';
   import { gesture } from '../lib/gesture';
-  import { openItem, playItem } from '../lib/items';
+  import { isPlayable, openItem, playItem } from '../lib/items';
   import type { ShelfItem } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
   import Art from './Art.svelte';
@@ -15,7 +15,7 @@
     <div class="a"><Art {item} size={128} /></div>
     <span class="t">{item.title}</span>
   </button>
-  <button class="play" aria-label="Play {item.title}" onclick={() => playItem(item)}><Play size={18} fill="currentColor" /></button>
+  {#if isPlayable(item)}<button class="play" aria-label="Play {item.title}" onclick={() => playItem(item)}><Play size={18} fill="currentColor" /></button>{/if}
 </div>
 
 <style>

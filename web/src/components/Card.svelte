@@ -1,13 +1,15 @@
 <script lang="ts">
   import { Play } from '@lucide/svelte';
   import { gesture } from '../lib/gesture';
-  import { openItem, playItem } from '../lib/items';
+  import { isPlayable, openItem, playItem } from '../lib/items';
+  import { progressFraction } from '../lib/v3';
   import type { ShelfItem } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
   import Art from './Art.svelte';
 
   let { item, siblings, wide = false }: { item: ShelfItem; siblings?: ShelfItem[]; wide?: boolean } = $props();
-  const playable = $derived(item.type !== 'catalog');
+  const playable = $derived(isPlayable(item));
+  const prog = $derived(progressFraction(item.progress));
 </script>
 
 <div class="card" class:wide>
@@ -20,7 +22,7 @@
     <Art {item} round={item.type === 'artist'} />
     <div class="t ellipsis">{item.title}</div>
     {#if item.subtitle}<div class="s ellipsis">{item.subtitle}</div>{/if}
-    {#if item.progress != null}<div class="prog"><span style:width="{Math.round(item.progress * 100)}%"></span></div>{/if}
+    {#if prog != null}<div class="prog"><span style:width="{Math.round(prog * 100)}%"></span></div>{/if}
   </button>
   {#if playable}
     <button class="play" aria-label="Play {item.title}" onclick={() => playItem(item)}><Play size={22} fill="currentColor" /></button>

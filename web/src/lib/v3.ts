@@ -30,12 +30,13 @@ export function motionMs(m: Motion, kind: 'fade' | 'cover' = 'fade'): number {
 }
 
 // ---- Home shelves (§3.1): user order + hidden, empty ones hide ----
-export const HOME_SHELVES = ['radio', 'devices', 'recent', 'continue', 'pinned'] as const;
+/** Home shelf ids (= kinds) as stored in settings `home.shelves` / `home.hidden`. */
+export const HOME_SHELVES = ['start_radio', 'devices', 'recently_played', 'continue_listening', 'pinned'] as const;
 export const HOME_SHELF_TITLES: Record<string, string> = {
-  radio: 'Start radio',
+  start_radio: 'Start radio',
   devices: 'Your devices',
-  recent: 'Recently played',
-  continue: 'Continue listening',
+  recently_played: 'Recently played',
+  continue_listening: 'Continue listening',
   pinned: 'Pinned',
 };
 
@@ -44,20 +45,24 @@ export interface ShelfPrefs {
   hidden: string[];
 }
 
-/** Shelves that are always shown even with no items (they render their own content). */
-const SELF_RENDERED = new Set(['radio', 'devices']);
+/** Shelves that render their own content and may arrive with no items. */
+const SELF_RENDERED = new Set(['start_radio', 'devices']);
 
+/**
+ * The server already orders/hides shelves from `home.shelves` / `home.hidden`; doing it again here makes a
+ * just-changed setting (or the mock / an older server) look right immediately. Matches by id, then by kind.
+ */
 export function arrangeShelves(shelves: Shelf[], prefs: ShelfPrefs, extraNonEmpty: Set<string> = new Set()): Shelf[] {
-  const rank = (id: string) => {
-    const base = id.split(':')[0];
-    const i = prefs.order.indexOf(base);
-    return i < 0 ? 1000 : i;
+  const keys = (s: Shelf) => [s.id, s.kind];
+  const rank = (s: Shelf) => {
+    const i = Math.min(...keys(s).map((k) => (prefs.order.includes(k) ? prefs.order.indexOf(k) : 1000)));
+    return i;
   };
   return shelves
-    .filter((s) => !prefs.hidden.includes(s.id.split(':')[0]))
-    .filter((s) => s.items.length > 0 || (SELF_RENDERED.has(s.id) && (s.id !== 'devices' || extraNonEmpty.has('devices'))))
+    .filter((s) => !keys(s).some((k) => prefs.hidden.includes(k)))
+    .filter((s) => s.items.length > 0 || (SELF_RENDERED.has(s.kind) && (s.kind !== 'devices' || extraNonEmpty.has('devices'))))
     .map((s, i) => ({ s, i }))
-    .sort((a, b) => rank(a.s.id) - rank(b.s.id) || a.i - b.i)
+    .sort((a, b) => rank(a.s) - rank(b.s) || a.i - b.i)
     .map((x) => x.s);
 }
 
@@ -77,8 +82,9 @@ export function needsTopUp(len: number, index: number, threshold = RADIO_TOPUP_A
   return len - index - 1 <= threshold;
 }
 
-/** Shelf radio ids look like `artist:ar2`, `track:t1`, or `random`. */
-export function parseRadioId(id: string): RadioSeed {
+/** A radio card's seed: the item's `seed`, else ids like `artist:ar2`, `track:t1`, or `random`. */
+export function parseRadioId(id: string, seed?: RadioSeed | null): RadioSeed {
+  if (seed?.type) return seed;
   const i = id.indexOf(':');
   if (id === 'random' || i < 0) return { type: 'random' };
   const type = id.slice(0, i);
@@ -114,15 +120,27 @@ export function greeting(hour: number): string {
   return 'Good evening';
 }
 
-// ---- accent presets (§7) ----
+// ---- accent presets (§7; settings `appearance.accent`: a preset name or "#rrggbb") ----
 export const ACCENTS: Record<string, string> = {
-  Green: '#4ade80',
-  Blue: '#60a5fa',
-  Purple: '#c084fc',
-  Pink: '#f472b6',
-  Orange: '#fb923c',
-  Yellow: '#facc15',
+  green: '#4ade80',
+  blue: '#60a5fa',
+  purple: '#c084fc',
+  pink: '#f472b6',
+  orange: '#fb923c',
+  red: '#f87171',
+  teal: '#2dd4bf',
 };
+
+export function accentColor(v: string | null | undefined): string {
+  if (v && /^#[0-9a-f]{6}$/i.test(v)) return v;
+  return ACCENTS[(v ?? '').toLowerCase()] ?? ACCENTS.green;
+}
+
+/** Progress (0..1) for a "Continue listening" item. */
+export function progressFraction(p: { index?: number; count?: number } | null | undefined): number | null {
+  if (!p || !p.count) return null;
+  return Math.max(0, Math.min(1, (p.index ?? 0) / p.count));
+}
 
 /** Normalised key for owned/not-owned matching when there's no MBID. */
 export function matchKey(artist: string, title: string): string {
