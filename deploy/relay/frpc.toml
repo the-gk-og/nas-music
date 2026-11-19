@@ -6,6 +6,8 @@ serverPort = 2333
 auth.method = "token"
 auth.token = "FRP_TOKEN"
 transport.tls.enable = true
+# Keep a few tunnel connections open in advance: saves a round trip (~150 ms) on every new visitor connection.
+transport.poolCount = 5
 
 # Public port 80/443 on the friend's server -> Caddy on the NAS. PROXY protocol v2 carries the real
 # visitor IP to Caddy (and from there to nasmusic as X-Forwarded-For).
