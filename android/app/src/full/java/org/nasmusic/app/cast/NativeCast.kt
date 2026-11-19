@@ -37,6 +37,10 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.nasmusic.app.AppContainer
 import org.nasmusic.app.data.api.CastSignRequest
+import org.nasmusic.app.playback.ExternalTarget
+import org.nasmusic.app.playback.NowPlaying
+import com.google.android.gms.cast.MediaSeekOptions
+import com.google.android.gms.cast.framework.media.RemoteMediaClient
 
 /**
  * `full` flavour: a Google Cast button that casts the phone's current queue straight to a Chromecast,
@@ -64,6 +68,7 @@ object NativeCast {
                 .addOnSuccessListener { cc ->
                     cast = cc
                     cc.sessionManager.addSessionManagerListener(Listener(c), CastSession::class.java)
+                    c.player.external = Target
                     ready.value = true
                 }
                 .addOnFailureListener { Log.w(TAG, "Google Cast unavailable: ${it.message}") }
@@ -90,6 +95,42 @@ object NativeCast {
             Text(
                 "Google Cast from this phone",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+
+    /** Transport controls and progress while a Cast session plays the queue (see PlayerConnection.external). */
+    private object Target : ExternalTarget {
+        private val session: CastSession? get() = cast?.sessionManager?.currentCastSession?.takeIf { it.isConnected }
+        private val rmc: RemoteMediaClient? get() = session?.remoteMediaClient?.takeIf { it.hasMediaSession() }
+        override val active: Boolean get() = rmc != null
+        override fun play() { rmc?.play() }
+        override fun pause() { rmc?.pause() }
+        override fun next() { rmc?.queueNext(null) }
+        override fun previous() {
+            val r = rmc ?: return
+            // Like a normal player: restart the track unless we're near its start.
+            if (r.approximateStreamPosition > 3000) r.seek(MediaSeekOptions.Builder().setPosition(0).build()) else r.queuePrev(null)
+        }
+        override fun seekTo(ms: Long) { rmc?.seek(MediaSeekOptions.Builder().setPosition(ms).build()) }
+        override fun skipTo(index: Int) {
+            val r = rmc ?: return
+            val item = r.mediaStatus?.queueItems?.firstOrNull { it.media?.customData?.optInt("index", -1) == index }
+            if (item != null) r.queueJumpToItem(item.itemId, null)
+        }
+        override fun setVolume(v: Float) { runCatching { session?.volume = v.toDouble() } }
+        override fun overlay(local: NowPlaying): NowPlaying? {
+            val r = rmc ?: return null
+            val idx = r.mediaInfo?.customData?.optInt("index", -1)?.takeIf { it >= 0 } ?: local.index
+            return local.copy(
+                item = local.queue.getOrNull(idx) ?: local.item,
+                index = idx,
+                isPlaying = r.isPlaying || r.isBuffering,
+                positionMs = r.approximateStreamPosition,
+                durationMs = r.streamDuration.coerceAtLeast(0),
+                hasNext = idx < local.queue.size - 1,
+                hasPrevious = true,
+                volume = (session?.volume ?: local.volume.toDouble()).toFloat(),
             )
         }
     }
@@ -122,7 +163,7 @@ object NativeCast {
         val start = (index - BEFORE).coerceAtLeast(0)
         val window = ids.subList(start, minOf(ids.size, start + MAX_ITEMS))
         val position = now.positionMs
-        c.player.pause()
+        c.player.pauseLocal()
         c.scope.launch {
             val signed = runCatching { c.api.castSign(CastSignRequest(window)).items }.getOrElse {
                 c.ui.toast("Couldn't start casting: ${it.message}")

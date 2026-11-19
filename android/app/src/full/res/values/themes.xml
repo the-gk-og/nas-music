@@ -1,0 +1,14 @@
+<resources>
+    <!-- Full flavour only: the Google Cast button's device picker (androidx.mediarouter) reads AppCompat theme
+         colours (colorPrimary, colorBackground) from the activity and crashes if they are unset/transparent.
+         Same look as main/res/values/themes.xml, just with an AppCompat parent and opaque colours. -->
+    <style name="Theme.NasMusic" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="colorPrimary">@color/background</item>
+        <item name="colorPrimaryDark">@color/background</item>
+        <item name="colorAccent">@color/ic_bg</item>
+        <item name="android:colorBackground">@color/background</item>
+    </style>
+</resources>

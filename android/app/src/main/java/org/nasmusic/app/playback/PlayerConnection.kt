@@ -76,6 +76,10 @@ class PlayerConnection(
 
     val isRemote: Boolean get() = connect.isRemote
 
+    /** Set by the full flavour's Google Cast integration; while active, controls go to the speaker. */
+    @Volatile var external: ExternalTarget? = null
+    private val ext: ExternalTarget? get() = external?.takeIf { it.active }
+
     fun connect() {
         if (controller != null) return
         val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
@@ -111,7 +115,7 @@ class PlayerConnection(
         }
         val c = controller
         if (c != null) {
-            _local.value = NowPlaying(
+            val local = NowPlaying(
                 item = c.currentMediaItem,
                 isPlaying = c.isPlaying,
                 positionMs = c.currentPosition,
@@ -126,6 +130,7 @@ class PlayerConnection(
                 speed = c.playbackParameters.speed,
                 pitch = c.playbackParameters.pitch,
             )
+            _local.value = ext?.overlay(local) ?: local
         }
         if (_remote.value != null) refreshRemote()
     }
@@ -179,8 +184,18 @@ class PlayerConnection(
         controller?.let(block) ?: run { pending += block; connect() }
     }
 
-    private fun remoteOr(action: String, args: Map<String, kotlinx.serialization.json.JsonElement> = emptyMap(), local: (MediaController) -> Unit) {
-        if (connect.isRemote) connect.command(action, args) else withController(local)
+    private fun remoteOr(
+        action: String,
+        args: Map<String, kotlinx.serialization.json.JsonElement> = emptyMap(),
+        cast: ((ExternalTarget) -> Unit)? = null,
+        local: (MediaController) -> Unit,
+    ) {
+        val e = ext
+        when {
+            e != null && cast != null -> { cast(e); mainHandler.postDelayed({ refresh() }, 300) }
+            connect.isRemote -> connect.command(action, args)
+            else -> withController(local)
+        }
     }
 
     /** Musicolet behaviour: playing from a list replaces the queue with that list (a new named queue). */
@@ -267,15 +282,21 @@ class PlayerConnection(
 
     fun skipTo(index: Int) {
         val q = queues.currentId.value
+        val e = ext
+        if (e != null) { e.skipTo(index); return }
         if (connect.isRemote && q != null) connect.command("playQueue", mapOf("queueId" to JsonPrimitive(q), "index" to JsonPrimitive(index)))
         else withController { it.seekTo(index, 0); it.play() }
     }
 
     fun togglePlay() {
         val playing = _state.value.isPlaying
-        remoteOr(if (playing) "pause" else "play") { if (it.isPlaying) it.pause() else it.play() }
+        remoteOr(if (playing) "pause" else "play", cast = { if (playing) it.pause() else it.play() }) {
+            if (it.isPlaying) it.pause() else it.play()
+        }
     }
-    fun pause() = remoteOr("pause") { it.pause() }
+    fun pause() = remoteOr("pause", cast = { it.pause() }) { it.pause() }
+    /** Pause this phone's own player only (casting is starting elsewhere). */
+    fun pauseLocal() = withController { it.pause() }
 
     /** Put local playback at a queue position (after a native Cast session ends). No-op as a remote. */
     fun resumeAt(index: Int, positionMs: Long, play: Boolean) {
@@ -286,10 +307,10 @@ class PlayerConnection(
         }
     }
 
-    fun next() = remoteOr("next") { it.seekToNext() }
-    fun previous() = remoteOr("prev") { it.seekToPrevious() }
-    fun seekTo(ms: Long) = remoteOr("seek", mapOf("positionMs" to JsonPrimitive(ms))) { it.seekTo(ms) }
-    fun setVolume(v: Float) = remoteOr("setVolume", mapOf("volume" to JsonPrimitive(v))) { it.volume = v }
+    fun next() = remoteOr("next", cast = { it.next() }) { it.seekToNext() }
+    fun previous() = remoteOr("prev", cast = { it.previous() }) { it.seekToPrevious() }
+    fun seekTo(ms: Long) = remoteOr("seek", mapOf("positionMs" to JsonPrimitive(ms)), cast = { it.seekTo(ms) }) { it.seekTo(ms) }
+    fun setVolume(v: Float) = remoteOr("setVolume", mapOf("volume" to JsonPrimitive(v)), cast = { it.setVolume(v) }) { it.volume = v }
     fun setShuffle(on: Boolean) = remoteOr("setShuffle", mapOf("on" to JsonPrimitive(on))) { it.shuffleModeEnabled = on }
 
     fun cycleRepeat() {
