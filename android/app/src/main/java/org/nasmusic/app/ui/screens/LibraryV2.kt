@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -151,7 +152,7 @@ fun AlbumGrid(albums: List<Album>, header: (@Composable () -> Unit)? = null, onC
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (header != null) item(span = { GridItemSpan(3) }) { header() }
-        items(albums, key = { it.id }) { a ->
+        itemsIndexed(albums, key = { i, a -> "$i:${a.id}" }) { _, a ->
             Card(
                 onClick = { onClick(a) },
                 shape = RoundedCornerShape(8.dp),

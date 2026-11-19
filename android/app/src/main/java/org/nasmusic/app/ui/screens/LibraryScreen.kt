@@ -17,6 +17,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -115,8 +117,8 @@ private fun <T> GridOrList(items: List<T>, grid: Boolean, key: (T) -> String, ce
         GridCells.Adaptive(140.dp), Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) { items(items, key = key) { cell(it) } }
-    else LazyColumn(Modifier.fillMaxSize()) { items(items, key = key) { row(it) } }
+    ) { itemsIndexed(items, key = { i, it -> "$i:${key(it)}" }) { _, it -> cell(it) } }
+    else LazyColumn(Modifier.fillMaxSize()) { itemsIndexed(items, key = { i, it -> "$i:${key(it)}" }) { _, it -> row(it) } }
 }
 
 @Composable

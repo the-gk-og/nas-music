@@ -1,6 +1,8 @@
 package org.nasmusic.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,12 +32,19 @@ import org.nasmusic.app.playback.MediaItems
 
 @Composable
 fun AlbumArt(albumId: String?, size: Dp, modifier: Modifier = Modifier) {
-    AsyncImage(
-        model = albumId?.let { MediaItems.artUrl(it, if (size > 120.dp) 512 else 128) },
-        contentDescription = null,
-        contentScale = ContentScale.Crop,
-        modifier = modifier.size(size).clip(RoundedCornerShape(6.dp)),
-    )
+    // A placeholder tile sits underneath, so a missing or failed cover never leaves a hole in the row.
+    Box(
+        modifier.size(size).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(size / 3))
+        if (!albumId.isNullOrBlank()) AsyncImage(
+            model = MediaItems.artUrl(albumId, if (size > 120.dp) 512 else 128),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
 }
 
 @Composable
