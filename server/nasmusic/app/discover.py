@@ -4,20 +4,22 @@ Every shelf is {id, kind, title, subtitle, layout, items}; every item is a gener
 {type, id, title, subtitle, artUrl, + one detail object}. artUrl is relative to the API base."""
 from __future__ import annotations
 
+import logging
 import sqlite3
 
-from nasmusic.app import ai_adapter, mixes, playlists, suggestions, toget, userdata
+from nasmusic.app import ai_adapter, blends, insights, mixes, playlists, suggestions, toget, userdata
 from nasmusic.app import collections as coll
 from nasmusic.config import Config
 from nasmusic.core import ai_config
 from nasmusic.library import art, queries
 
 HOME_KINDS = ("start_radio", "devices", "recently_played", "continue_listening", "pinned")
-FORYOU_KINDS = ("mixes", "radio", "because_you_played", "suggestions", "to_get")
+FORYOU_KINDS = ("mixes", "radio", "because_you_played", "release_radar", "suggestions", "to_get", "blends", "wrapped")
 PIN_TYPES = ("album", "artist", "playlist", "mix", "queue", "smart_list", "genre", "folder")
 SMART_TITLES = {"favourites": "Favourites", "recently_added": "Recently added", "recently_played": "Recently played",
                 "most_played": "Most played", "not_played": "Not played"}
 CONTINUE_DAYS = 30
+log = logging.getLogger(__name__)
 
 
 class NotFound(Exception):
@@ -338,6 +340,28 @@ def _because_you_played(conn: sqlite3.Connection, cfg: Config, uid: str) -> list
     return out
 
 
+def _optional(fn, *a) -> list[dict]:
+    """Phase-2 shelves never break For You: an engine without them (or any failure) just hides the shelf."""
+    try:
+        return fn(*a)
+    except NotImplementedError:
+        return []
+    except Exception:
+        log.exception("For You shelf %s failed", getattr(fn, "__name__", fn))
+        return []
+
+
+def _blends_shelf(conn: sqlite3.Connection, cfg: Config, uid: str) -> list[dict]:
+    """Your blends and invites, plus "Start a blend" when there's someone to blend with."""
+    items = blends.shelf_items(conn, cfg.data_dir, uid)
+    if blends.candidates(conn, uid):
+        items.append({"type": "blend", "id": "new", "title": "Start a blend",
+                      "subtitle": "Mix your taste with someone else's", "artUrl": None, "blend": {"status": "new"}})
+    if not items:
+        return []
+    return [shelf("blends", "blends", "Blends", items, subtitle="Shared playlists with people on this server")]
+
+
 def foryou(conn: sqlite3.Connection, cfg: Config, uid: str) -> dict:
     data_dir = cfg.data_dir
     mix_items = [i for i in (_mix_item(conn, data_dir, uid, m["id"]) for m in mixes.today(conn, uid)) if i]
@@ -351,8 +375,11 @@ def foryou(conn: sqlite3.Connection, cfg: Config, uid: str) -> dict:
     shelves = [shelf("mixes", "mixes", "Your mixes", mix_items),
                shelf("radio", "radio", "Radio", _radio_seeds(conn, data_dir, uid))]
     shelves += _because_you_played(conn, cfg, uid)
+    shelves += _optional(insights.release_radar_shelves, conn, cfg, uid)
     shelves += [shelf("suggestions", "suggestions", "Suggestions for you", sug_items),
                 shelf("to_get", "to_get", "To get", tg_items)]
+    shelves += _optional(_blends_shelf, conn, cfg, uid)
+    shelves += _optional(insights.wrapped_shelf, conn, cfg, uid)
     shelves = [s for s in shelves if s["items"]]
     return {"shelves": _ordered(shelves, userdata.get_settings(conn, uid), "foryou")}
 

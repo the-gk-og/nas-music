@@ -1,6 +1,6 @@
 <script lang="ts">
   // Cover for any item: its `artUrl` (relative to the API base), a 2×2 collage, or a placeholder.
-  import { Disc3, Radio, User } from '@lucide/svelte';
+  import { Blend, Disc3, Radio, Sparkles, User } from '@lucide/svelte';
   import { session } from '../lib/session.svelte';
   import type { ShelfItem } from '../lib/types';
   import Cover from './Cover.svelte';
@@ -30,6 +30,10 @@
     <div class="collage">{#each item.artIds.slice(0, 4) as a}<Cover albumId={a} size={Math.round(size / 2)} rounded={0} />{/each}</div>
   {:else if item.albumId || item.artIds?.length}
     <Cover albumId={item.albumId ?? item.artIds![0]} {size} rounded={0} />
+  {:else if item.type === 'wrapped' || item.type === 'blend'}
+    <div class="ph grad" class:wr={item.type === 'wrapped'}>
+      {#if item.type === 'wrapped'}<Sparkles size="34%" /><span class="yr">{item.wrapped?.year ?? item.id}</span>{:else}<Blend size="40%" />{/if}
+    </div>
   {:else}
     <div class="ph">{#if item.type === 'artist'}<User size="40%" />{:else if item.type === 'radio'}<Radio size="40%" />{:else}<Disc3 size="40%" strokeWidth={1.2} />{/if}</div>
   {/if}
@@ -37,6 +41,18 @@
 </div>
 
 <style>
+  .grad {
+    background: linear-gradient(135deg, var(--accent), #6d28d9);
+    color: #fff;
+    flex-direction: column;
+  }
+  .grad.wr {
+    background: linear-gradient(135deg, #f97316, #db2777 55%, #6d28d9);
+  }
+  .yr {
+    font-weight: 800;
+    font-size: 1.6rem;
+  }
   .art {
     position: relative;
     aspect-ratio: 1;

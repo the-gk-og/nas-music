@@ -358,7 +358,9 @@ def test_foryou(client, conn, monkeypatch):
 
     monkeypatch.setattr(ai, "because_you_played", byp, raising=False)
     s = {x["kind"]: x for x in client.get(f"{API}/foryou").json()["shelves"]}
-    assert list(s) == ["mixes", "radio", "because_you_played", "suggestions", "to_get"]
+    # (the whole test library was just added, so it also shows as "New in your library" on Release Radar)
+    assert [k for k in s if k not in ("wrapped", "release_radar")] == ["mixes", "radio", "because_you_played",
+                                                                        "suggestions", "to_get"]
     assert {i["mix"]["kind"] for i in s["mixes"]["items"]} == {"daily", "context"}
     radio = s["radio"]["items"]
     assert {i["seed"]["type"] for i in radio} == {"artist", "track"}
@@ -368,7 +370,7 @@ def test_foryou(client, conn, monkeypatch):
     assert [i["id"] for i in b["items"]] == [ids["Song 2"], ids["Opening"]]  # unknown ids dropped
     assert [i["id"] for i in s["suggestions"]["items"]] == ["s1"]
     assert s["to_get"]["items"][0]["toget"]["title"] == "Wish"
-    assert not {"release_radar", "blends", "wrapped"} & set(s)
+    assert "blends" not in s  # nobody to blend with
     client.put(f"{API}/me/settings", json={"settings": {"foryou.hidden": ["radio"]}})
     assert "radio" not in [x["kind"] for x in client.get(f"{API}/foryou").json()["shelves"]]
 
@@ -501,7 +503,8 @@ def test_isolation_of_v3_state(client, bob, conn, up):
                                        "source": {"type": "album", "id": album}})
     hb = {s["kind"] for s in bob.get(f"{API}/home").json()["shelves"]}
     assert hb == {"start_radio"}
-    assert bob.get(f"{API}/foryou").json() == {"shelves": []}
+    # nothing of alice's; only the offer to start a blend (there is someone to blend with)
+    assert [x["kind"] for x in bob.get(f"{API}/foryou").json()["shelves"]] == ["blends"]
     assert bob.get(f"{API}/search", params={"q": "album", "scope": "library"}).json()["queues"] == []
 
 

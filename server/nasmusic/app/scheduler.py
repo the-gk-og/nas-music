@@ -1,4 +1,4 @@
-"""Background jobs: library scan (+ analysis), nightly mixes, weekly discovery.
+"""Background jobs: library scan (+ analysis), nightly mixes (+ blends), weekly discovery and Release Radar.
 
 Each job runs at most once at a time; its last outcome is stored in `settings` under `job.<name>` as
 {"startedAt", "finishedAt", "ok", "durationS", "result", "error"}.
@@ -20,7 +20,8 @@ from nasmusic.stream.transcode import OpusCache
 
 log = logging.getLogger(__name__)
 
-JOB_NAMES = ("scan", "full_scan", "analyse", "nightly", "pretranscode", "lyrics", "discovery", "cleanup", "backup")
+JOB_NAMES = ("scan", "full_scan", "analyse", "nightly", "pretranscode", "lyrics", "discovery", "release_radar", "blends",
+             "cleanup", "backup")
 HISTORY = 20
 LYRICS_PER_RUN = 200
 
@@ -120,6 +121,12 @@ class Jobs:
     def _discovery(self, conn):
         return {"newSuggestions": ai_adapter.run_weekly_discovery(conn, ai_config(self.cfg))}
 
+    def _release_radar(self, conn):
+        return {"releases": ai_adapter.run_weekly_release_radar(conn, ai_config(self.cfg))}
+
+    def _blends(self, conn):
+        return {"blends": ai_adapter.run_blends(conn, ai_config(self.cfg))}
+
     def _body(self, name: str) -> Callable:
         return {
             "scan": self._scan,
@@ -128,6 +135,8 @@ class Jobs:
             "nightly": self._nightly,
             "pretranscode": self._pretranscode,
             "discovery": self._discovery,
+            "release_radar": self._release_radar,
+            "blends": self._blends,
             "lyrics": self._lyrics,
             "cleanup": self._cleanup,
             "backup": self._backup,
@@ -172,6 +181,7 @@ class Jobs:
         if name == "nightly" and rec["ok"]:
             self.trigger("pretranscode", "chained")
             self.trigger("lyrics", "chained")
+            self.trigger("blends", "chained")
         return rec
 
     def trigger(self, name: str, how: str = "manual") -> bool:
@@ -197,6 +207,9 @@ class Jobs:
                       next_run_time=datetime.now(tz) if initial_scan else None)
         sched.add_job(self.run, "cron", args=["nightly", "schedule"], id="nightly", hour=2, minute=0)
         sched.add_job(self.run, "cron", args=["discovery", "schedule"], id="discovery", day_of_week="sun", hour=3, minute=0)
+        # New music comes out on Fridays: refresh Release Radar early Friday morning (after the 02:00 nightly).
+        sched.add_job(self.run, "cron", args=["release_radar", "schedule"], id="release_radar", day_of_week="fri",
+                      hour=4, minute=0)
         sched.add_job(self.run, "cron", args=["cleanup", "schedule"], id="cleanup", hour=4, minute=30)
         sched.start()
         self.scheduler = sched
@@ -209,6 +222,7 @@ class Jobs:
         tz = ZoneInfo(self.cfg.timezone)
         for job_id, kw in (("nightly", {"hour": 2, "minute": 0}),
                            ("discovery", {"day_of_week": "sun", "hour": 3, "minute": 0}),
+                           ("release_radar", {"day_of_week": "fri", "hour": 4, "minute": 0}),
                            ("cleanup", {"hour": 4, "minute": 30})):
             self.scheduler.reschedule_job(job_id, trigger="cron", timezone=tz, **kw)
 

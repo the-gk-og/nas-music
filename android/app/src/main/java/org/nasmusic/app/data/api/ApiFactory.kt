@@ -17,10 +17,16 @@ object ApiFactory {
     }
 
     fun create(callFactory: Call.Factory, baseUrl: String = RoutedCallFactory.VIRTUAL_BASE): NasMusicApi =
+        retrofit(callFactory, baseUrl).create(NasMusicApi::class.java)
+
+    /** v5: Release Radar, Wrapped, Blend. */
+    fun discovery(callFactory: Call.Factory, baseUrl: String = RoutedCallFactory.VIRTUAL_BASE): DiscoveryApi =
+        retrofit(callFactory, baseUrl).create(DiscoveryApi::class.java)
+
+    private fun retrofit(callFactory: Call.Factory, baseUrl: String): Retrofit =
         Retrofit.Builder()
             .baseUrl(baseUrl)
             .callFactory(callFactory)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
-            .create(NasMusicApi::class.java)
 }

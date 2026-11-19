@@ -202,10 +202,11 @@ fun ForYouScreen(c: AppContainer) {
                         "to_get" -> TextButton(onClick = { ui.go("toget") }) { Text("See all") }
                         "suggestions" -> TextButton(onClick = { ui.go("discover") }) { Text("See all") }
                         "mixes" -> TextButton(onClick = { ui.go("mixes") }) { Text("See all") }
+                        "release_radar" -> TextButton(onClick = { ui.go("release-radar") }) { Text("See all") }
                     }
                 }
                 shelf.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 16.dp, bottom = 6.dp)) }
-                if (shelf.layout == "grid2") QuickPicks(c, shelf.items) else ShelfRow(c, shelf.items, cardWidth = if (shelf.kind == "mixes") 160.dp else 140.dp)
+                if (shelf.layout == "grid2") QuickPicks(c, shelf.items) else ShelfRow(c, shelf.items, cardWidth = if (shelf.kind == "mixes" || shelf.kind == "wrapped") 160.dp else 140.dp)
             }
         }
         if (feed == null && !failed) item { Box(Modifier.height(200.dp)) { Loading() } }

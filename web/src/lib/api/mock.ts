@@ -3,7 +3,11 @@
 import type { SocketLike } from '../connect';
 import { parseLrc } from '../lyrics';
 import type {
+  Blend,
   CatalogItem,
+  ReleaseRadar,
+  ServerWrapped,
+  Wrapped,
   ClientMessage,
   PinType,
   Shelf,
@@ -485,6 +489,28 @@ export class MockBackend {
     // ---- v3 ----
     if (path === '/home') return { shelves: this.homeShelves(who.deviceId) };
     if (path === '/foryou') return { shelves: this.forYouShelves() };
+    if (path === '/release-radar') return this.releaseRadar();
+    if (path === '/wrapped/years') return [new Date().getFullYear(), new Date().getFullYear() - 1];
+    if (path === '/wrapped' || path === '/admin/wrapped') return this.wrapped(Number(qs.get('year')) || new Date().getFullYear(), path !== '/wrapped');
+    if (path === '/blends/candidates') return this.users.filter((u) => u.id !== me.id).map((u) => ({ userId: u.id, username: u.username }));
+    if (path === '/blends' && method === 'POST') {
+      const b = this.mockBlend(String(body.name || '') || `${me.username} + ${(body.usernames as string[]).join(' + ')}`);
+      this.blendList = [b, ...this.blendList];
+      return b;
+    }
+    if (path === '/blends') return this.blendList.map((b) => ({ ...b, tracks: [] }));
+    const bm = /^\/blends\/([^/]+)(?:\/(accept|decline|leave|refresh|invite))?$/.exec(path);
+    if (bm) {
+      const b = this.blendList.find((x) => x.id === bm[1]);
+      if (!b) throw new HttpError(404, 'no such blend');
+      if (bm[2] === 'leave' || bm[2] === 'decline') {
+        this.blendList = this.blendList.filter((x) => x !== b);
+        return null;
+      }
+      if (bm[2] === 'accept') b.myStatus = 'joined';
+      if (method === 'PATCH' && body.name) b.name = String(body.name);
+      return b.myStatus === 'invited' ? { ...b, tracks: [] } : b;
+    }
     if (path === '/search') return this.search(qs.get('q') ?? '', qs.get('scope') ?? 'all');
     if (path === '/toget') {
       if (method === 'POST') {
@@ -740,8 +766,76 @@ export class MockBackend {
     return t ? this.pub(t) : null;
   }
 
+  private blendList: Blend[] = [];
+
+  private mockBlend(name: string, invited = false): Blend {
+    const t = this.lib.tracks.slice(0, 24);
+    return {
+      id: 'bl' + Math.random().toString(36).slice(2, 8),
+      name,
+      myStatus: invited ? 'invited' : 'joined',
+      invitedBy: invited ? 'sam' : null,
+      createdBy: { userId: 'u2', username: 'sam' },
+      members: [
+        { userId: 'u1', username: 'me', status: 'joined' },
+        { userId: 'u2', username: 'sam', status: 'joined' },
+      ],
+      matchPct: 72,
+      pairs: [{ a: 'u1', b: 'u2', aName: 'me', bName: 'sam', pct: 72 }],
+      trackCount: t.length,
+      tracks: t.map((x, i) => ({ track: this.pub(x), forUsers: i % 5 === 0 ? ['u1', 'u2'] : [i % 2 ? 'u2' : 'u1'], reason: i % 5 === 0 ? 'shared' : i % 3 ? 'top' : 'match' })),
+    };
+  }
+
+  private releaseRadar(): ReleaseRadar {
+    const L = this.lib;
+    return {
+      updatedAt: new Date(Date.now() - 86400e3).toISOString(),
+      windowDays: 56,
+      inLibrary: L.albums.slice(0, 4).map((a) => ({ type: 'album' as const, id: a.id, title: a.title, subtitle: a.artist, artUrl: `art/${a.id}`, album: a, release: { date: '2026-11-06', type: 'Album', upcoming: false, artist: a.artist } })),
+      notOwned: L.artists.slice(2, 7).map((a, i) => {
+        const id = `mb:rg:mock${i}`;
+        const catalog = { id, type: 'album' as const, title: `New ${['LP', 'EP', 'Single', 'Album', 'Sessions'][i]}`, artist: a.name, year: 2026, hasPreview: false, owned: false, toGet: null, artUrl: null, links: [] };
+        return { type: 'catalog' as const, id, title: catalog.title, subtitle: a.name, catalog, release: { date: i === 4 ? '2026-12-12' : `2026-11-${10 + i}`, type: i === 1 ? 'EP' : i === 2 ? 'Single' : 'Album', upcoming: i === 4, artist: a.name } };
+      }),
+    };
+  }
+
+  private wrapped(year: number, server: boolean): Wrapped & Partial<ServerWrapped> {
+    const L = this.lib;
+    const tracks = L.tracks.slice(0, 10);
+    const byHour = Array.from({ length: 24 }, (_, h) => Math.round(40 * Math.exp(-((h - 19) ** 2) / 18) + 8 * Math.exp(-((h - 8) ** 2) / 6)));
+    return {
+      year,
+      final: year < new Date().getFullYear(),
+      totals: { minutes: 18432, plays: 5210, skips: 640, tracks: 1210, artists: 214, albums: 388, days: 301 },
+      topTracks: tracks.slice(0, 5).map((t, i) => ({ track: this.pub(t), plays: 60 - i * 7, minutes: 240 - i * 25 })),
+      topArtists: L.artists.slice(0, 5).map((a, i) => ({ artist: { id: a.id, name: a.name, albumCount: 1 } as never, artUrl: `art/${L.albums.find((x) => x.artistId === a.id)?.id}`, plays: 300 - i * 40, minutes: 1200 - i * 150 })),
+      topAlbums: L.albums.slice(0, 5).map((a, i) => ({ album: a, plays: 120 - i * 15, minutes: 500 - i * 60 })),
+      topGenres: [
+        { name: 'Indie Rock', minutes: 6000, share: 0.33 },
+        { name: 'Jazz', minutes: 4000, share: 0.22 },
+        { name: 'Electronic', minutes: 3000, share: 0.16 },
+      ],
+      byHour,
+      byWeekday: [10, 12, 11, 13, 20, 25, 18],
+      byMonth: Array.from({ length: 12 }, (_, i) => 1000 + i * 50),
+      peakHour: 19,
+      peakWeekday: 5,
+      topDay: { date: `${year}-07-14`, minutes: 412 },
+      streaks: { longest: 47, longestFrom: `${year}-03-01`, longestTo: `${year}-04-16`, current: 9 },
+      discoveries: { artists: 38, tracks: 410, share: 0.21, topArtists: [] },
+      aura: { label: 'Golden', description: 'Feel-good and steady.', energy: 0.52, danceability: 0.61, valence: 0.2, bpm: 118, moods: [{ name: 'happy', score: 0.48 }, { name: 'relaxed', score: 0.41 }], colors: ['#d9a13b', '#c2417a'] },
+      firstPlay: tracks[0] ? { track: this.pub(tracks[0]), at: `${year}-01-01T00:12:00Z` } : null,
+      ...(server ? { listeners: 4, users: 5 } : {}),
+    };
+  }
+
   private forYouShelves(): Shelf[] {
     const L = this.lib;
+    if (!this.blendList.length) this.blendList = [this.mockBlend('me + sam'), this.mockBlend('Road trip', true)];
+    const rr = this.releaseRadar();
+    const year = new Date().getFullYear();
     const seed = L.tracks[4];
     const similar = L.tracks.filter((t) => t.genre === seed.genre && t.id !== seed.id).slice(0, 10);
     const shelves: Shelf[] = [
@@ -778,6 +872,18 @@ export class MockBackend {
         title: 'To get',
         items: this.toget.filter((x) => x.status === 'want').map((x) => ({ type: 'toget' as const, id: x.id, title: x.title, subtitle: x.artist, artUrl: x.artUrl, toget: x })),
       },
+      { id: 'release_radar', kind: 'release_radar', title: 'Release Radar', subtitle: 'New from artists you play', items: rr.notOwned },
+      { id: 'release_radar:library', kind: 'release_radar', title: 'New in your library', subtitle: 'Recently added by artists you play', items: rr.inLibrary },
+      {
+        id: 'blends',
+        kind: 'blends',
+        title: 'Blends',
+        items: [
+          ...this.blendList.map((b) => ({ type: 'blend' as const, id: b.id, title: b.name, subtitle: b.myStatus === 'invited' ? `Invite from ${b.invitedBy}` : `${b.matchPct}% match`, artUrl: null, blend: { status: b.myStatus, matchPct: b.matchPct, trackCount: b.trackCount } })),
+          { type: 'blend' as const, id: 'new', title: 'Start a blend', subtitle: "Mix your taste with someone else's", artUrl: null, blend: { status: 'new' as const } },
+        ],
+      },
+      { id: 'wrapped', kind: 'wrapped', title: 'Wrapped', subtitle: 'Your year in music', items: [{ type: 'wrapped' as const, id: String(year), title: `Your ${year} so far`, subtitle: '5,210 plays', artUrl: null, wrapped: { year, final: false } }] },
     ];
     return shelves.filter((s) => s.items.length);
   }

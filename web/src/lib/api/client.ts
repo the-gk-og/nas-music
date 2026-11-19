@@ -1,5 +1,9 @@
 import type {
   Feed,
+  Blend,
+  ReleaseRadar,
+  ServerWrapped,
+  Wrapped,
   PinType,
   ShelfItem,
   RadioSeed,
@@ -387,6 +391,22 @@ export class ApiClient {
   unpin = (type: PinType, id: string) => this.del<void>(`/pins/${type}/${encodeURIComponent(id)}`);
   startRadio = (seed: RadioSeed) => this.post<Queue>('/radio', { seed });
   radioMore = (queueId: string, count = 25) => this.post<Queue>(`/radio/${encodeURIComponent(queueId)}/more`, { count });
+
+  // ---- v5: Release Radar, Wrapped, Blend ----
+  releaseRadar = () => this.get<ReleaseRadar>('/release-radar');
+  wrapped = (year?: number) => this.get<Wrapped>('/wrapped', year ? { year } : undefined);
+  wrappedYears = () => this.get<number[]>('/wrapped/years');
+  adminWrapped = (year?: number) => this.get<ServerWrapped>('/admin/wrapped', year ? { year } : undefined);
+  blends = () => this.get<Blend[]>('/blends');
+  blendCandidates = () => this.get<{ userId: string; username: string }[]>('/blends/candidates');
+  createBlend = (usernames: string[], name?: string | null) => this.post<Blend>('/blends', { usernames, name: name || null });
+  blend = (id: string) => this.get<Blend>(`/blends/${encodeURIComponent(id)}`);
+  renameBlend = (id: string, name: string) => this.patch<Blend>(`/blends/${encodeURIComponent(id)}`, { name });
+  inviteToBlend = (id: string, usernames: string[]) => this.post<Blend>(`/blends/${encodeURIComponent(id)}/invite`, { usernames });
+  acceptBlend = (id: string) => this.post<Blend>(`/blends/${encodeURIComponent(id)}/accept`);
+  declineBlend = (id: string) => this.post<void>(`/blends/${encodeURIComponent(id)}/decline`);
+  leaveBlend = (id: string) => this.post<void>(`/blends/${encodeURIComponent(id)}/leave`);
+  refreshBlend = (id: string) => this.post<Blend>(`/blends/${encodeURIComponent(id)}/refresh`);
 
   // ---- admin ----
   invites = () => this.get<Invite[]>('/admin/invites');

@@ -59,6 +59,12 @@ data class ShelfItem(
     val suggestion: Suggestion? = null,
     val toget: ToGetItem? = null,
     val playedAt: String? = null,
+    /** v5 release_radar shelves */
+    val release: ReleaseInfo? = null,
+    val addedAt: String? = null,
+    /** v5 blends shelf; status "new" = the "Start a blend" card */
+    val blend: ShelfBlend? = null,
+    val wrapped: ShelfWrapped? = null,
 )
 
 @Serializable

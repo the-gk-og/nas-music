@@ -281,9 +281,10 @@ def migrate_v3_to_v4(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
     return True
 
 
-# ---------- v4 -> v5 (admin tag overrides, collaborative playlists) ----------
+# ---------- v4 -> v5 (admin tag overrides, collaborative playlists, Release Radar, Blend) ----------
 
-V5_TABLES = ("tag_overrides", "tag_edits", "playlist_members", "playlist_activity")
+V5_TABLES = ("tag_overrides", "tag_edits", "playlist_members", "playlist_activity",
+             "release_radar", "blends", "blend_members", "blend_tracks")
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:

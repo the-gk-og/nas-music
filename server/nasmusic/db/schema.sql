@@ -2,13 +2,15 @@
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
--- tag_overrides, tag_edits) and collaborative playlists (playlist_members, playlist_activity, playlists.rev;
--- playlist_tracks rebuilt with entry ids and a fractional REAL position). Older databases are upgraded by
--- nasmusic.db.migrations.
+-- tag_overrides, tag_edits), collaborative playlists (playlist_members, playlist_activity, playlists.rev;
+-- playlist_tracks rebuilt with entry ids and a fractional REAL position), release_radar, blends,
+-- blend_members and blend_tracks (Release Radar, Blend; Wrapped needs no table), and ReplayGain/loudness
+-- columns on tracks. Older databases are upgraded by nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
---   is also written by server core when a user answers).
+--   is also written by server core when a user answers), release_radar, blend_tracks (+ blends.match/built_at).
+-- Server core writes blends / blend_members (membership and consent); the AI only reads them.
 -- Timestamps are ISO-8601 UTC text. IDs are text (stable hashes or uuid4 hex).
 
 PRAGMA foreign_keys = ON;
@@ -447,3 +449,58 @@ CREATE TABLE IF NOT EXISTS suggestions (
     UNIQUE (user_id, release_group_mbid)
 );
 CREATE INDEX IF NOT EXISTS suggestions_user ON suggestions(user_id, status);
+
+-- ---------- v5: Release Radar (AI-owned cache) ----------
+
+-- New releases (MusicBrainz) by artists the user listens to. Rebuilt per user by the weekly job; whether
+-- the library owns a release is decided when it is read, so a scan shows it as owned straight away.
+CREATE TABLE IF NOT EXISTS release_radar (
+    user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    release_group_mbid TEXT NOT NULL,
+    title              TEXT NOT NULL,
+    artist             TEXT NOT NULL,      -- MusicBrainz artist credit
+    artist_mbid        TEXT,
+    artist_id          TEXT,               -- the library artist that put it on the radar
+    primary_type       TEXT,               -- Album, EP, Single
+    release_date       TEXT,               -- YYYY[-MM[-DD]] first release date
+    cover_url          TEXT,               -- Cover Art Archive release-group front
+    score              REAL NOT NULL DEFAULT 0,   -- how much the user plays the artist (0..1)
+    created_at         TEXT NOT NULL,
+    PRIMARY KEY (user_id, release_group_mbid)
+);
+
+-- ---------- v5: Blend (shared playlist of two or more users) ----------
+
+-- Membership and consent are written by server core; nobody is in a blend without accepting.
+CREATE TABLE IF NOT EXISTS blends (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    created_by  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    match       TEXT,                      -- AI: JSON {"pct": 0-100, "pairs": [{"a","b","pct"}]}
+    built_at    TEXT                       -- AI: last time blend_tracks were rebuilt
+);
+
+CREATE TABLE IF NOT EXISTS blend_members (
+    blend_id    TEXT NOT NULL REFERENCES blends(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status      TEXT NOT NULL CHECK (status IN ('invited','joined','declined','left')),
+    invited_by  TEXT REFERENCES users(id) ON DELETE SET NULL,
+    invited_at  TEXT NOT NULL,
+    joined_at   TEXT,
+    left_at     TEXT,
+    PRIMARY KEY (blend_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS blend_members_user ON blend_members(user_id, status);
+
+-- AI-owned: the blend's current tracks. Only members with status 'joined' contribute.
+CREATE TABLE IF NOT EXISTS blend_tracks (
+    blend_id    TEXT NOT NULL REFERENCES blends(id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    track_id    TEXT NOT NULL REFERENCES tracks(id),
+    for_users   TEXT NOT NULL,             -- JSON [user_id, ...] whose taste put it here (first = main)
+    reason      TEXT NOT NULL,             -- e.g. "top" | "shared" | "match" (clients word it)
+    score       REAL,
+    PRIMARY KEY (blend_id, position)
+);

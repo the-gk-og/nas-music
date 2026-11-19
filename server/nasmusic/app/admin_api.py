@@ -26,7 +26,8 @@ from nasmusic.library import lrclib, queries
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(admin_device)])
 Conn = sqlite3.Connection
-JobName = Literal["scan", "full_scan", "analyse", "nightly", "pretranscode", "discovery", "lyrics", "cleanup", "backup"]
+JobName = Literal["scan", "full_scan", "analyse", "nightly", "pretranscode", "discovery", "release_radar", "blends", "lyrics",
+                  "cleanup", "backup"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 KEEP_BACKUPS = 5
 

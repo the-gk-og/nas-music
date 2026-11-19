@@ -21,7 +21,7 @@ object LenientJson {
     )
     val ITEM_TYPES = setOf(
         "track", "album", "artist", "playlist", "mix", "radio", "queue", "device", "catalog", "suggestion",
-        "toget", "smart_list", "genre", "folder",
+        "toget", "smart_list", "genre", "folder", "blend", "wrapped",
     )
 
     fun <T> list(e: JsonElement?, ser: KSerializer<T>, json: Json = ApiFactory.json): List<T> =
