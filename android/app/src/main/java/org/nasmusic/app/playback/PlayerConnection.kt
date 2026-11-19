@@ -2,6 +2,8 @@ package org.nasmusic.app.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
@@ -54,6 +56,7 @@ class PlayerConnection(
     private val scope: CoroutineScope,
 ) {
     private var controller: MediaController? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val _local = MutableStateFlow(NowPlaying())
     private val _remote = MutableStateFlow<NowPlaying?>(null)
     private val _state = MutableStateFlow(NowPlaying())
@@ -101,6 +104,10 @@ class PlayerConnection(
 
     /** Called by the UI on a timer to update the position bar. */
     fun refresh() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { refresh() }
+            return
+        }
         val c = controller
         if (c != null) {
             _local.value = NowPlaying(
@@ -158,7 +165,16 @@ class PlayerConnection(
         }
     }
 
+    /**
+     * Media3's MediaController must only be used on the application (main) thread; calling it from a
+     * coroutine on Dispatchers.Default crashes with "MediaController method is called from a wrong thread".
+     * Every controller call goes through here, so hop to the main thread first.
+     */
     private fun withController(block: (MediaController) -> Unit) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { withController(block) }
+            return
+        }
         controller?.let(block) ?: run { pending += block; connect() }
     }
 
