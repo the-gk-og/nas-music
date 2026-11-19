@@ -34,6 +34,8 @@ class Config:
     lastfm_api_key: str | None = None
     model_version: str = "effnet-discogs-1"   # audio-analysis model (see nasmusic/ai/README.md)
     scan_interval_minutes: int = 5
+    lrclib_enabled: bool = True                 # lyrics fallback from lrclib.net when a file has none
+    lan_public_url: str | None = None           # public LAN address incl. port, if not https://lan_host:https_port
     source_path: Path | None = field(default=None, compare=False)
 
     @property
@@ -42,6 +44,8 @@ class Config:
 
     @property
     def lan_url(self) -> str:
+        if self.lan_public_url:
+            return self.lan_public_url.rstrip("/")
         host = f"[{self.lan_host}]" if ":" in self.lan_host else self.lan_host
         return f"https://{host}:{self.https_port}"
 
@@ -91,7 +95,7 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
         pth = Path(vals[key]).expanduser()
         vals[key] = pth if pth.is_absolute() else (base / pth).resolve()
     for key in ("tunnel_url", "cf_access_client_id", "cf_access_client_secret", "admin_password_hash",
-                "lastfm_api_key"):
+                "lastfm_api_key", "lan_public_url"):
         if vals.get(key) == "":
             vals[key] = None
     if vals.get("tunnel_url"):

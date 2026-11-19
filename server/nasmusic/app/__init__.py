@@ -33,7 +33,18 @@ def _web_secret(conn) -> bytes:
 
 
 def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
+    from nasmusic.app import serversettings
+
     init_db(cfg)
+    base_cfg = cfg
+    _c = open_db(cfg)
+    try:
+        cfg = serversettings.apply(base_cfg, serversettings.overrides(_c))  # admin-console overrides
+    finally:
+        _c.close()
+    if jobs is not None:
+        jobs.cfg = cfg
+        jobs.opus.max_bytes = int(cfg.opus_cache_gb * 1024**3)
     files, _ = tls.ensure_cert(cfg.data_dir, cfg.lan_host)
     conn = open_db(cfg)
     try:
@@ -57,6 +68,7 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
         hub=make_hub(cfg),
         weather=Weather(),
         catalog=Catalog(),
+        base_cfg=base_cfg,
     )
 
 

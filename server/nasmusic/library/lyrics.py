@@ -88,44 +88,109 @@ def parse(raw: str) -> tuple[bool, list[dict]] | None:
     return False, [{"timeMs": None, "text": t} for t in plain]
 
 
+_LYRIC_TXXX = ("lyrics", "unsyncedlyrics", "syncedlyrics", "unsynced lyrics", "synced lyrics", "lyric",
+               "lyrics_synced", "synced_lyrics")
+
+
+def _texts(v) -> list[str]:
+    if v is None:
+        return []
+    if isinstance(v, (list, tuple)):
+        return [t for x in v for t in _texts(x)]
+    if isinstance(v, bytes):
+        return [v.decode("utf-8", "replace")]
+    return [str(v)]
+
+
+def _id3_candidates(tags: ID3) -> list[str]:
+    found: list[str] = []
+    for fr in tags.getall("SYLT"):
+        # SYLT: list of (text, time); time in ms when format == 2
+        if getattr(fr, "format", 2) == 2 and fr.text:
+            found.append("\n".join(f"[{t // 60000:02d}:{(t // 1000) % 60:02d}.{(t % 1000) // 10:02d}]{s}"
+                                   for s, t in fr.text))
+    found += [str(fr.text) for fr in tags.getall("USLT")]  # every language / description
+    for fr in tags.getall("TXXX"):
+        if (fr.desc or "").strip().casefold() in _LYRIC_TXXX:
+            found += _texts(fr.text)
+    for fr in tags.getall("COMM"):
+        text = "\n".join(_texts(fr.text))
+        if "lyric" in (fr.desc or "").casefold() or len(_STAMP.findall(text)) >= 3:  # LRC stored as a comment
+            found.append(text)
+    return found
+
+
+def _apev2_candidates(path: Path) -> list[str]:
+    """APEv2 tags (also found appended to MP3s by some tools)."""
+    try:
+        from mutagen.apev2 import APEv2
+
+        ape = APEv2(path)
+    except Exception:  # no APE tag (APENoHeaderError) or unreadable
+        return []
+    return [str(v) for k, v in ape.items() if "lyric" in k.casefold()]
+
+
 def _embedded_candidates(path: Path) -> list[str]:
     """All lyric texts found in the file's tags, synced-looking ones first."""
     try:
         f = mutagen.File(path)
     except (mutagen.MutagenError, OSError, ValueError):
-        return []
-    if f is None or f.tags is None:
-        return []
-    tags, found = f.tags, []
-    if isinstance(f, MP4):
-        found += [str(v) for v in tags.get(_MP4_KEY, [])]
+        f = None
+    found: list[str] = []
+    tags = f.tags if f is not None else None
+    if isinstance(f, MP4) and tags is not None:
+        for k, v in tags.items():
+            if k == _MP4_KEY or (k.startswith("----:") and "lyric" in k.casefold()):
+                found += _texts(v)
     elif isinstance(tags, ID3):
-        for fr in tags.getall("SYLT"):
-            # SYLT: list of (text, time) with time in ms when format == 2
-            if getattr(fr, "format", 2) == 2 and fr.text:
-                found.append("\n".join(f"[{t // 60000:02d}:{(t // 1000) % 60:02d}.{(t % 1000) // 10:02d}]{s}"
-                                       for s, t in fr.text))
-        found += [str(fr.text) for fr in tags.getall("USLT")]
-    else:  # Vorbis comments: keys are case-insensitive in mutagen
-        for key in _VORBIS_SYNCED:
-            found += [str(v) for v in tags.get(key, []) or []]
-    found = [s for s in found if s and s.strip()]
+        found += _id3_candidates(tags)
+    elif tags is not None:  # Vorbis comments (FLAC/Ogg/Opus), APEv2 files (.ape/.wv/.mpc): any key with "lyric"
+        try:
+            items = list(tags.items())
+        except (TypeError, AttributeError):
+            items = []
+        for k, v in items:
+            if "lyric" in str(k).casefold():
+                found += _texts(v)
+    if path.suffix.lower() == ".mp3" or f is None:
+        found += _apev2_candidates(path)
+    found = list(dict.fromkeys(s for s in found if s and s.strip()))
     found.sort(key=lambda s: 0 if _STAMP.search(s) else 1)   # stable: synced first
     return found
 
 
-def _sidecar(path: Path) -> str | None:
-    for cand in (path.with_suffix(".lrc"), path.with_suffix(".LRC")):
+def _decode(data: bytes) -> str | None:
+    for enc in ("utf-8-sig", "utf-16", "cp1252"):
         try:
-            if cand.is_file():
-                data = cand.read_bytes()
-                for enc in ("utf-8-sig", "cp1252"):
-                    try:
-                        return data.decode(enc)
-                    except UnicodeDecodeError:
-                        continue
-        except OSError:
+            text = data.decode(enc)
+        except UnicodeDecodeError:
             continue
+        if enc == "utf-16" and not data.startswith((b"\xff\xfe", b"\xfe\xff")):
+            continue  # only trust UTF-16 with a BOM
+        return text
+    return None
+
+
+def _sidecar(path: Path) -> str | None:
+    """A same-named .lrc (any case), else .txt, next to the file. Case-insensitive on case-sensitive filesystems."""
+    stem = path.stem.casefold()
+    try:
+        entries = [e for e in path.parent.iterdir() if e.is_file()]
+    except OSError:
+        return None
+    for ext in (".lrc", ".txt"):
+        for e in sorted(entries):
+            if e.suffix.casefold() == ext and e.stem.casefold() == stem:
+                try:
+                    data = e.read_bytes()
+                except OSError:
+                    continue
+                if len(data) > 512 * 1024:
+                    continue
+                text = _decode(data)
+                if text and text.strip():
+                    return text
     return None
 
 
