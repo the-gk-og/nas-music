@@ -285,3 +285,28 @@ def test_me_devices_shows_online(tc, conn):
         assert [d["online"] for d in tc.get("/api/v1/me/devices", headers=h).json()] == [True]
     time.sleep(0.05)
     assert [d["online"] for d in tc.get("/api/v1/me/devices", headers=h).json()] == [False]
+
+
+def test_playlist_changes_push_to_all_members(tc, conn):
+    ids = [r[0] for r in conn.execute("SELECT id FROM tracks ORDER BY path")]
+    _, atok = token(conn, "alice")
+    _, btok = token(conn, "bob")
+    _, ctok = token(conn, "carol")
+    ha, hb = {"Authorization": f"Bearer {atok}"}, {"Authorization": f"Bearer {btok}"}
+    with tc.websocket_connect(URL, headers=ha) as a, tc.websocket_connect(URL, headers=hb) as b, \
+         tc.websocket_connect(URL, headers={"Authorization": f"Bearer {ctok}"}) as c:
+        for ws in (a, b, c):
+            hello(ws)
+            drain(ws)
+        p = tc.post("/api/v1/playlists", json={"name": "Shared", "trackIds": ids[:1]}, headers=ha).json()
+        tc.post(f"/api/v1/playlists/{p['id']}/members", json={"username": "bob", "role": "editor"}, headers=ha)
+        m = until(b, "playlist")
+        assert m["playlistId"] == p["id"] and not m["deleted"]
+        tc.post(f"/api/v1/playlists/{p['id']}/tracks", json={"trackIds": ids[1:2]}, headers=hb)
+        ra = [x for x in drain(a) if x["type"] == "playlist"]
+        assert ra and ra[-1]["rev"] == tc.get(f"/api/v1/playlists/{p['id']}", headers=ha).json()["rev"]
+        tc.delete(f"/api/v1/playlists/{p['id']}", headers=ha)
+        while not (m := until(b, "playlist"))["deleted"]:
+            pass
+        assert m["playlistId"] == p["id"]
+        assert [x for x in drain(c) if x["type"] == "playlist"] == []  # carol has no access
