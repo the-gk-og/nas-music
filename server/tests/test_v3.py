@@ -351,11 +351,10 @@ def test_foryou(client, conn, monkeypatch):
                  "('s1', ?, 'A', 'B', 'r', 'new', 'x'), ('s2', ?, 'C', 'D', 'r', 'not_interested', 'x')", (uid, uid))
     client.post(f"{API}/toget", json={"type": "album", "title": "Wish", "artist": "W"})
 
-    def byp(conn_, cfg, user_id, limit):
-        assert user_id == uid
-        album = conn_.execute("SELECT id FROM albums WHERE title = 'Second'").fetchone()[0]
-        return [{"seed": {"type": "album", "id": album, "title": "Second"}, "trackIds": [ids["Song 2"], "gone"],
-                 "albumIds": [album]}]
+    def byp(conn_, cfg, user_id, limit_shelves):
+        assert user_id == uid and limit_shelves == 3
+        return [{"seed_track_id": ids["Song 1"], "title": "Because you played Song 1",
+                 "track_ids": [ids["Song 2"], "gone", ids["Opening"]]}]
 
     monkeypatch.setattr(ai, "because_you_played", byp, raising=False)
     s = {x["kind"]: x for x in client.get(f"{API}/foryou").json()["shelves"]}
@@ -365,7 +364,8 @@ def test_foryou(client, conn, monkeypatch):
     assert {i["seed"]["type"] for i in radio} == {"artist", "track"}
     assert any(i["title"] == "Opening radio" for i in radio) and all(i["type"] == "radio" for i in radio)
     b = s["because_you_played"]
-    assert b["title"] == "Because you played Second" and [i["type"] for i in b["items"]] == ["track", "album"]
+    assert b["title"] == "Because you played Song 1" and b["id"] == f"byp:track:{ids['Song 1']}"
+    assert [i["id"] for i in b["items"]] == [ids["Song 2"], ids["Opening"]]  # unknown ids dropped
     assert [i["id"] for i in s["suggestions"]["items"]] == ["s1"]
     assert s["to_get"]["items"][0]["toget"]["title"] == "Wish"
     assert not {"release_radar", "blends", "wrapped"} & set(s)
@@ -376,42 +376,63 @@ def test_foryou(client, conn, monkeypatch):
 # ---------- radio ----------
 
 
-def test_radio_needs_ai(client, conn):
-    r = client.post(f"{API}/radio", json={"seed": {"type": "random"}})
-    assert r.status_code == 503
+def test_radio_without_analysis_is_404(client, conn):
+    """Real engine, nothing analysed yet -> KeyError -> 404."""
+    assert client.post(f"{API}/radio", json={"seed": {"type": "random"}}).status_code == 404
+
+
+def test_radio_end_to_end_with_real_engine(client, conn, app):
+    """Real analysis (basic-1, ffmpeg) + real radio_start/radio_more + radio_sessions title as the queue name."""
+    assert app.state.ctx.jobs.run("analyse")["result"]["analysed"] >= 5
+    r = client.post(f"{API}/radio", json={"seed": {"type": "track", "id": track_ids(conn)["Song 1"]}})
+    assert r.status_code == 200, r.text
+    q = r.json()
+    title = conn.execute("SELECT title FROM radio_sessions WHERE user_id = ?", (client.user_id,)).fetchone()[0]
+    assert q["name"] == title and q["radio"]["type"] == "track" and q["trackCount"] >= 1
+    more = client.post(f"{API}/radio/{q['id']}/more").json()  # tiny library: may add nothing; never repeats
+    assert len({t["id"] for t in more["tracks"]}) == more["trackCount"]
+    # signal=all erases radio sessions too (they encode taste).
+    client.delete(f"{API}/me/data", params={"signal": "all", "confirm": "true"})
+    assert conn.execute("SELECT COUNT(*) FROM radio_sessions WHERE user_id = ?", (client.user_id,)).fetchone()[0] == 0
 
 
 def test_radio_with_engine(client, conn, monkeypatch, bob):
     ids = list(track_ids(conn).values())
     seen = {}
 
-    def start(conn_, cfg, user_id, seed, n):
-        seen["start"] = (user_id, seed, n)
-        return ids[:3]
+    def start(conn_, cfg, user_id, seed):
+        seen["start"] = (user_id, seed)
+        if seed["type"] == "album" and seed.get("id") == "malformed":
+            raise ValueError("bad seed")
+        conn_.execute("INSERT INTO radio_sessions VALUES ('r1', ?, ?, ?, 'Second radio', '[]', '[]', 'x', 'x')",
+                      (user_id, seed["type"], seed.get("id")))
+        return "r1", ids[:3]
 
-    def more(conn_, cfg, user_id, queue_id, seed, exclude, n):
-        seen["more"] = (queue_id, sorted(exclude), n)
+    def more(conn_, cfg, user_id, radio_id, exclude_ids, n=25):
+        seen["more"] = (radio_id, sorted(exclude_ids), n)
         return ids[2:5]  # one repeat: dropped
 
-    monkeypatch.setattr(ai, "radio_start", start, raising=False)
-    monkeypatch.setattr(ai, "radio_more", more, raising=False)
+    monkeypatch.setattr(ai, "radio_start", start)
+    monkeypatch.setattr(ai, "radio_more", more)
     album = conn.execute("SELECT id FROM albums WHERE title = 'Second'").fetchone()[0]
     q = client.post(f"{API}/radio", json={"seed": {"type": "album", "id": album}}).json()
     assert q["name"] == "Second radio" and [t["id"] for t in q["tracks"]] == ids[:3]
     assert q["radio"] == {"type": "album", "id": album, "title": "Second"}
     assert q["source"] == {"type": "radio", "id": album}
-    assert seen["start"] == (client.user_id, {"type": "album", "id": album, "title": "Second"}, 25)
+    assert seen["start"] == (client.user_id, {"type": "album", "id": album})  # seed passed as {type, id}
+    assert conn.execute("SELECT radio_id FROM queues WHERE id = ?", (q["id"],)).fetchone()[0] == "r1"
     q2 = client.post(f"{API}/radio/{q['id']}/more", json={"count": 10}).json()
     assert [t["id"] for t in q2["tracks"]] == ids[:5]
-    assert seen["more"] == (q["id"], sorted(ids[:3]), 10)
-    r = client.post(f"{API}/radio", json={"seed": {"type": "random"}}).json()
-    assert r["name"] == "Random radio"
+    assert seen["more"] == ("r1", sorted(ids[:3]), 10)  # the AI's radio id, not the queue id
     assert client.post(f"{API}/radio", json={"seed": {"type": "track", "id": "nope"}}).status_code == 404
     assert client.post(f"{API}/radio", json={"seed": {"type": "track"}}).status_code == 404
+    monkeypatch.setattr(ai, "radio_start", lambda *a: (_ for _ in ()).throw(ValueError("x")))
+    assert client.post(f"{API}/radio", json={"seed": {"type": "random"}}).status_code == 400
+    monkeypatch.setattr(ai, "radio_more", lambda *a, **k: (_ for _ in ()).throw(KeyError("r1")))
+    assert client.post(f"{API}/radio/{q['id']}/more").status_code == 404
     plain = client.post(f"{API}/queues", json={"name": "Q", "trackIds": ids[:1]}).json()
     assert client.post(f"{API}/radio/{plain['id']}/more").status_code == 404
     assert bob.post(f"{API}/radio/{q['id']}/more").status_code == 404
-    # A radio is listed in Home's recently played as its queue.
     recent = {s["kind"]: s for s in client.get(f"{API}/home").json()["shelves"]}["recently_played"]["items"]
     assert any(i["type"] == "queue" and i.get("seed", {}).get("type") == "album" for i in recent)
 

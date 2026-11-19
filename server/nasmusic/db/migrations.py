@@ -207,8 +207,8 @@ def _create_indexes(conn: sqlite3.Connection, stmts: list[str]) -> None:
 
 # ---------- v2 -> v3 (docs/v3-ux.md phase 1): additive only ----------
 
-V3_TABLES = ("pins", "toget", "catalog_items")
-V3_QUEUE_COLUMNS = (("source_type", "TEXT"), ("source_id", "TEXT"), ("radio_seed", "TEXT"))
+V3_TABLES = ("pins", "toget", "catalog_items", "radio_sessions")  # radio_sessions may pre-exist (AI creates it)
+V3_QUEUE_COLUMNS = (("source_type", "TEXT"), ("source_id", "TEXT"), ("radio_seed", "TEXT"), ("radio_id", "TEXT"))
 
 
 def migrate_v2_to_v3(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:

@@ -879,6 +879,7 @@ paths:
         For You (docs/v3-ux.md §3.2): typed shelves. Kinds: mixes, radio, because_you_played (1–3 shelves),
         suggestions, to_get. Phase-2 kinds (release_radar, blends, wrapped) are reserved and not returned yet.
         Order and hiding follow settings `foryou.shelves` / `foryou.hidden`. Empty shelves are omitted.
+        because_you_played shelves have id "byp:track:<seed track id>" and track items.
       responses:
         '200':
           description: shelves
@@ -1003,8 +1004,9 @@ paths:
   /radio:
     post:
       summary: |
-        Start a radio (docs/v3-ux.md §5): the AI picks ~25 tracks and the server stores them as a queue named
-        "<seed> radio" (radio != null on the queue). Ask for more with POST /radio/{queueId}/more when ~5 remain.
+        Start a radio (docs/v3-ux.md §5): the AI picks ~25 tracks and the server stores them as a queue named by
+        the AI ("Song X radio", "Your Indie Rock radio"; radio != null on the queue). Starting the same radio
+        again replaces that queue. Ask for more with POST /radio/{queueId}/more when ~5 remain.
         Queue changes are pushed over Connect as usual.
       requestBody:
         required: true
@@ -1013,6 +1015,7 @@ paths:
         '200':
           description: the new radio queue
           content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
+        '400': { description: malformed seed }
         '404': { description: seed item not found, or nothing analysed to build a radio from }
         '503': { description: AI engine without radio support yet }
   /radio/{queueId}/more:
@@ -1022,7 +1025,7 @@ paths:
         content: { application/json: { schema: { type: object, properties: { count: { type: integer, default: 25, minimum: 1, maximum: 100 } } } } }
       responses:
         '200':
-          description: the queue with new tracks appended (no repeats within the queue)
+          description: the queue with new tracks appended (no repeats; unchanged once the library runs out)
           content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
         '404': { description: not a radio queue of yours }
         '503': { description: AI engine without radio support yet }

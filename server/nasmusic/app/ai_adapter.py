@@ -64,33 +64,27 @@ def _call(name: str, *args, **kwargs):
     return fn(*args, **kwargs)
 
 
-def _track_ids(res) -> list[str]:
-    if isinstance(res, dict):
-        res = res.get("trackIds") or res.get("tracks") or []
+def _ids(res) -> list[str]:
     return [t for t in (res or []) if isinstance(t, str)]
 
 
-def radio_start(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, seed: dict, n: int = 25) -> list[str]:
-    """Track ids for a new radio. Raises NotImplementedError until the engine has radio_start, KeyError
-    for an unknown/unanalysed seed."""
-    return _track_ids(_call("radio_start", conn, cfg, user_id, seed, n))
+def radio_start(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, seed: dict) -> tuple[str, list[str]]:
+    """(radio_id, ~25 track ids). The radio's display name is radio_sessions.title. Raises NotImplementedError
+    without the v3 engine, KeyError for unknown/unanalysed seeds or users, ValueError for a malformed seed."""
+    radio_id, ids = _call("radio_start", conn, cfg, user_id, {k: v for k, v in seed.items() if k in ("type", "id")})
+    return radio_id, _ids(ids)
 
 
-def radio_more(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, seed: dict, exclude: list[str],
-               n: int = 25, queue_id: str | None = None) -> list[str]:
-    fn = getattr(ai, "radio_more", None)
-    if fn is None:
-        raise NotImplementedError("AI engine has no radio_more yet")
-    params = inspect.signature(fn).parameters
-    kwargs = {k: v for k, v in (("queue_id", queue_id), ("seed", seed), ("exclude", exclude), ("n", n))
-              if k in params}
-    return _track_ids(fn(conn, cfg, user_id, **kwargs))
+def radio_more(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, radio_id: str, exclude: list[str],
+               n: int = 25) -> list[str]:
+    """More ids for radio `radio_id` (the AI's id, not the queue's); [] once the library runs out."""
+    return _ids(_call("radio_more", conn, cfg, user_id, radio_id, exclude, n))
 
 
 def because_you_played(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, limit: int = 3) -> list[dict]:
-    """[{seed: {type, id, title}, trackIds: [...], albumIds?: [...]}]; [] while the engine lacks it."""
+    """[{seed_track_id, title, track_ids}]; [] while the engine lacks it (it never raises)."""
     fn = getattr(ai, "because_you_played", None)
     if fn is None:
         return []
     res = fn(conn, cfg, user_id, limit)
-    return [r for r in (res or []) if isinstance(r, dict) and isinstance(r.get("seed"), dict)][:limit]
+    return [r for r in (res or []) if isinstance(r, dict) and isinstance(r.get("track_ids"), list)][:limit]

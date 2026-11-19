@@ -38,10 +38,11 @@ def test_v2_to_v3_is_additive(tmp_path):
     conn = db.connect(path)
     db.init(conn)
     assert migrations.current_version(conn) == 3
-    for t in ("pins", "toget", "catalog_items"):
+    for t in ("pins", "toget", "catalog_items", "radio_sessions"):
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
     q = conn.execute("SELECT * FROM queues").fetchone()
-    assert (q["name"], q["position_ms"], q["source_type"], q["radio_seed"]) == ("Album: Al", 1234, None, None)
+    assert (q["name"], q["position_ms"], q["source_type"], q["radio_seed"], q["radio_id"]) == (
+        "Album: Al", 1234, None, None, None)
     assert conn.execute("SELECT play_count FROM user_tracks").fetchone()[0] == 7
     assert conn.execute("SELECT context FROM events").fetchone()[0] == '{"output": "wired"}'
     assert conn.execute("SELECT COUNT(*) FROM queue_tracks").fetchone()[0] == 1
@@ -105,3 +106,19 @@ def test_v1_chains_to_v3_with_one_backup(tmp_path):
     assert migrations.current_version(conn) == 3
     assert {"source_type", "radio_seed"} <= {r[1] for r in conn.execute("PRAGMA table_info(queues)")}
     assert len(list(tmp_path.glob("*.v1-backup-*"))) == 1 and list(tmp_path.glob("*.v2-backup-*")) == []
+
+
+def test_v2_db_where_the_ai_already_created_radio_sessions(tmp_path):
+    """The v3 AI engine creates radio_sessions itself if missing; the migration must not trip over it."""
+    path = tmp_path / "nasmusic.db"
+    conn = make_v2(path)
+    conn.execute("CREATE TABLE radio_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) "
+                 "ON DELETE CASCADE, seed_type TEXT NOT NULL, seed_id TEXT, title TEXT NOT NULL, anchors TEXT NOT NULL, "
+                 "served TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+    conn.execute("INSERT INTO radio_sessions VALUES ('r', 'u1', 'random', NULL, 'Your radio', '[]', '[]', 'x', 'x')")
+    conn.close()
+    conn = db.connect(path)
+    db.init(conn)
+    assert migrations.current_version(conn) == 3
+    assert conn.execute("SELECT title FROM radio_sessions").fetchone()[0] == "Your radio"
+    assert "radio_sessions_user" in {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}

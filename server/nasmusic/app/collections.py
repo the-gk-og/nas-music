@@ -201,7 +201,8 @@ def _write_queue(conn: sqlite3.Connection, qid: str, ids: list[str], current: in
 
 def create_queue(conn: sqlite3.Connection, uid: str, name: str, track_ids: list[str], start_index: int = 0,
                  protect: str | None = None, replace_same_name: bool = False,
-                 source: tuple[str, str | None] | None = None, radio_seed: dict | None = None) -> dict:
+                 source: tuple[str, str | None] | None = None, radio_seed: dict | None = None,
+                 radio_id: str | None = None) -> dict:
     """New queue in the lowest free slot. With 20 already, the least recently updated queue (never `protect`,
     the one playing) is replaced and its slot reused. `replace_same_name` reuses a queue with that name."""
     _check_tracks(conn, track_ids)
@@ -226,9 +227,9 @@ def create_queue(conn: sqlite3.Connection, uid: str, name: str, track_ids: list[
             conn.execute("INSERT INTO queues (id, user_id, name, slot, created_at, updated_at) "
                          "VALUES (?, ?, ?, ?, ?, ?)", (qid, uid, name, slot, now, now))
         _write_queue(conn, qid, track_ids, start_index, 0)
-        conn.execute("UPDATE queues SET source_type = ?, source_id = ?, radio_seed = ? WHERE id = ?",
+        conn.execute("UPDATE queues SET source_type = ?, source_id = ?, radio_seed = ?, radio_id = ? WHERE id = ?",
                      (source[0] if source else None, source[1] if source else None,
-                      json.dumps(radio_seed) if radio_seed else None, qid))
+                      json.dumps(radio_seed) if radio_seed else None, radio_id, qid))
     return get_queue(conn, uid, qid)
 
 

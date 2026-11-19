@@ -134,6 +134,7 @@ def erase(conn: sqlite3.Connection, uid: str, signal: str) -> dict:
             conn.execute("UPDATE user_tracks SET play_count = 0, skip_count = 0, last_played = NULL "
                          "WHERE user_id = ?", (uid,))
             conn.execute("DELETE FROM taste_snapshots WHERE user_id = ?", (uid,))
+            conn.execute("DELETE FROM radio_sessions WHERE user_id = ?", (uid,))  # encode taste too
             conn.execute("UPDATE playback_state SET state = '{}' WHERE user_id = ?", (uid,))
             conn.execute("COMMIT")
             return {"eventsUpdated": 0, "eventsDeleted": deleted}

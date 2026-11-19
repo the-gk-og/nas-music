@@ -235,6 +235,8 @@ def _radio_errors(fn, *a):
         return fn(*a)
     except NotImplementedError as e:
         raise HTTPException(503, "radio isn't available yet (AI engine update pending)") from e
+    except ValueError as e:  # malformed seed (the AI's signal)
+        raise HTTPException(400, f"bad seed: {e}") from e
     except (discover.NotFound, KeyError) as e:
         raise HTTPException(404, "nothing to build this radio from yet") from e
     except coll.NotFound as e:

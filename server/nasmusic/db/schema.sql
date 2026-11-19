@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS queues (
     source_type   TEXT,                -- v3: what it was started from (album, playlist, mix, radio, ...)
     source_id     TEXT,
     radio_seed    TEXT,                -- v3: JSON RadioSeed for radio queues, else NULL
+    radio_id      TEXT,                -- v3: radio_sessions.id (the AI's radio) behind a radio queue
     UNIQUE (user_id, slot)
 );
 
@@ -262,6 +263,20 @@ CREATE TABLE IF NOT EXISTS catalog_items (
 );
 
 -- ---------- AI-owned tables ----------
+
+-- v3 radio sessions (written by the AI's radio_start/radio_more; server core maps queues.radio_id to them).
+CREATE TABLE IF NOT EXISTS radio_sessions (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    seed_type  TEXT NOT NULL,
+    seed_id    TEXT,
+    title      TEXT NOT NULL,          -- display name, e.g. "Song X radio"; used as the queue name
+    anchors    TEXT NOT NULL,
+    served     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS radio_sessions_user ON radio_sessions(user_id, updated_at);
 
 CREATE TABLE IF NOT EXISTS features (          -- global: audio analysis is shared
     track_id      TEXT NOT NULL REFERENCES tracks(id),

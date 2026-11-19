@@ -4,9 +4,7 @@ Every shelf is {id, kind, title, subtitle, layout, items}; every item is a gener
 {type, id, title, subtitle, artUrl, + one detail object}. artUrl is relative to the API base."""
 from __future__ import annotations
 
-import json
 import sqlite3
-from typing import Any
 
 from nasmusic.app import ai_adapter, mixes, suggestions, toget, userdata
 from nasmusic.app import collections as coll
@@ -327,16 +325,17 @@ def _radio_seeds(conn: sqlite3.Connection, data_dir, uid: str) -> list[dict]:
 
 
 def _because_you_played(conn: sqlite3.Connection, cfg: Config, uid: str) -> list[dict]:
+    """1-3 "Because you played <track>" shelves from the AI (seed is always a track)."""
     out = []
     for n, s in enumerate(ai_adapter.because_you_played(conn, ai_config(cfg), uid, 3)):
-        seed = s["seed"]
-        tracks = queries.tracks_by_ids(conn, uid, [i for i in s.get("trackIds", []) if isinstance(i, str)])
-        items = [track_item(tracks[i]) for i in s.get("trackIds", []) if i in tracks]
-        rows = _album_rows(conn, [i for i in s.get("albumIds", []) if isinstance(i, str)])
-        items += [album_item(cfg.data_dir, rows[i]) for i in s.get("albumIds", []) if i in rows]
+        ids = [i for i in s.get("track_ids", []) if isinstance(i, str)]
+        tracks = queries.tracks_by_ids(conn, uid, ids)
+        items = [track_item(tracks[i]) for i in ids if i in tracks]
         if items:
-            out.append(shelf(f"byp:{seed.get('type')}:{seed.get('id') or n}", "because_you_played",
-                             f"Because you played {seed.get('title') or 'this'}", items))
+            seed = s.get("seed_track_id")
+            out.append(shelf(f"byp:track:{seed or n}", "because_you_played",
+                             s.get("title") or "Because you played this", items,
+                             subtitle=None))
     return out
 
 
@@ -389,15 +388,16 @@ def seed_title(conn: sqlite3.Connection, uid: str, seed: dict) -> str:
 
 
 def start_radio(conn: sqlite3.Connection, cfg: Config, uid: str, seed: dict, protect: str | None) -> dict:
-    title = seed_title(conn, uid, seed)
+    title = seed_title(conn, uid, seed)  # validates the seed (404) and gives the seed a display title
     seed = {"type": seed["type"], "id": seed.get("id"), "title": title}
-    ids = [i for i in dict.fromkeys(ai_adapter.radio_start(conn, ai_config(cfg), uid, seed, 25))]
-    ids = [i for i in ids if queries.track_file(conn, i) is not None]
+    radio_id, ids = ai_adapter.radio_start(conn, ai_config(cfg), uid, seed)
+    ids = [i for i in dict.fromkeys(ids) if queries.track_file(conn, i) is not None]
     if not ids:
         raise NotFound("nothing to play for this radio yet")
-    name = "Random radio" if seed["type"] == "random" else f"{title} radio"
+    row = conn.execute("SELECT title FROM radio_sessions WHERE id = ?", (radio_id,)).fetchone()
+    name = (row[0] if row and row[0] else ("Random radio" if seed["type"] == "random" else f"{title} radio"))
     return coll.create_queue(conn, uid, name, ids, 0, protect=protect, replace_same_name=True,
-                             source=("radio", seed.get("id")), radio_seed=seed)
+                             source=("radio", seed.get("id")), radio_seed=seed, radio_id=radio_id)
 
 
 def more_radio(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str, n: int) -> dict:
@@ -405,12 +405,11 @@ def more_radio(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str, n: int
         row = coll.queue_row(conn, uid, qid)
     except coll.NotFound as e:
         raise NotFound("no such queue") from e
-    if not row["radio_seed"]:
+    if not row["radio_seed"] or not row["radio_id"]:
         raise NotFound("not a radio queue")
-    seed: dict[str, Any] = json.loads(row["radio_seed"])
     have = coll.queue_track_ids(conn, uid, qid)
-    new = ai_adapter.radio_more(conn, ai_config(cfg), uid, seed, have, n, queue_id=qid)
+    new = ai_adapter.radio_more(conn, ai_config(cfg), uid, row["radio_id"], have, n)
     fresh = [i for i in dict.fromkeys(new) if i not in set(have) and queries.track_file(conn, i) is not None]
-    if not fresh:
+    if not fresh:  # the library ran out: the queue stays as it is
         return coll.get_queue(conn, uid, qid)
     return coll.edit_queue(conn, uid, qid, add=fresh, position="end")
