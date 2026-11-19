@@ -28,9 +28,10 @@ jobs:
     steps:
       # Version = run number + 10. Builds 0.1.8 and 0.1.9 were signed locally and installed by hand,
       # so CI must stay above them or Android refuses the update as a downgrade.
-      - name: Version code
-        run: echo "VERSION_CODE=$((GITHUB_RUN_NUMBER + 10))" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
+      - name: Version code
+        working-directory: .
+        run: echo "VERSION_CODE=$((GITHUB_RUN_NUMBER + 10))" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
