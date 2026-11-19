@@ -140,6 +140,40 @@ paths:
                   artists: { type: array, items: { $ref: '#/components/schemas/Artist' } }
                   albums: { type: array, items: { $ref: '#/components/schemas/Album' } }
                   tracks: { type: array, items: { $ref: '#/components/schemas/Track' } }
+  /eq/autoeq:
+    get:
+      summary: Search AutoEq headphone profiles
+      description: |
+        The server downloads AutoEq's results index (github.com/jaakkopasanen/AutoEq, MIT; measurement sources vary)
+        on first use, refreshes it weekly and caches it. Nothing is bundled. Clients never contact GitHub.
+      parameters:
+        - { name: q, in: query, schema: { type: string, default: '' }, description: 'every word must appear in the name' }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        '200':
+          description: matches (names starting with the query first, then oratory1990, then A-Z)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [total, results]
+                properties:
+                  total: { type: integer, description: entries in the whole index }
+                  results: { type: array, items: { $ref: '#/components/schemas/AutoEqEntry' } }
+        '502': { description: the index could not be downloaded and there is no cached copy }
+  /eq/autoeq/profile:
+    get:
+      summary: One AutoEq parametric EQ profile (fetched on demand, then cached)
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string }, description: AutoEqEntry.id }
+      responses:
+        '200':
+          description: profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutoEqProfile' }
+        '404': { description: not an index entry }
+        '502': { description: GitHub unreachable or the profile has no parametric EQ }
   /stream/{trackId}:
     get:
       summary: Audio bytes. Supports HTTP Range for seeking. Opus is transcoded with ffmpeg and cached on disk.
@@ -1909,6 +1943,32 @@ components:
         missing: { type: boolean, description: 'only present (true) in playlists/queues when the file is gone' }
         replayGain:
           $ref: '#/components/schemas/ReplayGain'
+    AutoEqEntry:
+      type: object
+      required: [id, name, source, form]
+      properties:
+        id: { type: string, description: 'path under AutoEq results/, e.g. "oratory1990/over-ear/Sennheiser HD 650"' }
+        name: { type: string }
+        source: { type: string, description: who measured it }
+        rig: { type: [string, 'null'], description: measurement rig when the source used several }
+        form: { type: string, description: 'over-ear, in-ear, earbud' }
+    AutoEqProfile:
+      allOf:
+        - $ref: '#/components/schemas/AutoEqEntry'
+        - type: object
+          required: [preampDb, filters]
+          properties:
+            preampDb: { type: number, description: '<= 0; apply before the filters to avoid clipping' }
+            filters:
+              type: array
+              items:
+                type: object
+                required: [type, fc, gainDb, q]
+                properties:
+                  type: { type: string, enum: [PK, LSC, HSC], description: 'peaking, low shelf, high shelf (RBJ cookbook, Q as given)' }
+                  fc: { type: number, description: Hz }
+                  gainDb: { type: number }
+                  q: { type: number }
     ReplayGain:
       type: object
       description: |

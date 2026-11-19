@@ -31,6 +31,7 @@ class AppContext:
     catalog: object | None = None          # nasmusic.catalog.Catalog (online catalogue for search)
     base_cfg: Config | None = None         # config.toml as loaded; `cfg` = this + admin-console overrides
     lrclib: object | None = None           # nasmusic.library.lrclib.Lrclib
+    autoeq: object | None = None           # nasmusic.app.autoeq.AutoEq (created on first use)
     started_at: float = 0.0                # time.time() at start (uptime)
     login_limiter: users.RateLimiter = field(default_factory=lambda: users.RateLimiter(5, 60.0))
 
