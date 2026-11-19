@@ -258,7 +258,7 @@ def test_nightly_triggers_pretranscode(cfg, monkeypatch):
     monkeypatch.setattr(jobs, "trigger", lambda name: started.append(name) or True)
     monkeypatch.setattr(ai, "run_nightly", lambda conn, c: ["m"])
     assert jobs.run("nightly")["ok"]
-    assert started == ["pretranscode"]
+    assert started == ["pretranscode", "lyrics"]
 
 
 def test_pretranscode_runs_ffmpeg_niced(cfg, conn, scanned, monkeypatch):

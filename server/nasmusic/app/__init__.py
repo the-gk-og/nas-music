@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import re
 import secrets
+import time
 from importlib.metadata import PackageNotFoundError, version
 
 from fastapi import FastAPI, Request
@@ -45,6 +46,9 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
     if jobs is not None:
         jobs.cfg = cfg
         jobs.opus.max_bytes = int(cfg.opus_cache_gb * 1024**3)
+        from nasmusic.library.lrclib import Lrclib
+
+        jobs.lrclib = Lrclib(VERSION, min_interval_s=1.0)  # background prefetch: gentle
     files, _ = tls.ensure_cert(cfg.data_dir, cfg.lan_host)
     conn = open_db(cfg)
     try:
@@ -55,6 +59,7 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
         conn.close()
     from nasmusic.app.connect_api import make_hub
     from nasmusic.catalog import Catalog
+    from nasmusic.library.lrclib import Lrclib
     from nasmusic.app.weather import Weather
 
     return AppContext(
@@ -69,6 +74,8 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
         weather=Weather(),
         catalog=Catalog(),
         base_cfg=base_cfg,
+        lrclib=Lrclib(VERSION),
+        started_at=time.time(),
     )
 
 

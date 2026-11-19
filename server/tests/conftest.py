@@ -128,6 +128,11 @@ def offline(app):
     app.state.ctx.catalog = Catalog(httpx.MockTransport(refuse))
     app.state.ctx.weather = Weather(httpx.MockTransport(refuse))
     app.state.ctx.http_transport = httpx.MockTransport(refuse)
+    from nasmusic.library.lrclib import Lrclib
+
+    app.state.ctx.lrclib = Lrclib("test", httpx.MockTransport(refuse), min_interval_s=0)
+    if app.state.ctx.jobs is not None:
+        app.state.ctx.jobs.lrclib = app.state.ctx.lrclib
     return app
 
 

@@ -20,7 +20,9 @@ from nasmusic.stream.transcode import OpusCache
 
 log = logging.getLogger(__name__)
 
-JOB_NAMES = ("scan", "full_scan", "analyse", "nightly", "pretranscode", "discovery")
+JOB_NAMES = ("scan", "full_scan", "analyse", "nightly", "pretranscode", "lyrics", "discovery", "cleanup")
+HISTORY = 20
+LYRICS_PER_RUN = 200
 
 
 class Jobs:
@@ -28,6 +30,7 @@ class Jobs:
         self.cfg = cfg
         # Shared with the API so on-demand and background transcodes use the same per-track locks.
         self.opus = opus or OpusCache(cfg.data_dir / "opus", int(cfg.opus_cache_gb * 1024**3))
+        self.lrclib = None   # nasmusic.library.lrclib.Lrclib for the prefetch job (set by build_context)
         self._locks = {n: threading.Lock() for n in JOB_NAMES}
         self._locks["full_scan"] = self._locks["scan"]  # never scan twice at once
         self.scheduler = None
@@ -68,6 +71,47 @@ class Jobs:
                 log.warning("pre-transcode failed for %s: %s", r["id"], e)
         return {"transcoded": done, "alreadyCached": cached, "failed": failed}
 
+    def _lyrics(self, conn):
+        """Pre-fetch LRCLIB lyrics for favourites and active mixes whose files have none (rate-limited)."""
+        from nasmusic.library import lrclib, lyrics
+
+        if not self.cfg.lrclib_enabled or self.lrclib is None:
+            return {"skipped": "LRCLIB is turned off"}
+        rows = conn.execute(
+            "SELECT t.id, t.path FROM tracks t WHERE t.missing = 0 AND (t.id IN ("
+            "  SELECT ut.track_id FROM user_tracks ut JOIN users u ON u.id = ut.user_id "
+            "  WHERE ut.starred_at IS NOT NULL AND u.disabled = 0) OR t.id IN ("
+            "  SELECT mt.track_id FROM mix_tracks mt JOIN mixes m ON m.id = mt.mix_id WHERE m.active = 1)) "
+            "AND t.id NOT IN (SELECT track_id FROM lyrics_cache WHERE status = 'found' OR retry_after > ?) "
+            "ORDER BY t.id", (now_iso(),)).fetchall()
+        fetched = in_file = found = unreachable = 0
+        for r in rows:
+            if fetched >= LYRICS_PER_RUN:
+                break
+            if lyrics.read_all(self.cfg.library_root / r["path"]):
+                in_file += 1
+                continue
+            row = lrclib.fetch(conn, self.lrclib, r["id"])
+            if row is None:
+                unreachable += 1
+                if unreachable >= 3:  # LRCLIB is down: try again next time
+                    break
+                continue
+            fetched += 1
+            found += row["status"] == "found"
+        return {"candidates": len(rows), "fetched": fetched, "found": found, "inFile": in_file,
+                "unreachable": unreachable}
+
+    def _cleanup(self, conn):
+        """Daily housekeeping: expire bug reports (30 days)."""
+        from datetime import UTC, datetime, timedelta
+
+        from nasmusic.core import iso
+
+        cutoff = iso(datetime.now(UTC) - timedelta(days=30))
+        return {"bugReportsDeleted": conn.execute("DELETE FROM bug_reports WHERE created_at < ?",
+                                                  (cutoff,)).rowcount}
+
     def _discovery(self, conn):
         return {"newSuggestions": ai_adapter.run_weekly_discovery(conn, ai_config(self.cfg))}
 
@@ -79,6 +123,8 @@ class Jobs:
             "nightly": self._nightly,
             "pretranscode": self._pretranscode,
             "discovery": self._discovery,
+            "lyrics": self._lyrics,
+            "cleanup": self._cleanup,
         }[name]
 
     # ----- running -----
@@ -109,6 +155,8 @@ class Jobs:
             rec["durationS"] = round(time.monotonic() - t0, 2)
             try:
                 set_setting(conn, f"job.{name}", rec)
+                hist = get_setting(conn, f"jobhist.{name}", []) or []
+                set_setting(conn, f"jobhist.{name}", [rec, *hist][:HISTORY])
             finally:
                 conn.close()
                 lock.release()
@@ -116,6 +164,7 @@ class Jobs:
             self.trigger("analyse")
         if name == "nightly" and rec["ok"]:
             self.trigger("pretranscode")
+            self.trigger("lyrics")
         return rec
 
     def trigger(self, name: str) -> bool:
@@ -141,6 +190,7 @@ class Jobs:
                       next_run_time=datetime.now(tz) if initial_scan else None)
         sched.add_job(self.run, "cron", args=["nightly"], id="nightly", hour=2, minute=0)
         sched.add_job(self.run, "cron", args=["discovery"], id="discovery", day_of_week="sun", hour=3, minute=0)
+        sched.add_job(self.run, "cron", args=["cleanup"], id="cleanup", hour=4, minute=30)
         sched.start()
         self.scheduler = sched
         return sched
