@@ -75,8 +75,9 @@ def _lower_priority() -> None:  # runs in the forked child before exec
 
 
 def measure(path: Path, ffmpeg: str = "ffmpeg") -> Measurement | None:
+    # framelog=verbose (not "quiet", which ffmpeg < 6 rejects): per-frame lines stay below the default log level.
     cmd = [ffmpeg, "-nostdin", "-hide_banner", "-nostats", "-i", str(path), "-map", "0:a:0", "-vn",
-           "-filter:a", "ebur128=peak=sample:framelog=quiet", "-f", "null", "-"]
+           "-filter:a", "ebur128=peak=sample:framelog=verbose", "-f", "null", "-"]
     try:
         proc = subprocess.run(cmd, capture_output=True, timeout=FFMPEG_TIMEOUT_S, check=False,
                               preexec_fn=_lower_priority)
@@ -84,7 +85,8 @@ def measure(path: Path, ffmpeg: str = "ffmpeg") -> Measurement | None:
         log.warning("loudness: ffmpeg failed to run on %s: %s", path.name, e)
         return None
     if proc.returncode != 0:
-        log.warning("loudness: ffmpeg exited %s on %s", proc.returncode, path.name)
+        tail = proc.stderr.decode(errors="replace").strip().splitlines()[-2:]
+        log.warning("loudness: ffmpeg exited %s on %s: %s", proc.returncode, path.name, " | ".join(tail))
         return None
     return parse_ebur128(proc.stderr.decode(errors="replace"))
 
