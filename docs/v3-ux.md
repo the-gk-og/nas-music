@@ -119,6 +119,15 @@ These sync per user via `/me/settings` (device-local overrides allowed).
   sleep timer, LRCLIB lyrics fallback, AutoEQ headphone profiles, Android Auto.
 - **Smarter**: Release Radar, Wrapped (monthly/yearly), Blend between two users, plain-language mix
   requests (after the hardware upgrade).
+- **Casting to TVs and speakers** (owner asked 2026-11-19): server-side Cast via pychromecast (MIT) for
+  Chromecast/Google TV/Nest, DLNA/UPnP renderers via async-upnp-client, Home Assistant media players —
+  all shown as Connect devices; web player gets a Cast button via the browser Remote Playback API.
+  Needs mDNS/SSDP discovery from the container (host network or a discovery helper).
+  **Plus built-in Cast in Android (owner decision 2026-11-19): two Android build flavours published
+  side by side — `foss` (no Google code at all; F-Droid-ready) and `full` (adds the Google Cast SDK for a
+  Spotify-style Cast button and system output switcher; uses Google's Default Media Receiver).**
+  Casting needs short-lived signed stream URLs (the receiver can't send a bearer token) on an address
+  the Chromecast accepts (public relay URL with a real cert, or a LAN plain-HTTP cast port).
 - **Devices/home**: Wear OS app, Snapcast multi-room (owner has spare PCs/Pis), DLNA/UPnP renderers
   (owner has smart TV/DLNA speakers), Home Assistant integration (owner runs HA), Android widget +
   quick-settings tile.
