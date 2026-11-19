@@ -169,6 +169,7 @@
     background: var(--bg-2);
     border-radius: 999px;
     border: 2px solid transparent;
+    box-shadow: 0 -12px 0 10px var(--bg);
   }
   .box:focus-within {
     border-color: #fff;
@@ -217,6 +218,9 @@
   .topgrid {
     display: grid;
     gap: 8px;
+  }
+  .topgrid > section {
+    min-width: 0;
   }
   @media (min-width: 900px) {
     .topgrid {

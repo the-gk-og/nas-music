@@ -99,6 +99,7 @@ export class Player {
   private events: EventQueue;
   private stateTimer: ReturnType<typeof setInterval> | null = null;
   private claimedAt = 0;
+  private lastRemoteQueue: string | null = null;
   private lastQueueSave = 0;
   private loadToken = 0;
   private blobTried = new Set<string>();
@@ -868,7 +869,14 @@ export class Player {
         onState: (s) => {
           this.myDeviceId = this.connect?.deviceId ?? null;
           this.remoteState = s;
-          if (s.activeDeviceId && s.activeDeviceId !== this.myDeviceId) void this.loadRemoteTrack(s.trackId);
+          if (s.activeDeviceId && s.activeDeviceId !== this.myDeviceId) {
+            void this.loadRemoteTrack(s.trackId);
+            // As a remote, the Queue view follows the queue playing on the active device.
+            if (s.queueId && s.queueId !== this.viewQueue?.id && s.queueId !== this.lastRemoteQueue) {
+              this.lastRemoteQueue = s.queueId;
+              void this.showQueue(s.queueId);
+            }
+          }
         },
         onTakeover: (s) => void this.takeover(s),
         onRelease: () => this.release(),

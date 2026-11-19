@@ -231,7 +231,7 @@
   }
   .wide .body {
     display: grid;
-    grid-template-columns: min(520px, 42vw) 1fr;
+    grid-template-columns: min(520px, 42vw) minmax(0, 1fr);
     grid-template-rows: auto auto;
   }
   .wide .stage {
@@ -245,6 +245,8 @@
     grid-row: 1 / span 2;
     align-self: stretch;
     min-height: 0;
+    min-width: 0;
+    max-height: 78vh;
     display: flex;
     padding-top: 12px;
   }
