@@ -56,6 +56,25 @@ class PairingRepository(
     fun unpair() = store.save(null)
 
     /** Keeps the token but updates addresses / CF credentials from the Settings screen. */
+    /**
+     * Validates and normalises what was typed (adds https://, keeps an explicit port such as
+     * music.example.com:8443, adds :8443 only to bare LAN IPs) and saves it. Returns an error
+     * message, or null when saved.
+     */
+    fun saveAddresses(lanInput: String, remoteInput: String, cfId: String?, cfSecret: String?): String? {
+        val lan = lanInput.takeIf { it.isNotBlank() }?.let { org.nasmusic.app.net.ServerAddress.normalize(it) }
+        val remote = remoteInput.takeIf { it.isNotBlank() }?.let { org.nasmusic.app.net.ServerAddress.normalize(it) }
+        lan?.exceptionOrNull()?.let { return "Home (LAN) address: ${it.message}" }
+        remote?.exceptionOrNull()?.let { return "Remote address: ${it.message}" }
+        if (lan == null && remote == null) return "Enter at least one address"
+        updateAddresses(
+            lan?.getOrNull()?.let(org.nasmusic.app.net.ServerAddress::origin).orEmpty(),
+            remote?.getOrNull()?.let(org.nasmusic.app.net.ServerAddress::origin),
+            cfId, cfSecret,
+        )
+        return null
+    }
+
     fun updateAddresses(lanUrl: String, tunnelUrl: String?, cfId: String?, cfSecret: String?) {
         val cur = store.config.value ?: return
         store.save(
