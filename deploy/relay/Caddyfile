@@ -16,6 +16,12 @@
 }
 
 music.whoactuallyneeds.men {
+	# Public port 80 on the relay belongs to the friend's nginx, so prove the domain over 443 only.
+	tls {
+		issuer acme {
+			disable_http_challenge
+		}
+	}
 	reverse_proxy nasmusic:8080 {
 		# stream audio and the Connect WebSocket without buffering
 		flush_interval -1

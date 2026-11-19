@@ -4,11 +4,12 @@ Cloudflare's terms don't allow streaming media through its tunnel, so the public
 `https://music.whoactuallyneeds.men` goes through a friend's server instead:
 
 ```
-phone ──HTTPS──▶ friend's router :80/:443 ─▶ friend's server (frps) ══tunnel (NAS dialled out, :2333)══▶ NAS: frpc ─▶ Caddy (HTTPS, Let's Encrypt) ─▶ nasmusic
+phone ──HTTPS──▶ friend's server :443 ─▶ friend's server (frps) ══tunnel (NAS dialled out, :2333)══▶ NAS: frpc ─▶ Caddy (HTTPS, Let's Encrypt) ─▶ nasmusic
 ```
 
 - **Your home router: nothing to forward.** The NAS connects out.
-- **Friend's router (TCP):** public **80 → server 8080**, public **443 → server 8043**, public **2333 → server 2333**. Explicit forwards win over a DMZ setting, and the server's own 80/443 stay free for the friend's services.
+- **Friend's router:** none needed (it's a DMZ). The relay uses the server's public **443** and **2333**;
+  port 80 stays with the friend's nginx, so Caddy proves the domain over 443 (TLS-ALPN) only.
 - HTTPS is end-to-end: only Caddy on your NAS can decrypt. The friend's server just passes bytes.
 - Real visitor IPs reach the server (PROXY protocol), so login rate-limiting works per person.
 
