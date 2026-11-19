@@ -57,3 +57,10 @@ it('no-lyrics message matches the spec', () => {
     'Could not find embedded lyrics in tags of "Conversations with Strangers.flac" file.',
   );
 });
+
+it('attributes LRCLIB lyrics', async () => {
+  const { lyricsAttribution, SOURCE_LABEL } = await import('./lyrics');
+  expect(lyricsAttribution('lrclib')).toBe('Lyrics from LRCLIB');
+  expect(lyricsAttribution('embedded')).toBeNull();
+  expect(SOURCE_LABEL.lrclib).toBe('LRCLIB');
+});

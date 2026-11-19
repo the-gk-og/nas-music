@@ -23,7 +23,7 @@
   import Settings from './screens/Settings.svelte';
   import Equalizer from './screens/Equalizer.svelte';
   import Account from './screens/Account.svelte';
-  import Admin from './screens/Admin.svelte';
+  import AdminConsole from './screens/admin/AdminConsole.svelte';
   import PlayerBar from './components/PlayerBar.svelte';
   import RightPanel from './components/RightPanel.svelte';
   import { appearance } from './lib/appearance.svelte';
@@ -149,7 +149,7 @@
     {:else if n === 'settings'}<Settings />
     {:else if n === 'equalizer'}<Equalizer />
     {:else if n === 'account'}<Account />
-    {:else if n === 'admin'}<Admin />
+    {:else if n === 'admin'}<AdminConsole />
     {:else}<Home />
     {/if}
   {/snippet}
@@ -164,7 +164,7 @@
       </div>
       {#if form !== 'desktop' && !fullNow}<MiniPlayer />{/if}
     </main>
-    {#if form === 'desktop' && ui.panel && !fullNow}<RightPanel />{/if}
+    {#if form === 'desktop' && ui.panel && !fullNow && name !== 'admin'}<RightPanel />{/if}
     {#if sidePane}
       <aside class="side">{#if fullNow}<Queues compact />{:else}<NowPlaying />{/if}</aside>
     {/if}

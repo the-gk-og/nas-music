@@ -341,11 +341,11 @@ export class MockBackend {
       }
       const want = qs.get('source');
       const own = want && want !== 'user' ? undefined : this.lyricOverrides.get(id);
-      const fileSrc = hashSource(id) ? 'lrc_file' : 'embedded';
+      const fileSrc = hashSource(id) ? 'lrc_file' : id.endsWith('2') ? 'lrclib' : 'embedded';
       const raw = own ?? (want === 'user' || (want && want !== fileSrc) ? undefined : L.lyrics.get(id));
       if (raw == null) throw new HttpError(404, `no lyrics for ${t.fileName}`);
       const p = parseLrc(raw);
-      return { trackId: id, synced: p.synced, source: own != null ? 'user' : fileSrc, lines: p.lines, text: p.text, canEdit: true };
+      return { trackId: id, synced: p.synced, source: own != null ? 'user' : fileSrc, sources: [...(L.lyrics.has(id) ? [fileSrc] : []), ...(own != null ? ['user'] : [])], lines: p.lines, text: p.text, canEdit: true };
     }
     if ((r = m(/^\/tracks\/([^/]+)\/why$/))) {
       const t = this.track(r[1]);
