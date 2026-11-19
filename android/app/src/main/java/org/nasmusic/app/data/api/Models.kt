@@ -80,6 +80,16 @@ data class Track(
     val rating: Int? = null,
     /** v2: in playlists/queues when the file is gone. */
     val missing: Boolean = false,
+    /** api 0.5: volume levelling (ReplayGain 2.0 scale); null until the server has measured the track. */
+    val replayGain: ReplayGain? = null,
+)
+
+@Serializable
+data class ReplayGain(
+    val trackGain: Double,
+    val trackPeak: Double? = null,
+    val albumGain: Double? = null,
+    val albumPeak: Double? = null,
 )
 
 @Serializable
@@ -191,3 +201,9 @@ data class Suggestion(
 
 @Serializable
 data class SuggestionStatus(val status: String)
+
+@Serializable
+data class AutoEqEntry(val id: String, val name: String, val source: String = "", val rig: String? = null, val form: String = "")
+
+@Serializable
+data class AutoEqSearch(val total: Int = 0, val results: List<AutoEqEntry> = emptyList())

@@ -21,6 +21,11 @@ object MediaItems {
     const val EXTRA_ALBUM_ID = "nas.albumId"
     const val EXTRA_ARTIST_ID = "nas.artistId"
     const val EXTRA_SEARCH_QUERY = "nas.searchQuery"
+    const val EXTRA_DISC_NO = "nas.discNo"
+    const val EXTRA_RG_TRACK_GAIN = "nas.rgTrackGain"
+    const val EXTRA_RG_TRACK_PEAK = "nas.rgTrackPeak"
+    const val EXTRA_RG_ALBUM_GAIN = "nas.rgAlbumGain"
+    const val EXTRA_RG_ALBUM_PEAK = "nas.rgAlbumPeak"
 
     fun artUrl(albumId: String, size: Int = 512) = RoutedCallFactory.virtual("art/$albumId?size=$size")
 
@@ -38,6 +43,13 @@ object MediaItems {
             putString(EXTRA_ALBUM_ID, t.albumId)
             putString(EXTRA_ARTIST_ID, t.artistId)
             searchQuery?.let { putString(EXTRA_SEARCH_QUERY, it) }
+            t.discNo?.let { putInt(EXTRA_DISC_NO, it) }
+            t.replayGain?.let { rg ->
+                putDouble(EXTRA_RG_TRACK_GAIN, rg.trackGain)
+                rg.trackPeak?.let { putDouble(EXTRA_RG_TRACK_PEAK, it) }
+                rg.albumGain?.let { putDouble(EXTRA_RG_ALBUM_GAIN, it) }
+                rg.albumPeak?.let { putDouble(EXTRA_RG_ALBUM_PEAK, it) }
+            }
         }
         val md = MediaMetadata.Builder()
             .setTitle(t.title)
@@ -65,8 +77,19 @@ object MediaItems {
             albumId = x?.getString(EXTRA_ALBUM_ID).orEmpty(),
             album = md.albumTitle?.toString().orEmpty(),
             trackNo = md.trackNumber,
+            discNo = x?.takeIf { it.containsKey(EXTRA_DISC_NO) }?.getInt(EXTRA_DISC_NO),
             durationS = x?.getDouble(EXTRA_DURATION_S) ?: ((md.durationMs ?: 0L) / 1000.0),
             starred = x?.getBoolean(EXTRA_STARRED) ?: false,
+            replayGain = x?.takeIf { it.containsKey(EXTRA_RG_TRACK_GAIN) }?.let {
+                org.nasmusic.app.data.api.ReplayGain(
+                    it.getDouble(EXTRA_RG_TRACK_GAIN), it.dbl(EXTRA_RG_TRACK_PEAK), it.dbl(EXTRA_RG_ALBUM_GAIN), it.dbl(EXTRA_RG_ALBUM_PEAK),
+                )
+            },
         )
     }
+
+    private fun Bundle.dbl(k: String): Double? = if (containsKey(k)) getDouble(k) else null
+
+    /** What the listening rules (crossfade, levelling, sleep timer) need from a queue entry. */
+    fun facts(item: MediaItem?): TrackFacts? = item?.let { TrackFacts.of(toTrack(it)) }
 }

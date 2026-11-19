@@ -11,6 +11,16 @@ class Biquad(private val b0: Double, private val b1: Double, private val b2: Dou
     private val z1 = DoubleArray(channels)
     private val z2 = DoubleArray(channels)
 
+    /** Magnitude response in dB at `f` (tests). */
+    fun responseDb(fs: Double, f: Double): Double {
+        val w = 2 * PI * f / fs
+        val nr = b0 + b1 * cos(w) + b2 * cos(2 * w)
+        val ni = -(b1 * sin(w) + b2 * sin(2 * w))
+        val dr = 1 + a1 * cos(w) + a2 * cos(2 * w)
+        val di = -(a1 * sin(w) + a2 * sin(2 * w))
+        return 10 * kotlin.math.log10((nr * nr + ni * ni) / (dr * dr + di * di))
+    }
+
     fun process(x: Double, ch: Int): Double {
         val y = b0 * x + z1[ch]
         z1[ch] = b1 * x - a1 * y + z2[ch]
@@ -28,6 +38,32 @@ class Biquad(private val b0: Double, private val b1: Double, private val b2: Dou
                 (1 + alpha * a) / a0, (-2 * cos(w0)) / a0, (1 - alpha * a) / a0,
                 (-2 * cos(w0)) / a0, (1 - alpha / a) / a0, channels,
             )
+        }
+
+        /** Shelf with an explicit Q (AutoEq's LSC/HSC). */
+        fun shelfQ(fs: Double, f0: Double, gainDb: Double, q: Double, high: Boolean, channels: Int): Biquad {
+            val a = 10.0.pow(gainDb / 40)
+            val w0 = 2 * PI * f0.coerceAtMost(fs * 0.49) / fs
+            val cw = cos(w0)
+            val alpha = sin(w0) / (2 * q.coerceAtLeast(0.05))
+            val sq = 2 * sqrt(a) * alpha
+            val sg = if (high) -1.0 else 1.0
+            val a0 = a + 1 + sg * (a - 1) * cw + sq
+            return Biquad(
+                a * (a + 1 - sg * (a - 1) * cw + sq) / a0,
+                sg * 2 * a * (a - 1 - sg * (a + 1) * cw) / a0,
+                a * (a + 1 - sg * (a - 1) * cw - sq) / a0,
+                -sg * 2 * (a - 1 + sg * (a + 1) * cw) / a0,
+                (a + 1 + sg * (a - 1) * cw - sq) / a0,
+                channels,
+            )
+        }
+
+        fun parametric(f: ParametricFilter, fs: Double, channels: Int): Biquad? = when (f.type.uppercase()) {
+            "PK" -> peaking(fs, f.fc.coerceAtMost(fs * 0.49), f.gainDb, f.q.coerceAtLeast(0.05), channels)
+            "LSC" -> shelfQ(fs, f.fc, f.gainDb, f.q, high = false, channels)
+            "HSC" -> shelfQ(fs, f.fc, f.gainDb, f.q, high = true, channels)
+            else -> null
         }
 
         fun lowShelf(fs: Double, f0: Double, gainDb: Double, channels: Int, s: Double = 1.0): Biquad {
@@ -58,6 +94,7 @@ class EqEngine(val settings: EqSettings, val sampleRate: Int, val channels: Int)
     private val filters: List<Biquad> = buildList {
         if (!settings.enabled) return@buildList
         val fs = sampleRate.toDouble()
+        settings.headphone?.filters?.forEach { f -> Biquad.parametric(f, fs, channels)?.let(::add) }
         EqSettings.BANDS_HZ.forEachIndexed { i, f ->
             val g = settings.bandsDb.getOrElse(i) { 0f }.toDouble()
             // Bands above Nyquist are skipped (e.g. 16 kHz at 22.05 kHz sample rate).
@@ -65,7 +102,9 @@ class EqEngine(val settings: EqSettings, val sampleRate: Int, val channels: Int)
         }
         if (settings.bassBoost > 0) add(Biquad.lowShelf(fs, 100.0, settings.bassBoost / 100.0 * 12.0, channels))
     }
-    private val preamp = if (settings.enabled) 10.0.pow(settings.preampDb / 20.0) else 1.0
+    private val preamp = if (settings.enabled) {
+        10.0.pow((settings.preampDb + (settings.headphone?.preampDb?.coerceAtMost(0.0) ?: 0.0)) / 20.0)
+    } else 1.0
     private val width = if (settings.enabled) settings.surround / 100.0 else 0.0
     private val leftGain = if (settings.enabled) (1.0 - settings.balance).coerceIn(0.0, 1.0) else 1.0
     private val rightGain = if (settings.enabled) (1.0 + settings.balance).coerceIn(0.0, 1.0) else 1.0

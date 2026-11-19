@@ -107,6 +107,7 @@ fun EqualizerScreen(c: AppContainer) {
             }
             Switch(eq.enabled, { on -> c.eq.update { it.copy(enabled = on) } }, modifier = Modifier.padding(end = 12.dp))
         }
+        if (page == 0) HeadphoneCorrection(c)
         Box(Modifier.weight(1f)) {
             if (page == 0) BandsPage(c, eq) else EffectsPage(c, eq, now.volume)
         }

@@ -87,6 +87,8 @@ class AppContainer(val context: Context) {
     /** Messages from background parts (playback service, workers) to show as a snackbar. */
     val ui = UiMessages()
     val eq = EqRepository(context)
+    val listening = org.nasmusic.app.playback.ListeningRepository(context)
+    val sleep = org.nasmusic.app.playback.SleepTimerState()
     val contextCollector = ContextCollector(context, scope)
     val feeds = org.nasmusic.app.data.FeedRepository(api)
 

@@ -153,6 +153,10 @@ fun SettingsScreen(c: AppContainer) {
         OutlinedButton(enabled = settings.offlineFavourites, onClick = { SyncScheduler.syncNow(c.context) }) { Text("Sync now") }
 
         HorizontalDivider()
+        Section("Playback")
+        PlaybackSettings(c)
+
+        HorizontalDivider()
         Section("Appearance")
         AppearanceSettings(c, settings)
 

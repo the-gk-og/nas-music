@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -126,6 +127,9 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
     var dragY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var starred by remember(trackId) { mutableStateOf(extras?.getBoolean(MediaItems.EXTRA_STARRED) ?: false) }
     var volumeOpen by remember { mutableStateOf(false) }
+    var sleepOpen by remember { mutableStateOf(false) }
+    val sleepTimer by c.sleep.timer.collectAsStateWithLifecycle()
+    if (sleepOpen) SleepTimerDialog(c) { sleepOpen = false }
     var seeking by remember { mutableStateOf<Float?>(null) }
     val tint = rememberDominantColor(MediaItems.artUrl(track.albumId, 128))
 
@@ -149,6 +153,10 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                 s.remote?.let {
                     Text("Playing on ${it.deviceName}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f).padding(start = 8.dp))
                 } ?: Spacer(Modifier.weight(1f))
+                if (s.remote == null) IconButton(onClick = { sleepOpen = true }) {
+                    Icon(Icons.Default.Bedtime, if (sleepTimer != null) "Sleep timer on" else "Sleep timer",
+                        tint = if (sleepTimer != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                }
                 IconButton(onClick = { ui.queueSheet = true }) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "Queue") }
                 IconButton(onClick = { ui.devicesOpen = true }) {
                     Icon(Icons.Default.SpeakerGroup, "Devices", tint = if (s.remote != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
