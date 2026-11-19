@@ -28,6 +28,8 @@ STATE_FIELDS = {
     "queueId": (str, type(None)), "index": (int,), "trackId": (str, type(None)), "positionMs": (int, float),
     "positionAt": (str,), "playing": (bool,), "volume": (int, float), "shuffle": (bool,), "repeat": (str,),  # noqa: E501
     "speed": (int, float),
+    # The active phone is playing through a Google Cast session it started: the speaker's name, else None.
+    "castTo": (str, type(None)),
 }
 REPEAT = ("off", "all", "one")
 ACTIONS = ("play", "pause", "next", "prev", "seek", "setVolume", "setShuffle", "setRepeat", "playQueue",
@@ -43,7 +45,7 @@ def _now_iso() -> str:
 def default_state() -> dict:
     return {"activeDeviceId": None, "queueId": None, "index": 0, "trackId": None, "positionMs": 0,
             "positionAt": _now_iso(), "playing": False, "volume": 1.0, "shuffle": False, "repeat": "off",
-            "speed": 1.0, "rev": 0}
+            "speed": 1.0, "castTo": None, "rev": 0}
 
 
 def position_now(state: dict) -> int:
@@ -251,6 +253,7 @@ class Hub:
             return
         self._pause_in_place(u.state)
         u.state["activeDeviceId"] = None
+        u.state["castTo"] = None
         await self._changed(uid, u, force_persist=True)
         await self._broadcast(uid, {"type": "error", "source": "speaker",
                                     "detail": "someone else started playing on that speaker"})
@@ -405,6 +408,8 @@ class Hub:
                 u.state[k] = v
         if u.state.get("repeat") not in REPEAT:
             u.state["repeat"] = "off"
+        if "castTo" not in incoming:  # clients that don't know the field (or stopped casting) aren't casting
+            u.state["castTo"] = None
         if "positionAt" not in incoming:
             u.state["positionAt"] = _now_iso()
         u.state["positionMs"] = int(u.state.get("positionMs") or 0)
@@ -421,6 +426,7 @@ class Hub:
         if play is not None:
             u.state["playing"] = bool(play)
         u.state["activeDeviceId"] = target.device_id
+        u.state["castTo"] = None
         if u.release_task:
             u.release_task.cancel()
             u.release_task = None

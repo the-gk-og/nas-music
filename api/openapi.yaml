@@ -2557,6 +2557,11 @@ components:
         shuffle: { type: boolean }
         repeat: { type: string, enum: ['off', all, one] }
         speed: { type: number }
+        castTo:
+          type: [string, 'null']
+          description: >-
+            the active phone is playing through a Google Cast session it started (full Android build) — the
+            speaker's name. Show "Casting to <castTo>". Omitted in a state report = not casting.
         rev: { type: integer }
     ConnectDevice:
       type: object

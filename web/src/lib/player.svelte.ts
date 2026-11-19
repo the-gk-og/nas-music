@@ -179,6 +179,14 @@ export class Player {
     return !!id && !!this.myDeviceId && id !== this.myDeviceId && this.connectStatus === 'open';
   }
 
+  /** "Playing on Pixel", or "Casting from Pixel to Bedroom display" when that phone casts with Google Cast. */
+  get remoteLabel(): string {
+    const d = this.remoteDevice;
+    if (!d) return '';
+    const to = this.remoteState?.castTo;
+    return to ? `Casting from ${d.name} to ${to}` : `Playing on ${d.name}`;
+  }
+
   get remoteDevice(): ConnectDevice | null {
     if (!this.isRemote) return null;
     return this.devices.find((d) => d.id === this.remoteState!.activeDeviceId) ?? null;

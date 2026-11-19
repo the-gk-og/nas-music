@@ -376,6 +376,8 @@ class PlaybackService : MediaLibraryService() {
             val now = System.currentTimeMillis()
             AbRepeat.check(c.abRepeat.loop.value, player.currentMediaItem?.mediaId, player.currentPosition)?.let { player.seekTo(it) }
             if (player.isPlaying && now - lastStateSentMs > 5_000) sendState()
+            // Casting: the local player is paused, so poll the speaker (track changes, pause from its screen).
+            if (ext != null && now - lastStateSentMs > 2_000) sendState()
             maybeExtendRadio()
             if (player.isPlaying && now - lastProgressMs > 15_000) {
                 lastProgressMs = now
@@ -442,21 +444,34 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    /** A Google Cast session (full flavour) playing this phone's queue; Connect sees it as this phone. */
+    private val ext: ExternalTarget? get() = c.player.external?.takeIf { it.active }
+
     private fun sendState() {
         if (!c.connect.isActiveHere || player.mediaItemCount == 0) return
         lastStateSentMs = System.currentTimeMillis()
+        // While casting, report what the speaker is doing so the web app, desktop and watch follow it.
+        val cast = ext?.overlay(
+            NowPlaying(
+                item = player.currentMediaItem,
+                queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) },
+                index = player.currentMediaItemIndex,
+                volume = mixer.user,
+            ),
+        )
         c.connect.reportState(
             PlaybackState(
                 queueId = c.queueSync.currentId.value,
-                index = player.currentMediaItemIndex,
-                trackId = player.currentMediaItem?.mediaId,
-                positionMs = player.currentPosition,
+                index = cast?.index ?: player.currentMediaItemIndex,
+                trackId = cast?.item?.mediaId ?: player.currentMediaItem?.mediaId,
+                positionMs = cast?.positionMs ?: player.currentPosition,
                 positionAt = Instant.now().toString(),
-                playing = player.isPlaying,
-                volume = mixer.user,
+                playing = cast?.isPlaying ?: player.isPlaying,
+                volume = cast?.volume ?: mixer.user,
                 shuffle = player.shuffleModeEnabled,
                 repeat = when (player.repeatMode) { Player.REPEAT_MODE_ONE -> "one"; Player.REPEAT_MODE_ALL -> "all"; else -> "off" },
                 speed = player.playbackParameters.speed,
+                castTo = if (cast != null) ext?.name ?: "a Cast speaker" else null,
             ),
         )
     }
@@ -467,8 +482,9 @@ class PlaybackService : MediaLibraryService() {
         applyingRemote = true
         try {
             when (m) {
-                is ConnectMessage.Takeover -> takeover(m.state)
-                ConnectMessage.Release -> player.pause()
+                // While casting this phone stays the active device; the speaker plays, not the phone.
+                is ConnectMessage.Takeover -> if (ext == null) takeover(m.state)
+                ConnectMessage.Release -> ext?.pause() ?: player.pause()
                 is ConnectMessage.Command -> command(m.action, m.args)
                 is ConnectMessage.QueuesChanged -> {
                     c.queueSync.refresh()
@@ -501,6 +517,17 @@ class PlaybackService : MediaLibraryService() {
     private suspend fun command(action: String, a: JsonObject) {
         fun long(k: String) = a[k]?.jsonPrimitive?.longOrNull
         fun float(k: String) = a[k]?.jsonPrimitive?.floatOrNull
+        ext?.let { e ->
+            when (action) {
+                "play" -> { e.play(); return }
+                "pause" -> { e.pause(); return }
+                "next" -> { e.next(); return }
+                "prev" -> { e.previous(); return }
+                "seek" -> { long("positionMs")?.let(e::seekTo); return }
+                "setVolume" -> { float("volume")?.let(e::setVolume); return }
+                else -> Unit
+            }
+        }
         when (action) {
             "play" -> player.play()
             "pause" -> player.pause()
@@ -516,7 +543,7 @@ class PlaybackService : MediaLibraryService() {
                 val q = c.queueSync.load(id) ?: return
                 setTracks(q.tracks, a["index"]?.jsonPrimitive?.intOrNull ?: q.currentIndex, 0)
                 c.queueSync.setCurrent(id)
-                player.play()
+                ext?.reload() ?: player.play()
             }
             "playTracks" -> {
                 val ids = a["trackIds"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
@@ -528,7 +555,7 @@ class PlaybackService : MediaLibraryService() {
                 setTracks(tracks, index, 0)
                 c.queueSync.setCurrent(q?.id)
                 c.queueSync.refresh()
-                player.play()
+                ext?.reload() ?: player.play()
             }
         }
     }

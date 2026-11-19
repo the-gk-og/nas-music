@@ -63,7 +63,7 @@
   <div class="top">
     <button class="icon-btn" aria-label="Minimise" title="Minimise" onclick={minimise}><ChevronDown size={28} /></button>
     {#if player.remoteDevice}
-      <button class="remote" onclick={() => ui.open({ kind: 'devices' })}><Speaker size={16} /> Playing on {player.remoteDevice.name}</button>
+      <button class="remote" onclick={() => ui.open({ kind: 'devices' })}><Speaker size={16} /> {player.remoteLabel}</button>
     {:else}<span></span>{/if}
     <div class="topr">
       {#if !player.remoteDevice}

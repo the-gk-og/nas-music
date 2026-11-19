@@ -24,7 +24,10 @@ import org.nasmusic.app.data.api.Queue
 import org.nasmusic.app.data.api.Track
 
 /** Another device is playing; this phone is a remote control. */
-data class RemoteInfo(val deviceId: String, val deviceName: String)
+data class RemoteInfo(val deviceId: String, val deviceName: String, val castTo: String? = null) {
+    /** "Playing on Pixel", or "Casting from Pixel to Bedroom display" when that phone casts with Google Cast. */
+    val label: String get() = castTo?.let { "Casting from $deviceName to $it" } ?: "Playing on $deviceName"
+}
 
 data class NowPlaying(
     val item: MediaItem? = null,
@@ -115,21 +118,7 @@ class PlayerConnection(
         }
         val c = controller
         if (c != null) {
-            val local = NowPlaying(
-                item = c.currentMediaItem,
-                isPlaying = c.isPlaying,
-                positionMs = c.currentPosition,
-                durationMs = c.duration.coerceAtLeast(0),
-                hasNext = c.hasNextMediaItem(),
-                hasPrevious = c.hasPreviousMediaItem(),
-                queue = localQueueCache,
-                index = c.currentMediaItemIndex,
-                shuffle = c.shuffleModeEnabled,
-                repeat = c.repeatMode,
-                volume = c.volume,
-                speed = c.playbackParameters.speed,
-                pitch = c.playbackParameters.pitch,
-            )
+            val local = snapshot(c)
             _local.value = ext?.overlay(local) ?: local
         }
         if (_remote.value != null) refreshRemote()
@@ -155,7 +144,7 @@ class PlayerConnection(
             repeat = when (s.repeat) { "one" -> Player.REPEAT_MODE_ONE; "all" -> Player.REPEAT_MODE_ALL; else -> Player.REPEAT_MODE_OFF },
             volume = s.volume,
             speed = s.speed,
-            remote = RemoteInfo(dev.id, dev.name),
+            remote = RemoteInfo(dev.id, dev.name, s.castTo),
         )
     }
 
@@ -183,6 +172,27 @@ class PlayerConnection(
         }
         controller?.let(block) ?: run { pending += block; connect() }
     }
+
+    private fun snapshot(c: MediaController): NowPlaying =
+        NowPlaying(
+            item = c.currentMediaItem,
+            isPlaying = c.isPlaying,
+            positionMs = c.currentPosition,
+            durationMs = c.duration.coerceAtLeast(0),
+            hasNext = c.hasNextMediaItem(),
+            hasPrevious = c.hasPreviousMediaItem(),
+            queue = localQueueCache,
+            index = c.currentMediaItemIndex,
+            shuffle = c.shuffleModeEnabled,
+            repeat = c.repeatMode,
+            volume = c.volume,
+            speed = c.playbackParameters.speed,
+            pitch = c.playbackParameters.pitch,
+        )
+
+    /** This phone's own player state (never the Cast speaker's). Main thread only; null if not connected. */
+    fun localSnapshot(): NowPlaying? =
+        controller?.takeIf { Looper.myLooper() == Looper.getMainLooper() }?.let(::snapshot)
 
     private fun remoteOr(
         action: String,

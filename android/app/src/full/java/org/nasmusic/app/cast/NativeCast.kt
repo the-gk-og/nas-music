@@ -68,6 +68,7 @@ object NativeCast {
                 .addOnSuccessListener { cc ->
                     cast = cc
                     cc.sessionManager.addSessionManagerListener(Listener(c), CastSession::class.java)
+                    Target.c = c
                     c.player.external = Target
                     ready.value = true
                 }
@@ -101,9 +102,16 @@ object NativeCast {
 
     /** Transport controls and progress while a Cast session plays the queue (see PlayerConnection.external). */
     private object Target : ExternalTarget {
+        var c: AppContainer? = null
+        override fun reload() {
+            val cont = c ?: return
+            // Give the phone's MediaController a moment to see the new queue the service just set.
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ session?.let { handOff(cont, it) } }, 700)
+        }
         private val session: CastSession? get() = cast?.sessionManager?.currentCastSession?.takeIf { it.isConnected }
         private val rmc: RemoteMediaClient? get() = session?.remoteMediaClient?.takeIf { it.hasMediaSession() }
         override val active: Boolean get() = rmc != null
+        override val name: String? get() = session?.castDevice?.friendlyName
         override fun play() { rmc?.play() }
         override fun pause() { rmc?.pause() }
         override fun next() { rmc?.queueNext(null) }
@@ -156,7 +164,7 @@ object NativeCast {
     }
 
     private fun handOff(c: AppContainer, session: CastSession) {
-        val now = c.player.state.value
+        val now = c.player.localSnapshot() ?: c.player.state.value
         val ids = now.queue.map { it.mediaId }.filter { it.isNotBlank() }
         if (ids.isEmpty()) return
         val index = now.index.coerceIn(0, ids.size - 1)
@@ -201,7 +209,10 @@ object NativeCast {
                     .setCurrentTime(position)
                     .setAutoplay(true)   // casting starts playing, even from a paused phone
                     .build()
-                session.remoteMediaClient?.load(req)
+                session.remoteMediaClient?.load(req)?.addStatusListener { st ->
+                    // Now the speaker plays: make this phone the Connect device, so other apps follow and control it.
+                    if (st.isSuccess) c.connect.claimPlayback()
+                }
             }
         }
     }

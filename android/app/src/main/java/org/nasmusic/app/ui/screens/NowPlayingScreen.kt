@@ -151,7 +151,7 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 if (!compact) IconButton(onClick = { ui.nav.popBackStack() }) { Icon(Icons.Default.KeyboardArrowDown, "Minimise") }
                 s.remote?.let {
-                    Text("Playing on ${it.deviceName}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                    Text(it.label, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f).padding(start = 8.dp))
                 } ?: Spacer(Modifier.weight(1f))
                 if (s.remote == null) IconButton(onClick = { sleepOpen = true }) {
                     Icon(Icons.Default.Bedtime, if (sleepTimer != null) "Sleep timer on" else "Sleep timer",

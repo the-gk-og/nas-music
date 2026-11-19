@@ -310,3 +310,33 @@ def test_playlist_changes_push_to_all_members(tc, conn):
             pass
         assert m["playlistId"] == p["id"]
         assert [x for x in drain(c) if x["type"] == "playlist"] == []  # carol has no access
+
+
+def test_cast_to_is_relayed_and_cleared(tc, conn):
+    """A phone casting with Google Cast reports the speaker name; other devices show "casting to X"."""
+    phone, ptok = token(conn, kind="android")
+    web, wtok = token(conn, kind="web")
+    with tc.websocket_connect(URL, headers={"Authorization": f"Bearer {ptok}"}) as p, \
+         tc.websocket_connect(URL, headers={"Authorization": f"Bearer {wtok}"}) as w:
+        hello(p, "Pixel")
+        hello(w, "Firefox", "web")
+        until_devices(p, lambda ds: len(ds) == 2)
+        p.send_json({"type": "transfer", "toDeviceId": phone, "play": True})
+        until(p, "takeover")
+        def state_until(ws, pred):
+            for _ in range(20):
+                st = until(ws, "state")["state"]
+                if pred(st):
+                    return st
+            raise AssertionError("state never matched")
+
+        p.send_json({"type": "state", "state": {"playing": True, "castTo": "Bedroom display"}})
+        state_until(w, lambda st: st["castTo"] == "Bedroom display")
+        # A report without the field (stopped casting / older client) clears it.
+        p.send_json({"type": "state", "state": {"playing": True, "positionMs": 5}})
+        state_until(w, lambda st: st["positionMs"] == 5 and st["castTo"] is None)
+        p.send_json({"type": "state", "state": {"playing": True, "castTo": "Bedroom display"}})
+        state_until(w, lambda st: st["castTo"] == "Bedroom display")
+        # Another device taking over isn't casting.
+        w.send_json({"type": "transfer", "toDeviceId": web, "play": True})
+        assert until(w, "takeover")["state"]["castTo"] is None

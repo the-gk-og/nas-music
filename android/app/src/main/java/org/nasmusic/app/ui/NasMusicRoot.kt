@@ -297,7 +297,7 @@ fun MiniPlayer(c: AppContainer) {
                 Text(item.mediaMetadata.title?.toString().orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val remote = s.remote
                 Text(
-                    if (remote != null) "Playing on ${remote.deviceName}" else item.mediaMetadata.artist?.toString().orEmpty(),
+                    if (remote != null) remote.label else item.mediaMetadata.artist?.toString().orEmpty(),
                     style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     color = if (remote != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )

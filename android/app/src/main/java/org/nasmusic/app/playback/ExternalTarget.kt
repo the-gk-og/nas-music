@@ -7,6 +7,8 @@ package org.nasmusic.app.playback
  */
 interface ExternalTarget {
     val active: Boolean
+    /** The speaker's name, shown to other devices ("Casting from Pixel to <name>"). */
+    val name: String?
     fun play()
     fun pause()
     fun next()
@@ -15,6 +17,8 @@ interface ExternalTarget {
     /** Jump to this index of the phone's queue, if the target has it. */
     fun skipTo(index: Int)
     fun setVolume(v: Float)
+    /** The phone's queue was replaced (e.g. another device said "play this"): send it to the target. */
+    fun reload()
     /** What Now Playing should show, based on the local state (queue etc.); null = nothing to override. */
     fun overlay(local: NowPlaying): NowPlaying?
 }

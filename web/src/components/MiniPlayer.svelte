@@ -31,7 +31,7 @@
       <div class="text">
         <div class="ellipsis title">{s.track.title}</div>
         {#if player.remoteDevice}
-          <div class="ellipsis remote"><Speaker size={13} /> Playing on {player.remoteDevice.name}</div>
+          <div class="ellipsis remote"><Speaker size={13} /> {player.remoteLabel}</div>
         {:else}
           <div class="ellipsis muted">{s.track.artist}</div>
         {/if}

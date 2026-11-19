@@ -320,6 +320,8 @@ export interface PlaybackState {
   shuffle: boolean;
   repeat: RepeatMode;
   speed: number;
+  /** The active phone is casting with Google Cast to this speaker (name); null/absent = not casting. */
+  castTo?: string | null;
   rev: number;
 }
 
