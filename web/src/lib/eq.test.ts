@@ -171,3 +171,32 @@ it('stores per-output profiles', () => {
   expect(p['moto buds'].bassBoost).toBe(31);
   expect(loadProfiles({ getItem: () => '{bad' })).toEqual({});
 });
+
+describe('AutoEq parametric filters', () => {
+  it('RBJ shelves and peaks have the requested gain', async () => {
+    const { rbjCoefficients, biquadResponseDb } = await import('./eq');
+    const fs = 48000;
+    const pk = rbjCoefficients('PK', fs, 1000, 6, 1.4);
+    expect(biquadResponseDb(pk, fs, 1000)).toBeCloseTo(6, 3);
+    expect(Math.abs(biquadResponseDb(pk, fs, 50))).toBeLessThan(0.1);
+    const ls = rbjCoefficients('LSC', fs, 105, 6.4, 0.7);
+    expect(biquadResponseDb(ls, fs, 10)).toBeCloseTo(6.4, 1);
+    expect(Math.abs(biquadResponseDb(ls, fs, 5000))).toBeLessThan(0.05);
+    expect(biquadResponseDb(ls, fs, 105)).toBeCloseTo(3.2, 1); // half the gain at fc
+    const hs = rbjCoefficients('HSC', fs, 10000, -2.1, 0.7);
+    expect(biquadResponseDb(hs, fs, 23000)).toBeCloseTo(-2.1, 1);
+    expect(Math.abs(biquadResponseDb(hs, fs, 100))).toBeLessThan(0.01);
+  });
+
+  it('inserts IIR filters between the preamp and the bands, and removes them', () => {
+    const ctx = Object.assign(fakeCtx(), { createIIRFilter: () => new FakeNode('iir'), sampleRate: 48000 });
+    const g = buildEqGraph(ctx as unknown as AudioCtxLike);
+    const hp = { id: 'x', name: 'HD 650', source: 'oratory1990', preampDb: -6, filters: [
+      { type: 'LSC' as const, fc: 105, gainDb: 6.4, q: 0.7 }, { type: 'PK' as const, fc: 8800, gainDb: 5.1, q: 1.42 }] };
+    g.apply({ ...defaultEq(), enabled: true, headphone: hp });
+    expect(chain(g.preamp as unknown as FakeNode).slice(0, 4)).toEqual(['gain', 'iir', 'iir', 'biquad']);
+    expect((g.preamp as unknown as FakeGain).gain.value).toBeCloseTo(dbToGain(-6));
+    g.apply({ ...defaultEq(), enabled: false, headphone: hp });
+    expect(chain(g.preamp as unknown as FakeNode).slice(0, 2)).toEqual(['gain', 'biquad']);
+  });
+});

@@ -329,6 +329,18 @@ export class MockBackend {
       return undefined;
     }
 
+    // AutoEq (a tiny fixed index in the demo)
+    if (path === '/eq/autoeq') {
+      const words = (qs.get('q') ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+      const results = MOCK_AUTOEQ.filter((e) => words.every((w) => e.name.toLowerCase().includes(w))).map(({ preampDb: _p, filters: _f, ...e }) => e);
+      return { total: MOCK_AUTOEQ.length, results };
+    }
+    if (path === '/eq/autoeq/profile') {
+      const p = MOCK_AUTOEQ.find((e) => e.id === qs.get('id'));
+      if (!p) throw new HttpError(404, 'no such AutoEq profile');
+      return p;
+    }
+
     // lyrics
     if ((r = m(/^\/tracks\/([^/]+)\/lyrics$/))) {
       const id = decodeURIComponent(r[1]);
@@ -1059,3 +1071,19 @@ export const mockBackend = (() => {
   let b: MockBackend | null = null;
   return () => (b ??= new MockBackend());
 })();
+
+const MOCK_AUTOEQ = [
+  {
+    id: 'oratory1990/over-ear/Sennheiser HD 650', name: 'Sennheiser HD 650', source: 'oratory1990', rig: null, form: 'over-ear', preampDb: -6.1,
+    filters: [
+      { type: 'LSC' as const, fc: 105, gainDb: 6.4, q: 0.7 },
+      { type: 'PK' as const, fc: 8800, gainDb: 5.1, q: 1.42 },
+      { type: 'PK' as const, fc: 118, gainDb: -3.1, q: 0.5 },
+      { type: 'HSC' as const, fc: 10000, gainDb: -2.1, q: 0.7 },
+    ],
+  },
+  {
+    id: 'oratory1990/in-ear/Apple AirPods Pro', name: 'Apple AirPods Pro', source: 'oratory1990', rig: null, form: 'in-ear', preampDb: -4.2,
+    filters: [{ type: 'PK' as const, fc: 200, gainDb: -3.5, q: 0.8 }, { type: 'PK' as const, fc: 3000, gainDb: 3.2, q: 1.5 }],
+  },
+];

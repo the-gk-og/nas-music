@@ -1,4 +1,5 @@
-// The player: <audio> → Web Audio EQ graph, queues (local copy mirrored to the server), Connect
+// The player: two <audio> decks (gapless preload / crossfade) → per-deck gain (levelling, fades) →
+// sleep-timer gain → Web Audio EQ graph, queues (local copy mirrored to the server), Connect
 // (active device vs remote), listening events, Media Session, A-B repeat, speed and pitch.
 import { ApiError } from './api/client';
 import { mockBackend } from './api/mock';
@@ -30,10 +31,30 @@ import {
 import { session } from './session.svelte';
 import type { CommandAction, ConnectDevice, PlaybackState, Queue, RadioSeed, RepeatMode, Track } from './types';
 import { appendNew, needsTopUp } from './v3';
+import {
+  PRELOAD_AHEAD_S,
+  crossfadeFor,
+  defaultListening,
+  fadeIn,
+  fadeOut,
+  levellingGain,
+  loadListening,
+  normaliseListening,
+  saveListening,
+  sleepFadeLevel,
+  sleepStopsAt,
+  useAlbumGain,
+  type ListeningSettings,
+  type SleepTimer,
+} from './listening';
 import { ui } from './ui.svelte';
 
 const LOCAL_KEY = 'nm.player';
 const SESSION_GAP_MS = 30 * 60 * 1000;
+/** Start the next deck this long before the current one ends (covers play() latency). */
+const GAPLESS_LEAD_MS = 15;
+/** Fade length when the sleep timer stops at the end of a track/album. */
+const SLEEP_TRACK_FADE_S = 6;
 
 interface LocalPrefs {
   queueId: string | null;
@@ -86,10 +107,26 @@ export class Player {
   sinkId = $state('');
   sinkSupported = $state(false);
 
+  // ---- listening: crossfade, levelling, sleep timer (per device) ----
+  listening = $state<ListeningSettings>(defaultListening());
+  sleep = $state<SleepTimer | null>(null);
+  /** Ticks while a sleep timer runs, so labels refresh. */
+  sleepNow = $state(Date.now());
+
   // ---- data settings (§10) ----
   signals = $state<Partial<Record<SignalKey, boolean>>>({});
 
+  /** The deck playing the current track. */
   private audio: HTMLAudioElement | null = null;
+  private decks: HTMLAudioElement[] = [];
+  private deckGains: GainNode[] = [];
+  private mix: GainNode | null = null;
+  /** The other deck, loaded with the next track. */
+  private preloaded: { id: string; el: HTMLAudioElement } | null = null;
+  private preloading: string | null = null;
+  private preloadFailed = new Set<string>();
+  private transitioning = false;
+  private fadingOut: { el: HTMLAudioElement; timer: ReturnType<typeof setTimeout> } | null = null;
   private ctx: AudioContext | null = null;
   private graph: EqGraph | null = null;
   private pitchNode: AudioWorkletNode | null = null;
@@ -190,6 +227,7 @@ export class Player {
     this.outputKey = prefs.outputKey;
     this.sinkId = prefs.sinkId;
     this.profiles = loadProfiles(storage);
+    this.listening = loadListening(storage);
     this.eq = this.profiles[this.outputKey] ?? defaultEq();
 
     this.setupAudio();
@@ -215,28 +253,38 @@ export class Player {
   }
 
   private setupAudio() {
+    this.decks = [this.makeDeck(), this.makeDeck()];
+    this.audio = this.decks[0];
+    setInterval(() => this.watchTransition(), 100);
+  }
+
+  private makeDeck(): HTMLAudioElement {
     const a = new Audio();
     a.preload = 'auto';
-    this.audio = a;
     a.volume = 1;
+    // Events from the other deck (preloading, or fading out after a crossfade) don't drive the UI.
+    const mine = () => a === this.audio;
     a.addEventListener('play', () => {
+      if (!mine()) return;
       this.playing = true;
       this.updateMediaSession();
       this.stateChanged();
     });
     a.addEventListener('pause', () => {
+      if (!mine()) return;
       this.playing = false;
       this.updateMediaSession();
       this.stateChanged();
       this.saveLocal();
       void this.saveQueuePosition(true);
     });
-    a.addEventListener('waiting', () => (this.buffering = true));
-    a.addEventListener('playing', () => (this.buffering = false));
+    a.addEventListener('waiting', () => mine() && (this.buffering = true));
+    a.addEventListener('playing', () => mine() && (this.buffering = false));
     a.addEventListener('loadedmetadata', () => {
-      if (isFinite(a.duration)) this.duration = a.duration;
+      if (mine() && isFinite(a.duration)) this.duration = a.duration;
     });
     a.addEventListener('timeupdate', () => {
+      if (!mine()) return;
       this.position = a.currentTime;
       this.tracker.progress(a.currentTime, this.duration || undefined);
       // A-B repeat
@@ -245,10 +293,200 @@ export class Player {
       if (this.playing && Date.now() - this.lastQueueSave > 15000) void this.saveQueuePosition(false);
     });
     a.addEventListener('ended', () => {
+      if (!mine()) return;
       this.tracker.ended();
+      const q = this.queue;
+      const n = q ? nextIndex(q, this.repeat, false) : null;
+      if (this.sleep && sleepStopsAt(this.sleep, this.current, n == null || !q ? null : q.tracks[n])) {
+        this.finishSleep();
+        return;
+      }
       void this.advance(false);
     });
-    a.addEventListener('error', () => void this.onAudioError());
+    a.addEventListener('error', () => {
+      if (mine()) void this.onAudioError();
+      else if (this.preloaded?.el === a) {
+        this.preloadFailed.add(this.preloaded.id);
+        this.preloaded = null;
+      }
+    });
+    return a;
+  }
+
+  private otherDeck(): HTMLAudioElement | null {
+    return this.decks.find((d) => d !== this.audio) ?? null;
+  }
+
+  // ================= gapless / crossfade =================
+
+  /** 10 Hz while playing: preload the next track, start it on time, run the sleep timer. */
+  private watchTransition() {
+    this.watchSleep();
+    const a = this.audio;
+    const q = this.queue;
+    const cur = this.current;
+    if (!a || !q || !cur || a.paused || this.isRemote || this.transitioning) return;
+    if (this.ab.a != null && this.ab.b != null) return;
+    const dur = isFinite(a.duration) && a.duration > 0 ? a.duration : cur.durationS;
+    if (!dur) return;
+    const remaining = (dur - a.currentTime) / (a.playbackRate || 1);
+    const n = nextIndex(q, this.repeat, false);
+    const next = n == null ? null : q.tracks[n];
+    if (this.sleep && sleepStopsAt(this.sleep, cur, next)) {
+      this.setMix(sleepFadeLevel(remaining, SLEEP_TRACK_FADE_S));
+      return;
+    }
+    if (n == null || !next || n === q.index) return; // end of queue / repeat one: the plain 'ended' path
+    if (remaining <= PRELOAD_AHEAD_S) this.preload(next);
+    if (!this.isPreloaded(next.id)) return;
+    const fade = crossfadeFor(this.listening, cur, next);
+    if (fade > 0) {
+      if (remaining <= fade) void this.transition(n, fade);
+    } else if (remaining <= 0.25) {
+      this.transitioning = true;
+      setTimeout(() => void this.transition(n, 0), Math.max(0, remaining * 1000 - GAPLESS_LEAD_MS));
+    }
+  }
+
+  private isPreloaded(id: string): boolean {
+    return this.preloaded?.id === id && this.preloaded.el.readyState >= 3;
+  }
+
+  private preload(t: Track) {
+    if (this.preloaded?.id === t.id || this.preloading === t.id || this.preloadFailed.has(t.id)) return;
+    const el = this.otherDeck();
+    if (!el || this.fadingOut?.el === el) return; // still fading out; try again on the next tick
+    this.preloading = t.id;
+    this.preloaded = null;
+    session.api
+      .streamSrc(t.id, preferredFormat())
+      .then((src) => {
+        if (this.preloading !== t.id || el === this.audio) return;
+        this.preloading = null;
+        el.pause();
+        el.crossOrigin = session.api.mode === 'bearer' && !src.startsWith('blob:') && !src.startsWith('data:') ? 'anonymous' : null;
+        el.src = src;
+        el.playbackRate = this.speed;
+        el.preservesPitch = true;
+        el.load();
+        this.preloaded = { id: t.id, el };
+      })
+      .catch(() => {
+        this.preloading = null;
+        this.preloadFailed.add(t.id);
+      });
+  }
+
+  /** Automatic move to queue index `n` on the preloaded deck (fadeS = 0: gapless). */
+  private async transition(n: number, fadeS: number) {
+    const q = this.queue;
+    this.transitioning = true;
+    try {
+      if (!q || !this.preloaded || q.tracks[n]?.id !== this.preloaded.id) return;
+      if (this.audio?.paused && !this.audio.ended) return; // paused meanwhile
+      this.tracker.ended();
+      this.queue = { ...q, index: n };
+      if (this.viewQueue?.id === q.id) this.viewQueue = this.queue;
+      this.loadCurrent(true, 0, fadeS);
+    } finally {
+      this.transitioning = false;
+    }
+  }
+
+  /** Stop a deck that is no longer current: fade it out, let it finish its last few ms, or pause now. */
+  private retire(el: HTMLAudioElement, fadeS: number) {
+    this.stopFading();
+    if (fadeS > 0 && !el.paused) {
+      this.rampDeck(el, fadeS, false);
+      this.fadingOut = { el, timer: setTimeout(() => this.stopFading(), fadeS * 1000 + 100) };
+    } else if (!el.paused && isFinite(el.duration) && el.duration - el.currentTime < 0.3) {
+      /* gapless hand-over: it ends by itself within a few ms */
+    } else el.pause();
+  }
+
+  private stopFading() {
+    if (!this.fadingOut) return;
+    clearTimeout(this.fadingOut.timer);
+    if (this.fadingOut.el !== this.audio) this.fadingOut.el.pause();
+    this.fadingOut = null;
+  }
+
+  private deckGain(el: HTMLAudioElement | null): GainNode | null {
+    return el ? (this.deckGains[this.decks.indexOf(el)] ?? null) : null;
+  }
+
+  /** Levelling gain for the current track. */
+  private currentGain(): number {
+    return levellingGain(this.current, this.listening, useAlbumGain(this.listening, this.queue, this.queue?.index ?? 0));
+  }
+
+  /** Set the current deck's gain; `fadeInS` > 0 ramps it up from silence (crossfade). */
+  private applyDeckGain(fadeInS = 0) {
+    const g = this.deckGain(this.audio);
+    if (!g || !this.ctx) return;
+    if (fadeInS > 0) this.rampDeck(this.audio!, fadeInS, true);
+    else {
+      g.gain.cancelScheduledValues(this.ctx.currentTime);
+      g.gain.setTargetAtTime(this.currentGain(), this.ctx.currentTime, 0.02);
+    }
+  }
+
+  private rampDeck(el: HTMLAudioElement, seconds: number, up: boolean) {
+    const g = this.deckGain(el);
+    if (!g || !this.ctx) return;
+    const from = up ? 0 : g.gain.value;
+    const to = up ? this.currentGain() : 0;
+    const curve = new Float32Array(32).map((_, i) => {
+      const x = i / 31;
+      return up ? to * fadeIn(x) : from * fadeOut(x);
+    });
+    const t = this.ctx.currentTime;
+    g.gain.cancelScheduledValues(t);
+    try {
+      g.gain.setValueCurveAtTime(curve, t, seconds);
+    } catch {
+      g.gain.value = to;
+    }
+  }
+
+  // ================= listening settings / sleep timer =================
+
+  setListening(patch: Partial<ListeningSettings>) {
+    this.listening = normaliseListening({ ...this.listening, ...patch });
+    saveListening(storage, this.listening);
+    this.applyDeckGain();
+  }
+
+  /** Start (or with null, cancel) the sleep timer. */
+  setSleep(t: SleepTimer | null) {
+    if (t?.mode === 'album') t = { ...t, albumId: this.current?.albumId };
+    this.sleep = t;
+    this.sleepNow = Date.now();
+    this.setMix(1);
+  }
+
+  private watchSleep() {
+    const s = this.sleep;
+    if (!s) return;
+    this.sleepNow = Date.now();
+    if (s.mode !== 'minutes' || !s.endsAt) return;
+    const remaining = (s.endsAt - Date.now()) / 1000;
+    if (remaining <= 0) this.finishSleep();
+    else if (this.playing) this.setMix(sleepFadeLevel(remaining));
+  }
+
+  private finishSleep() {
+    const wasPlaying = this.playing;
+    this.sleep = null;
+    this.audio?.pause();
+    this.stopFading();
+    // Restore the level once the pause has taken effect, so the next play starts at full volume.
+    setTimeout(() => this.setMix(1), 400);
+    if (wasPlaying) ui.toast('Sleep timer: playback stopped');
+  }
+
+  private setMix(level: number) {
+    if (this.mix && this.ctx) this.mix.gain.setTargetAtTime(level, this.ctx.currentTime, 0.05);
   }
 
   private async onAudioError() {
@@ -283,9 +521,18 @@ export class Player {
     if (!AC) return;
     try {
       this.ctx = new AC({ latencyHint: 'playback' });
-      const src = this.ctx.createMediaElementSource(this.audio);
       this.graph = buildEqGraph(this.ctx);
-      src.connect(this.graph.input);
+      this.mix = this.ctx.createGain();
+      this.mix.connect(this.graph.input);
+      this.deckGains = this.decks.map((el) => {
+        const src = this.ctx!.createMediaElementSource(el);
+        const g = this.ctx!.createGain();
+        src.connect(g);
+        g.connect(this.mix!);
+        return g;
+      });
+      this.deckGain(this.otherDeck())!.gain.value = 0;
+      this.applyDeckGain();
       this.applyEq();
       void this.applySink();
       void this.loadPitchWorklet();
@@ -373,8 +620,7 @@ export class Player {
       const ctx = this.ctx as (AudioContext & { setSinkId?: (id: string) => Promise<void> }) | null;
       if (ctx?.setSinkId) await ctx.setSinkId(this.sinkId === 'default' ? '' : this.sinkId);
       else {
-        const a = this.audio as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
-        await a?.setSinkId?.(this.sinkId);
+        for (const d of this.decks) await (d as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }).setSinkId?.(this.sinkId);
       }
     } catch {
       /* unsupported */
@@ -520,12 +766,40 @@ export class Player {
     }
   }
 
-  /** Load the current track into <audio>. */
-  private loadCurrent(autoplay: boolean, startS = 0) {
+  /** Load the current track into <audio>. Uses the preloaded deck when it holds this track
+   *  (gapless; `fadeS` > 0 crossfades from the old deck). */
+  private loadCurrent(autoplay: boolean, startS = 0, fadeS = 0) {
     const t = this.current;
-    const a = this.audio;
+    let a = this.audio;
     if (!t || !a) return;
     const token = ++this.loadToken;
+    const pre = this.preloaded;
+    if (pre && pre.id === t.id && pre.el !== a && !startS && pre.el.readyState >= 2) {
+      this.preloaded = null;
+      const old = a;
+      this.audio = a = pre.el;
+      this.retire(old, autoplay ? fadeS : 0);
+      void this.topUpRadio();
+      this.tracker.start(t, this.queue ? (this.queueMeta.get(this.queue.id) ?? {}) : {});
+      this.position = 0;
+      this.duration = isFinite(a.duration) ? a.duration : t.durationS;
+      this.error = null;
+      this.ab = { a: null, b: null };
+      this.updateMediaSession();
+      this.applyDeckGain(autoplay ? fadeS : 0);
+      a.playbackRate = this.speed;
+      if (autoplay) void this.startAudio();
+      else this.playing = false;
+      this.stateChanged();
+      this.saveLocal();
+      void this.saveQueuePosition(true);
+      return;
+    }
+    // A manual jump: stop whatever the other deck is doing.
+    this.stopFading();
+    const other = this.otherDeck();
+    if (other && !other.paused) other.pause();
+    this.applyDeckGain();
     void this.topUpRadio();
     this.tracker.start(t, this.queue ? (this.queueMeta.get(this.queue.id) ?? {}) : {});
     this.position = startS;
@@ -606,6 +880,7 @@ export class Player {
   pause() {
     if (this.remote('pause')) return;
     this.audio?.pause();
+    this.stopFading();
   }
 
   toggle() {
@@ -684,7 +959,7 @@ export class Player {
     s = Math.max(0.25, Math.min(3, Math.round(s * 100) / 100));
     if (this.remote('setSpeed', { speed: s })) return;
     this.speed = s;
-    if (this.audio) this.audio.playbackRate = s;
+    for (const d of this.decks) d.playbackRate = s;
     this.saveLocal();
     this.stateChanged();
   }
@@ -983,6 +1258,7 @@ export class Player {
   private release() {
     if (this.playing) this.tracker.finish(this.position);
     this.audio?.pause();
+    this.stopFading();
     this.remoteState = this.connect?.state ?? this.remoteState;
   }
 

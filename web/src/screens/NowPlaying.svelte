@@ -5,6 +5,7 @@
     Heart,
     Info,
     ListPlus,
+    Moon,
     Pause,
     Play,
     Repeat,
@@ -22,6 +23,7 @@
   import { gesture } from '../lib/gesture';
   import { session } from '../lib/session.svelte';
   import { fmtTime } from '../lib/format';
+  import { sleepLabel } from '../lib/listening';
   import { player } from '../lib/player.svelte';
   import { ui } from '../lib/ui.svelte';
   import Lyrics from './Lyrics.svelte';
@@ -63,7 +65,12 @@
     {#if player.remoteDevice}
       <button class="remote" onclick={() => ui.open({ kind: 'devices' })}><Speaker size={16} /> Playing on {player.remoteDevice.name}</button>
     {:else}<span></span>{/if}
-    <button class="icon-btn" class:on={!!player.remoteDevice} aria-label="Devices" title="Devices" onclick={() => ui.open({ kind: 'devices' })}><Speaker size={24} /></button>
+    <div class="topr">
+      {#if !player.remoteDevice}
+        <button class="icon-btn" class:on={!!player.sleep} aria-label="Sleep timer" title={player.sleep ? `Sleep timer: ${sleepLabel(player.sleep, player.sleepNow)}` : 'Sleep timer'} onclick={() => ui.open({ kind: 'sleep' })}><Moon size={22} /></button>
+      {/if}
+      <button class="icon-btn" class:on={!!player.remoteDevice} aria-label="Devices" title="Devices" onclick={() => ui.open({ kind: 'devices' })}><Speaker size={24} /></button>
+    </div>
   </div>
 
   <div class="body">
@@ -173,6 +180,10 @@
 </div>
 
 <style>
+  .topr {
+    display: flex;
+    align-items: center;
+  }
   .np {
     position: relative;
     height: 100%;

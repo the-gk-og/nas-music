@@ -65,6 +65,7 @@ export type Dialog =
   | { kind: 'addToPlaylist'; tracks: Track[] }
   | { kind: 'addToQueue'; tracks: Track[] }
   | { kind: 'speed' }
+  | { kind: 'sleep' }
   | { kind: 'lyricsEditor'; track: Track; raw: string }
   | { kind: 'devices' }
   | { kind: 'itemMenu'; item: import('./types').ShelfItem }

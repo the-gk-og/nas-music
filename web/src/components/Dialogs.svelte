@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { sleepLabel } from '../lib/listening';
   import {
     ArrowRightLeft,
+    Moon,
     Captions,
     Disc3,
     Gauge,
@@ -163,6 +165,7 @@
     }
   }
   const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  const SLEEP_MINUTES = [5, 10, 15, 30, 45, 60, 90];
 </script>
 
 {#if d?.kind === 'songMenu'}
@@ -176,6 +179,7 @@
       <button onclick={() => { ui.close(); ui.go('now'); ui.lyricsOpen = true; if (player.current?.id !== t.id && d.ctx.list) void player.playList(d.ctx.list, d.ctx.list.indexOf(t), 'Queue'); }}><Captions />Show lyrics</button>
       <button onclick={() => { ui.close(); player.abStep(); ui.toast(player.ab.b == null ? 'A set — tap A-B repeat again to set B' : 'A-B repeat on'); }} disabled={player.current?.id !== t.id}><ArrowRightLeft />A-B repeat{player.ab.a != null ? (player.ab.b != null ? ' (clear)' : ' (set B)') : ''}</button>
       <button onclick={() => ui.open({ kind: 'speed' })}><Gauge />Play speed and pitch</button>
+      <button onclick={() => ui.open({ kind: 'sleep' })}><Moon />Sleep timer{player.sleep ? ` (${sleepLabel(player.sleep, player.sleepNow)})` : ''}</button>
       <hr />
       <button onclick={() => { ui.close(); void player.addToQueue([t], 'next'); }}><ListStart />Play next</button>
       <button onclick={() => ui.open({ kind: 'addToQueue', tracks: [t] })}><ListEnd />Add to a queue</button>
@@ -262,6 +266,25 @@
     </div>
     <div class="foot">
       <button class="btn text" onclick={() => { player.setSpeed(1); player.setPitch(0); }}>Reset</button>
+      <button class="btn text" onclick={() => ui.close()}>Done</button>
+    </div>
+  </Sheet>
+{:else if d?.kind === 'sleep'}
+  <Sheet label="Sleep timer">
+    <div class="pad">
+      <h2>Sleep timer</h2>
+      {#if player.sleep}<p><b>Stops: {sleepLabel(player.sleep, player.sleepNow)}</b>{#if player.sleep.mode === 'minutes'} <span class="muted">(at {new Date(player.sleep.endsAt ?? 0).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})</span>{/if}</p>{/if}
+      <div class="chips">
+        {#each SLEEP_MINUTES as m}<button class="chip" onclick={() => { player.setSleep({ mode: 'minutes', endsAt: Date.now() + m * 60000 }); ui.close(); }}>{m} min</button>{/each}
+      </div>
+      <div class="chips">
+        <button class="chip" class:on={player.sleep?.mode === 'track'} onclick={() => { player.setSleep({ mode: 'track' }); ui.close(); }}>End of this song</button>
+        <button class="chip" class:on={player.sleep?.mode === 'album'} disabled={!player.current} onclick={() => { player.setSleep({ mode: 'album' }); ui.close(); }}>End of this album</button>
+      </div>
+      <p class="muted small">The music fades out over the last few seconds, then pauses. This timer runs on this device only.</p>
+    </div>
+    <div class="foot">
+      <button class="btn text" disabled={!player.sleep} onclick={() => { player.setSleep(null); ui.close(); }}>Turn off</button>
       <button class="btn text" onclick={() => ui.close()}>Done</button>
     </div>
   </Sheet>

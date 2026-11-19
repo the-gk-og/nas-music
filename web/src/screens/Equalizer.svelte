@@ -2,7 +2,49 @@
   import { ArrowLeft, AudioLines, Headphones, Waves } from '@lucide/svelte';
   import { EQ_LABELS, EQ_MAX_DB, PRESET_NAMES, PRESETS, balanceLabel, presetFor, type PreampMode } from '../lib/eq';
   import { player } from '../lib/player.svelte';
+  import { session } from '../lib/session.svelte';
+  import type { AutoEqEntry } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
+
+  // ---- AutoEq headphone correction ----
+  let hpOpen = $state(false);
+  let hpQuery = $state('');
+  let hpResults = $state<AutoEqEntry[]>([]);
+  let hpBusy = $state(false);
+  let hpError = $state<string | null>(null);
+  let hpTimer: ReturnType<typeof setTimeout> | undefined;
+  function hpSearch(q: string) {
+    hpQuery = q;
+    clearTimeout(hpTimer);
+    hpTimer = setTimeout(async () => {
+      if (!q.trim()) {
+        hpResults = [];
+        return;
+      }
+      hpBusy = true;
+      try {
+        hpResults = (await session.api.autoEqSearch(q.trim(), 40)).results;
+        hpError = null;
+      } catch (e) {
+        hpError = (e as Error).message;
+      } finally {
+        hpBusy = false;
+      }
+    }, 250);
+  }
+  async function hpPick(e: AutoEqEntry) {
+    hpBusy = true;
+    try {
+      const p = await session.api.autoEqProfile(e.id);
+      player.setEq({ enabled: true, headphone: { id: p.id, name: p.name, source: p.source, preampDb: p.preampDb, filters: p.filters } });
+      hpOpen = false;
+      ui.toast(`${p.name} correction on`);
+    } catch (err) {
+      ui.toast((err as Error).message);
+    } finally {
+      hpBusy = false;
+    }
+  }
 
   let page = $state<'bands' | 'effects'>('bands');
   const eq = $derived(player.eq);
@@ -99,6 +141,28 @@
         {#each PRESET_NAMES as p}<option value={p} disabled={p === 'Custom'}>{p}</option>{/each}
       </select>
     </div>
+    <div class="hp">
+      <Headphones size={20} />
+      <div class="grow">
+        <div>Headphone correction</div>
+        <div class="muted small">{eq.headphone ? `${eq.headphone.name} · ${eq.headphone.source} · ${eq.headphone.filters.length} filters, ${eq.headphone.preampDb} dB` : 'Off — pick your headphones to flatten their response (AutoEq)'}</div>
+      </div>
+      {#if eq.headphone}<button class="btn text" onclick={() => player.setEq({ headphone: null })}>Remove</button>{/if}
+      <button class="btn text" onclick={() => (hpOpen = !hpOpen)}>{hpOpen ? 'Close' : eq.headphone ? 'Change' : 'Choose'}</button>
+    </div>
+    {#if hpOpen}
+      <div class="hpsearch">
+        <input placeholder="Search headphones, e.g. HD 650" value={hpQuery} oninput={(e) => hpSearch(e.currentTarget.value)} aria-label="Search headphones" />
+        {#if hpError}<p class="muted small">Couldn't reach the AutoEq index: {hpError}</p>{/if}
+        {#if hpBusy}<p class="muted small">Searching…</p>{/if}
+        <ul>
+          {#each hpResults as r (r.id)}
+            <li><button onclick={() => hpPick(r)}><b>{r.name}</b> <span class="muted small">{r.source}{r.rig ? ` on ${r.rig}` : ''} · {r.form}</span></button></li>
+          {/each}
+        </ul>
+        <p class="muted small">Profiles come from the AutoEq project (MIT) and are fetched by your server when you pick one. They apply on this output only, with the EQ switched on.</p>
+      </div>
+    {/if}
     <div class="bands" class:off={!eq.enabled}>
       {#each EQ_LABELS as label, i}
         <div class="band">
@@ -174,6 +238,40 @@
 </div>
 
 <style>
+  .hp {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 4px 12px 8px;
+  }
+  .hp .grow {
+    flex: 1;
+    min-width: 0;
+  }
+  .hpsearch {
+    margin: 0 12px 12px;
+  }
+  .hpsearch input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .hpsearch ul {
+    list-style: none;
+    padding: 0;
+    margin: 6px 0;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .hpsearch li button {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: 0;
+    color: inherit;
+    padding: 8px 4px;
+    border-bottom: 1px solid #333;
+    cursor: pointer;
+  }
   .device {
     display: flex;
     align-items: center;
