@@ -31,9 +31,19 @@ class QueueSync(private val api: () -> NasMusicApi, private val scope: Coroutine
     /** Queue name as shown in the selector ("20. Search: conver"). */
     fun label(q: Queue) = "${q.slot}. ${q.name}"
 
-    fun refresh() = scope.launch { runCatching { api().queues() }.onSuccess { _queues.value = it.sortedBy { q -> q.slot } } }
+    fun refresh() = scope.launch {
+        runCatching { api().queues() }.onSuccess { list ->
+            _queues.value = list.sortedBy { q -> q.slot }
+            list.filter { it.isRadio }.forEach { radioIds += it.id }
+        }
+    }
 
     fun setCurrent(id: String?) { _currentId.value = id }
+
+    /** Radio queues known to this device (from /radio or a queue flagged radio by the server). */
+    private val radioIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    fun markRadio(id: String) { radioIds += id }
+    fun isRadio(id: String?): Boolean = id != null && (id in radioIds || _queues.value.any { it.id == id && it.isRadio })
 
     /** A list was played: create a server queue for it (replaces the oldest unused when 20 exist). */
     fun created(name: String, tracks: List<Track>, startIndex: Int) = scope.launch {

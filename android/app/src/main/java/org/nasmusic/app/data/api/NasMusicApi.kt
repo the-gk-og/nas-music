@@ -215,4 +215,43 @@ interface NasMusicApi {
 
     @POST("admin/users/{id}/reset-password")
     suspend fun resetPassword(@Path("id") id: String, @Body body: NewPassword): Response<Unit>
+    // ---- v3 (docs/v3-ux.md) ----
+    @GET("home")
+    suspend fun home(): ShelfFeed
+
+    @GET("foryou")
+    suspend fun forYou(): ShelfFeed
+
+    @GET("search")
+    suspend fun globalSearch(@Query("q") q: String, @Query("scope") scope: String = "all", @Query("limit") limit: Int = 20): SearchResults
+
+    /** status: want (default) | got | dismissed | all */
+    @GET("toget")
+    suspend fun toGet(@Query("status") status: String = "want"): List<ToGetItem>
+
+    @POST("toget")
+    suspend fun addToGet(@Body body: NewToGet): ToGetItem
+
+    @PATCH("toget/{id}")
+    suspend fun patchToGet(@Path("id") id: String, @Body body: ToGetPatch): ToGetItem
+
+    @DELETE("toget/{id}")
+    suspend fun deleteToGet(@Path("id") id: String): Response<Unit>
+
+    @GET("pins")
+    suspend fun pins(): List<ShelfItem>
+
+    /** Returns all pins after the change. */
+    @POST("pins")
+    suspend fun pin(@Body body: NewPin): List<ShelfItem>
+
+    @DELETE("pins/{type}/{id}")
+    suspend fun unpin(@Path("type") type: String, @Path("id") id: String): Response<Unit>
+
+    @POST("radio")
+    suspend fun startRadio(@Body body: RadioRequest): Queue
+
+    /** Returns the whole queue with the new tracks appended. */
+    @POST("radio/{queueId}/more")
+    suspend fun radioMore(@Path("queueId") queueId: String): kotlinx.serialization.json.JsonObject
 }

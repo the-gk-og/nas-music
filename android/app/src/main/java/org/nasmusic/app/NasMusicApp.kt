@@ -23,6 +23,7 @@ class NasMusicApp : Application(), SingletonImageLoader.Factory {
         container.contextCollector.start()
         container.connect.start()
         container.startServerInfoRefresh()
+        container.startAppearancePush()
         // Streaming is the default; the nightly download only exists while "Offline favourites" is on.
         container.scope.launch {
             container.settings.settings.map { it.offlineFavourites to it.syncHour }.distinctUntilChanged().collect { (on, hour) ->

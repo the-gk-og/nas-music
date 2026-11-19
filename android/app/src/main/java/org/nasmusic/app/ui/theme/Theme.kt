@@ -7,13 +7,13 @@ import androidx.compose.ui.graphics.Color
 
 val Accent = Color(0xFF4ADE80)
 
-/** True-black dark theme with one green accent (docs/v2.md §7). */
-private val Scheme = darkColorScheme(
-    primary = Accent,
+/** True-black dark theme with one accent (green by default; docs/v3-ux.md §1, §7). */
+private fun scheme(accent: Color) = darkColorScheme(
+    primary = accent,
     onPrimary = Color(0xFF00210E),
-    secondary = Accent,
+    secondary = accent,
     onSecondary = Color(0xFF00210E),
-    tertiary = Accent,
+    tertiary = accent,
     background = Color.Black,
     onBackground = Color.White,
     surface = Color.Black,
@@ -29,4 +29,5 @@ private val Scheme = darkColorScheme(
 )
 
 @Composable
-fun NasMusicTheme(content: @Composable () -> Unit) = MaterialTheme(colorScheme = Scheme, content = content)
+fun NasMusicTheme(accent: Color = Accent, content: @Composable () -> Unit) =
+    MaterialTheme(colorScheme = scheme(accent), content = content)

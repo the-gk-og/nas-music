@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -95,6 +96,11 @@ private fun SyncedLyrics(lyrics: Lyrics, positionMs: Long, onSeek: (Long) -> Uni
             val active = i == current
             val instrumental = LyricsTimeline.isInstrumental(line)
             val colors = MaterialTheme.colorScheme
+            // Expressive motion: the active line grows in smoothly (docs/v3-ux.md §1).
+            val motion = org.nasmusic.app.ui.LocalMotion.current
+            val scale by androidx.compose.animation.core.animateFloatAsState(
+                if (active && motion.expressive) 1.06f else 1f, motion.spec(1.5f), label = "lyric",
+            )
             Text(
                 if (instrumental) "♪" else line.text,
                 style = if (active) MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
@@ -107,6 +113,7 @@ private fun SyncedLyrics(lyrics: Lyrics, positionMs: Long, onSeek: (Long) -> Uni
                 },
                 textAlign = TextAlign.Start,
                 modifier = Modifier.fillMaxWidth()
+                    .graphicsLayer { scaleX = scale; scaleY = scale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f) }
                     .clickable(enabled = line.timeMs != null) { line.timeMs?.let(onSeek) }
                     .padding(horizontal = 24.dp, vertical = 10.dp),
             )
