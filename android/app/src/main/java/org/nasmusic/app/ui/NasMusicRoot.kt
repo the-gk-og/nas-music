@@ -127,6 +127,10 @@ private fun MainScaffold(c: AppContainer) {
     val current = entry?.destination?.route
     val snack = remember { SnackbarHostState() }
     LaunchedEffect(ui.toast) { ui.toast?.let { snack.showSnackbar(it); ui.toast = null } }
+    LaunchedEffect(Unit) { c.ui.messages.collect { ui.toast = it } }
+    LaunchedEffect(current) { org.nasmusic.app.diag.CrashLog.currentScreen = current ?: "?" }
+    // Offer a bug report once after a crash.
+    LaunchedEffect(Unit) { if (org.nasmusic.app.diag.CrashLog.hasUnsentCrash()) ui.bugReport = true }
     val conf = LocalConfiguration.current
     val wide = conf.screenWidthDp >= 600
     // Tablet / foldable landscape: Now Playing lives in a side pane (docs/v3-ux.md §6).

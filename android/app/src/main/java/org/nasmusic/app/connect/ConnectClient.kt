@@ -4,11 +4,9 @@ import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -42,9 +40,16 @@ class ConnectClient(
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
-    /** Commands / takeover / release / queue changes for the player to act on. */
-    private val _events = MutableSharedFlow<ConnectMessage>(extraBufferCapacity = 64)
-    val events: SharedFlow<ConnectMessage> = _events.asSharedFlow()
+    /**
+     * Commands / takeover / release / queue changes for the playback service. A buffered channel,
+     * not a SharedFlow: if the service isn't running yet (e.g. another device transfers playback to
+     * this phone while the app is closed) the events wait for it instead of being dropped.
+     */
+    private val _events = kotlinx.coroutines.channels.Channel<ConnectMessage>(64)
+    val events: kotlinx.coroutines.flow.Flow<ConnectMessage> = _events.receiveAsFlow()
+
+    /** Called on takeover so the app can start the playback service (set by the container). */
+    @Volatile var onTakeover: () -> Unit = {}
 
     @Volatile private var socket: WebSocket? = null
     private var loop: Job? = null
@@ -136,9 +141,10 @@ class ConnectClient(
             is ConnectMessage.State -> if (ConnectProtocol.accept(_state.value, m.state)) _state.value = m.state
             is ConnectMessage.Takeover -> {
                 _state.value = m.state.copy(activeDeviceId = _myId.value ?: m.state.activeDeviceId)
-                _events.tryEmit(m)
+                _events.trySend(m)
+                onTakeover()
             }
-            is ConnectMessage.Command, ConnectMessage.Release, is ConnectMessage.QueuesChanged -> _events.tryEmit(m)
+            is ConnectMessage.Command, ConnectMessage.Release, is ConnectMessage.QueuesChanged -> _events.trySend(m)
             else -> Unit
         }
     }
