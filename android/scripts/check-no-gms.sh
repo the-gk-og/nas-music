@@ -15,7 +15,11 @@ unzip -q -o "$apk" 'classes*.dex' AndroidManifest.xml -d "$tmp"
 pattern='Lcom/google/android/gms/|Lcom/google/firebase/|Lcom/google/android/play/core/|Lcom/google/mlkit/'
 hits="$(cat "$tmp"/classes*.dex | grep -aoE "(${pattern})[A-Za-z0-9_/\$]*" | sort -u || true)"
 # The binary manifest stores strings as UTF-16LE; strip NULs to search it.
-mhits="$(tr -d '\000' < "$tmp/AndroidManifest.xml" | grep -aoE 'com\.google\.(android\.gms|firebase)[A-Za-z0-9_.]*' | sort -u || true)"
+# Strings are packed back to back, so cut each match at the known allowed key. Allowed: the
+# `com.google.android.gms.car.application` meta-data NAME — a plain string that Android Auto reads to find
+# media apps; no Google library is linked for it (see AndroidManifest.xml).
+mhits="$(tr -d '\000' < "$tmp/AndroidManifest.xml" | sed 's/com\.google\.android\.gms\.car\.application/\n/g' \
+  | grep -aoE 'com\.google\.(android\.gms|firebase)[A-Za-z0-9_.]*' | sort -u || true)"
 n=$(( $(printf '%s' "$hits" | grep -c . || true) + $(printf '%s' "$mhits" | grep -c . || true) ))
 if (( expect )); then
   if (( n == 0 )); then echo "FAIL: expected Google Play Services code in $apk but found none (is the check broken?)"; exit 1; fi
