@@ -63,7 +63,10 @@ def load(path: str | os.PathLike | None = None) -> Config:
     try:
         raw = tomllib.loads(p.read_text())
     except FileNotFoundError as e:
-        raise ConfigError(f"config file not found: {p} (copy config.example.toml)") from e
+        raise ConfigError(
+            f"config file not found: {p}. Create it (in Docker: /data/config.toml in the data volume; the image "
+            f"ships an example at /opt/nasmusic/config.example.toml), or point NASMUSIC_CONFIG / --config at it."
+        ) from e
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"invalid TOML in {p}: {e}") from e
     return from_dict(raw, source=p)
