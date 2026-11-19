@@ -1,5 +1,6 @@
 package org.nasmusic.app.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -269,6 +270,8 @@ private fun SwipeToRemove(enabled: Boolean, onRemove: () -> Unit, content: @Comp
     androidx.compose.material3.SwipeToDismissBox(
         state = state,
         backgroundContent = {
+            // Only show the remove hint while a swipe is actually in progress; the row on top is transparent.
+            if (state.dismissDirection == androidx.compose.material3.SwipeToDismissBoxValue.Settled) return@SwipeToDismissBox
             Row(
                 Modifier.fillMaxSize().padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
@@ -277,5 +280,8 @@ private fun SwipeToRemove(enabled: Boolean, onRemove: () -> Unit, content: @Comp
                 Icon(Icons.Default.Close, "Remove", tint = MaterialTheme.colorScheme.error)
             }
         },
-    ) { content() }
+    ) {
+        // Opaque background so the hint underneath never bleeds through the row.
+        androidx.compose.foundation.layout.Box(Modifier.background(MaterialTheme.colorScheme.background)) { content() }
+    }
 }
