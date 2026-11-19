@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from nasmusic import catalog
 from nasmusic.app import collections as coll
 from nasmusic.app import discover, suggestions, toget
+from nasmusic.app import playlists as playlists_mod
 from nasmusic.app.context import AppContext, ctx, db, device
 from nasmusic.auth import Device
 from nasmusic.library import art, queries
@@ -105,7 +106,7 @@ def search(q: str = Query(..., min_length=1, max_length=200), scope: Literal["al
     lib = queries.search(conn, uid, q, limit, c.data_dir) if scope != "catalog" else empty
     words = [w.casefold() for w in q.split()]
     match = lambda name: all(w in name.casefold() for w in words)  # noqa: E731
-    playlists = [p for p in coll.list_playlists(conn, uid) if match(p["name"])][:limit] if scope != "catalog" else []
+    playlists = [p for p in playlists_mod.list_playlists(conn, uid) if match(p["name"])][:limit] if scope != "catalog" else []
     queues = [x for x in coll.list_queues(conn, uid) if match(x["name"])][:limit] if scope != "catalog" else []
     cat_items: list[dict] = []
     cat_error = None

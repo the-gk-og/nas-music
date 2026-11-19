@@ -1,7 +1,10 @@
--- nas-music shared schema v4 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v5 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
--- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. Older databases are upgraded by nasmusic.db.migrations.
+-- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
+-- tag_overrides, tag_edits) and collaborative playlists (playlist_members, playlist_activity, playlists.rev;
+-- playlist_tracks rebuilt with entry ids and a fractional REAL position). Older databases are upgraded by
+-- nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -91,7 +94,11 @@ CREATE TABLE IF NOT EXISTS tracks (
     sample_rate     INTEGER,           -- Hz
     bits_per_sample INTEGER,
     channels        INTEGER,
-    folder          TEXT NOT NULL DEFAULT ''   -- relative directory ('' = library root)
+    folder          TEXT NOT NULL DEFAULT '',  -- relative directory ('' = library root)
+    -- v5: the tags as read from the file (JSON). The columns above hold the EFFECTIVE tags: file tags with
+    -- tag_overrides applied, so every reader (search, API, AI) sees admin edits without knowing about them.
+    -- NULL = not read since v5; the server re-reads the file (read-only) when it needs them.
+    file_tags       TEXT
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist_id);
@@ -159,20 +166,48 @@ CREATE INDEX IF NOT EXISTS events_user ON events(user_id, at);
 
 CREATE TABLE IF NOT EXISTS playlists (
     id          TEXT PRIMARY KEY,
-    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,   -- the owner
     name        TEXT NOT NULL,
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    rev         INTEGER NOT NULL DEFAULT 0   -- v5: bumped on every change (live sync / stale-client checks)
 );
 CREATE INDEX IF NOT EXISTS playlists_user ON playlists(user_id);
 
+-- v5: one row per entry (the same track may appear twice). `position` is a fractional index: order by it;
+-- inserting between two entries takes the midpoint, so concurrent edits never renumber other entries.
 CREATE TABLE IF NOT EXISTS playlist_tracks (
+    id          TEXT PRIMARY KEY,          -- entry id (uuid4 hex)
     playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
-    position    INTEGER NOT NULL,
+    position    REAL NOT NULL,
     track_id    TEXT NOT NULL REFERENCES tracks(id),
     added_at    TEXT NOT NULL,
-    PRIMARY KEY (playlist_id, position)
+    added_by    TEXT REFERENCES users(id) ON DELETE SET NULL
 );
+CREATE INDEX IF NOT EXISTS playlist_tracks_order ON playlist_tracks(playlist_id, position);
+CREATE INDEX IF NOT EXISTS playlist_tracks_track ON playlist_tracks(track_id);
+
+-- v5: collaborative playlists. The owner (playlists.user_id) is not listed here.
+CREATE TABLE IF NOT EXISTS playlist_members (
+    playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role        TEXT NOT NULL CHECK (role IN ('editor','viewer')),
+    added_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    added_at    TEXT NOT NULL,
+    PRIMARY KEY (playlist_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS playlist_members_user ON playlist_members(user_id);
+
+CREATE TABLE IF NOT EXISTS playlist_activity (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    user_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+    at          TEXT NOT NULL,
+    action      TEXT NOT NULL,             -- create, rename, add, remove, move, member_add, member_role, member_remove, leave
+    track_id    TEXT,
+    detail      TEXT                       -- JSON
+);
+CREATE INDEX IF NOT EXISTS playlist_activity_pl ON playlist_activity(playlist_id, id);
 
 -- Musicolet-style named queues shared by a user's devices. Max 20 per user.
 CREATE TABLE IF NOT EXISTS queues (
@@ -290,6 +325,37 @@ CREATE TABLE IF NOT EXISTS bug_reports (
     status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed'))
 );
 CREATE INDEX IF NOT EXISTS bug_reports_created ON bug_reports(created_at);
+
+-- ---------- v5: admin tag edits (the library is read-only, so edits live here) ----------
+
+-- One row per overridden field. `value` is JSON (string, integer or null = "clear this tag").
+-- Fields: title, artist, album_artist, album, track_no, disc_no, year, genre, lyrics (raw LRC/plain text)
+-- and cover (sha256 of an uploaded image stored under data_dir/art/uploads/).
+CREATE TABLE IF NOT EXISTS tag_overrides (
+    track_id   TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    field      TEXT NOT NULL CHECK (field IN ('title','artist','album_artist','album','track_no','disc_no',
+                                              'year','genre','lyrics','cover')),
+    value      TEXT NOT NULL,
+    updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (track_id, field)
+);
+CREATE INDEX IF NOT EXISTS tag_overrides_field ON tag_overrides(field);
+
+-- Audit log of tag edits and reverts (one row per track and field).
+CREATE TABLE IF NOT EXISTS tag_edits (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id   TEXT NOT NULL,              -- one admin action (a bulk edit is one batch)
+    track_id   TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    user_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    at         TEXT NOT NULL,
+    action     TEXT NOT NULL CHECK (action IN ('set','revert')),
+    field      TEXT NOT NULL,
+    old_value  TEXT,                       -- JSON, effective value before
+    new_value  TEXT                        -- JSON, effective value after
+);
+CREATE INDEX IF NOT EXISTS tag_edits_track ON tag_edits(track_id, id);
+CREATE INDEX IF NOT EXISTS tag_edits_at ON tag_edits(at);
 
 -- ---------- AI-owned tables ----------
 

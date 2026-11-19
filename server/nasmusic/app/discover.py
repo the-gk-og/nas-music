@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from nasmusic.app import ai_adapter, mixes, suggestions, toget, userdata
+from nasmusic.app import ai_adapter, mixes, playlists, suggestions, toget, userdata
 from nasmusic.app import collections as coll
 from nasmusic.config import Config
 from nasmusic.core import ai_config
@@ -79,11 +79,10 @@ def _artist_item(conn: sqlite3.Connection, data_dir, artist_id: str) -> dict | N
 
 
 def _playlist_item(conn: sqlite3.Connection, data_dir, uid: str, pid: str) -> dict | None:
-    row = conn.execute("SELECT * FROM playlists WHERE id = ? AND user_id = ?", (pid, uid)).fetchone()
-    if row is None:
+    p = playlists.summary_for(conn, uid, pid)
+    if p is None:
         return None
-    p = coll._playlist_summary(conn, row)
-    ids = coll._playlist_ids(conn, pid)
+    ids = playlists._playlist_ids(conn, pid)
     return {"type": "playlist", "id": pid, "title": p["name"], "subtitle": f"{p['trackCount']} songs",
             "artUrl": _art_for_tracks(conn, data_dir, ids), "playlist": p}
 
@@ -378,8 +377,8 @@ def seed_title(conn: sqlite3.Connection, uid: str, seed: dict) -> str:
         r = conn.execute("SELECT name FROM artists WHERE id = ?", (i,)).fetchone()
         title = r and r[0]
     elif t == "playlist":
-        r = conn.execute("SELECT name FROM playlists WHERE id = ? AND user_id = ?", (i, uid)).fetchone()
-        title = r and r[0]
+        p = playlists.summary_for(conn, uid, i)
+        title = p and p["name"]
     else:
         title = None
     if not title:

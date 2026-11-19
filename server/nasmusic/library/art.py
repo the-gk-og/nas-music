@@ -89,6 +89,42 @@ def embedded_state_known(data_dir: Path, album_id: str) -> bool:
     return src_path(data_dir, album_id).exists() or none_marker(data_dir, album_id).exists()
 
 
+UPLOAD_PREFIX = "@upload/"   # albums.art_path for an admin-uploaded cover (data_dir/art/uploads/<sha256>.jpg)
+
+
+def upload_path(data_dir: Path, sha: str) -> Path:
+    return art_dir(data_dir) / "uploads" / f"{sha}.jpg"
+
+
+def store_upload(data_dir: Path, data: bytes) -> str:
+    """Save an uploaded cover (any Pillow-readable image) as JPEG; returns its sha256 (the override value).
+    Raises ValueError if it is not an image."""
+    import hashlib
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            jpeg = _to_jpeg(img, SRC_MAX)
+    except (UnidentifiedImageError, OSError) as e:
+        raise ValueError(f"not an image: {e}") from e
+    sha = hashlib.sha256(jpeg).hexdigest()
+    dest = upload_path(data_dir, sha)
+    if not dest.exists():
+        _atomic_write(dest, jpeg)
+    return sha
+
+
+def source_path(data_dir: Path, library_root: Path, art_path: str | None, album_id: str) -> Path:
+    if art_path and art_path.startswith(UPLOAD_PREFIX):
+        return art_dir(data_dir) / "uploads" / art_path[len(UPLOAD_PREFIX):]
+    return (library_root / art_path) if art_path else src_path(data_dir, album_id)
+
+
+def forget_resized(data_dir: Path, album_id: str) -> None:
+    """Drop cached resized copies (the album's art source changed to an older file)."""
+    for b in SIZE_BUCKETS:
+        (art_dir(data_dir) / str(b) / f"{album_id}.jpg").unlink(missing_ok=True)
+
+
 def has_art(data_dir: Path, art_path: str | None, album_id: str) -> bool:
     return bool(art_path) or src_path(data_dir, album_id).exists()
 
@@ -102,7 +138,7 @@ def bucket(size: int) -> int:
 
 def resized(data_dir: Path, library_root: Path, album_id: str, art_path: str | None, size: int) -> Path | None:
     """Return a cached JPEG of the album art at (bucketed) `size`, creating it if needed."""
-    source = (library_root / art_path) if art_path else src_path(data_dir, album_id)
+    source = source_path(data_dir, library_root, art_path, album_id)
     try:
         src_mtime = source.stat().st_mtime
     except OSError:

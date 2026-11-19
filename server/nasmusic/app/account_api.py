@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from nasmusic import auth
 from nasmusic.app import collections as coll
-from nasmusic.app import suggestions, userdata
+from nasmusic.app import playlists, suggestions, userdata
 from nasmusic.app.context import SESSION_COOKIE, AppContext, admin_device, client_ip, ctx, db, device
 from nasmusic.auth import Device, qr, users
 
@@ -248,7 +248,8 @@ def data_export(me: Device = Depends(device), conn: Conn = Depends(db), c: AppCo
     uid = me.user_id
     doc = userdata.export(
         conn, uid, users.get(conn, uid).as_api(), device_list(conn, c, uid, me.id),
-        [coll.get_playlist(conn, uid, p["id"]) for p in coll.list_playlists(conn, uid)],
+        [playlists.get_playlist(conn, uid, p["id"]) for p in playlists.list_playlists(conn, uid)
+         if p["ownerId"] == uid],
         [coll.get_queue(conn, uid, q["id"]) for q in coll.list_queues(conn, uid)],
         suggestions.list_all(conn, uid),
     )

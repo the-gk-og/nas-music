@@ -102,14 +102,12 @@ def remove_missing(conn: sqlite3.Connection, track_ids: list[str] | None) -> int
     if not ids:
         return 0
     from nasmusic.app import collections as coll
+    from nasmusic.app import playlists
 
     gone = set(ids)
     conn.execute("BEGIN IMMEDIATE")
     try:
-        for (pid,) in conn.execute("SELECT DISTINCT playlist_id FROM playlist_tracks WHERE track_id IN "
-                                   f"({','.join('?' * len(ids))})", ids).fetchall():
-            keep = [t for t in coll._playlist_ids(conn, pid) if t not in gone]
-            coll._write_playlist(conn, pid, keep)
+        playlists.remove_tracks_everywhere(conn, ids)
         for (qid,) in conn.execute("SELECT DISTINCT queue_id FROM queue_tracks WHERE track_id IN "
                                    f"({','.join('?' * len(ids))})", ids).fetchall():
             row = conn.execute("SELECT current_index FROM queues WHERE id = ?", (qid,)).fetchone()
