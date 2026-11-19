@@ -110,7 +110,25 @@ def app(cfg, scanned):
     from nasmusic.app import create_app
     from nasmusic.app.scheduler import Jobs
 
-    return create_app(cfg, jobs=Jobs(cfg))
+    app = create_app(cfg, jobs=Jobs(cfg))
+    offline(app)
+    return app
+
+
+def offline(app):
+    """No test may reach a real third-party service: catalogue + weather fail fast unless a test mocks them."""
+    import httpx
+
+    from nasmusic.app.weather import Weather
+    from nasmusic.catalog import Catalog
+
+    def refuse(request):
+        raise httpx.ConnectError(f"tests are offline: {request.url.host}")
+
+    app.state.ctx.catalog = Catalog(httpx.MockTransport(refuse))
+    app.state.ctx.weather = Weather(httpx.MockTransport(refuse))
+    app.state.ctx.http_transport = httpx.MockTransport(refuse)
+    return app
 
 
 @pytest.fixture
