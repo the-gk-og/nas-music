@@ -82,7 +82,10 @@
       </section>
     {:else}
       <Shelf title={s.title} subtitle={s.subtitle ?? (s.kind === 'because_you_played' ? 'Because you played' : '')}>
-        {#each s.items as it (it.type + it.id)}<Card item={it} siblings={s.items} wide={s.kind === 'mixes'} />{/each}
+        {#snippet action()}
+          {#if s.kind === 'release_radar'}<button class="btn text" onclick={() => ui.go('release-radar')}>See all</button>{/if}
+        {/snippet}
+        {#each s.items as it (it.type + it.id)}<Card item={it} siblings={s.items} wide={s.kind === 'mixes' || s.kind === 'wrapped'} />{/each}
       </Shelf>
     {/if}
   {/each}

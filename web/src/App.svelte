@@ -10,6 +10,9 @@
   import ConnectScreen from './screens/ConnectScreen.svelte';
   import Home from './screens/Home.svelte';
   import ForYou from './screens/ForYou.svelte';
+  import BlendPage from './screens/BlendPage.svelte';
+  import ReleaseRadar from './screens/ReleaseRadar.svelte';
+  import Wrapped from './screens/Wrapped.svelte';
   import Search from './screens/Search.svelte';
   import Library from './screens/Library.svelte';
   import Queues from './screens/Queues.svelte';
@@ -146,6 +149,9 @@
     {:else if n === 'mix'}<TrackListPage kind="mix" param={p} />
     {:else if n === 'playlist'}<PlaylistDetail id={p} />
     {:else if n === 'toget'}<ToGet />
+    {:else if n === 'release-radar'}<ReleaseRadar />
+    {:else if n === 'wrapped'}<Wrapped year={p} />
+    {:else if n === 'blend'}<BlendPage id={p || 'new'} />
     {:else if n === 'settings'}<Settings />
     {:else if n === 'equalizer'}<Equalizer />
     {:else if n === 'account'}<Account />

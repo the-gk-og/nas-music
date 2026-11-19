@@ -314,7 +314,9 @@ export type ItemType =
   | 'toget'
   | 'smart_list'
   | 'genre'
-  | 'folder';
+  | 'folder'
+  | 'blend'
+  | 'wrapped';
 
 export interface RadioSeed {
   type: 'random' | 'track' | 'artist' | 'album' | 'playlist';

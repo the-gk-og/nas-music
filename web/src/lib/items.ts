@@ -40,6 +40,10 @@ export function openItem(it: ShelfItem, siblings?: ShelfItem[]) {
       return ui.go('toget');
     case 'suggestion':
       return ui.go('foryou');
+    case 'blend':
+      return ui.go('blend', it.id);
+    case 'wrapped':
+      return ui.go('wrapped', String(it.wrapped?.year ?? it.id));
   }
 }
 
@@ -63,6 +67,13 @@ export async function playItem(it: ShelfItem) {
         const t = await session.api.genreTracks(it.id);
         return player.playList(t, 0, it.title, { source: 'library', addedFrom: 'genre' });
       }
+      case 'blend': {
+        if (it.id === 'new' || it.blend?.status !== 'joined') return openItem(it);
+        const b = await session.api.blend(it.id);
+        const t = (b.tracks ?? []).map((x) => x.track);
+        if (!t.length) return openItem(it);
+        return player.playList(t, 0, `Blend: ${b.name}`, { source: 'mix', addedFrom: 'blend' });
+      }
       case 'artist':
         return player.startRadio({ type: 'artist', id: it.id }, `${it.title} radio`);
       default:
@@ -84,4 +95,6 @@ export function radioFor(it: ShelfItem) {
     void player.startRadio({ type: it.type, id: it.id }, `${it.title} radio`);
 }
 
-export const isPlayable = (it: ShelfItem) => ['album', 'playlist', 'mix', 'genre', 'artist', 'radio', 'queue', 'track'].includes(it.type);
+export const isPlayable = (it: ShelfItem) =>
+  ['album', 'playlist', 'mix', 'genre', 'artist', 'radio', 'queue', 'track'].includes(it.type) ||
+  (it.type === 'blend' && it.blend?.status === 'joined' && (it.blend.trackCount ?? 0) > 0);
