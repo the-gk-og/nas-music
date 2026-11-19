@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import sqlite3
+import threading
 import unicodedata
 import uuid
 from collections.abc import Iterator
@@ -246,7 +247,34 @@ class Library:
         return x / np.maximum(n, 1e-9)
 
 
+_LIB_CACHE: dict[tuple, Library] = {}
+_LIB_LOCK = threading.Lock()
+
+
 def load_library(conn: sqlite3.Connection, model_version: str) -> Library:
+    """The analysed library, cached in-process between calls (radio, explain, more-like are called often;
+    loading 5,000 embeddings from SQLite each time is the slow part on the i5). Any new analysis, scan
+    change or new database file invalidates it. Callers must treat the result as read-only."""
+    db_file = next((r[2] for r in conn.execute("PRAGMA database_list") if r[1] == "main"), "")
+    f = conn.execute("SELECT COUNT(*), MAX(analysed_at) FROM features WHERE model_version = ?",
+                     (model_version,)).fetchone()
+    t = conn.execute("SELECT COUNT(*), SUM(missing), MAX(mtime), MAX(added_at) FROM tracks").fetchone()
+    key = (db_file, model_version, *f, *t)
+    if not db_file:  # in-memory database: no stable identity
+        return _load_library(conn, model_version)
+    with _LIB_LOCK:
+        hit = _LIB_CACHE.get(key)
+    if hit is not None:
+        return hit
+    lib = _load_library(conn, model_version)
+    with _LIB_LOCK:
+        for k in [k for k in _LIB_CACHE if k[:2] == key[:2]]:
+            del _LIB_CACHE[k]
+        _LIB_CACHE[key] = lib
+    return lib
+
+
+def _load_library(conn: sqlite3.Connection, model_version: str) -> Library:
     rows = conn.execute(
         """
         SELECT t.id, t.artist_id, COALESCE(a.name, ''), t.album_id, t.title, t.duration_s, t.added_at,
