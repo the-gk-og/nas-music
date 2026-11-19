@@ -119,6 +119,11 @@ These sync per user via `/me/settings` (device-local overrides allowed).
   sleep timer, LRCLIB lyrics fallback, AutoEQ headphone profiles, Android Auto.
 - **Smarter**: Release Radar, Wrapped (monthly/yearly), Blend between two users, plain-language mix
   requests (after the hardware upgrade).
+- **Casting to TVs and speakers** (owner asked 2026-11-19): server-side Cast via pychromecast (MIT) for
+  Chromecast/Google TV/Nest, DLNA/UPnP renderers via async-upnp-client, Home Assistant media players —
+  all shown as Connect devices; web player gets a Cast button via the browser Remote Playback API.
+  No Google Cast SDK in the apps. Needs mDNS/SSDP discovery from the container (host network or a
+  discovery helper).
 - **Devices/home**: Wear OS app, Snapcast multi-room (owner has spare PCs/Pis), DLNA/UPnP renderers
   (owner has smart TV/DLNA speakers), Home Assistant integration (owner runs HA), Android widget +
   quick-settings tile.
