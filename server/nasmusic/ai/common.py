@@ -67,6 +67,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "ai.discovery.seed_artists": 15,
     "ai.discovery.preview_candidates": 25,
     "ai.discovery.qobuz_locale": "gb-en",
+    # release radar (weekly, MusicBrainz)
+    "ai.release_radar.window_days": 56,       # releases first released in the last N days
+    "ai.release_radar.lookahead_days": 30,    # ... and announced ones up to N days ahead
+    "ai.release_radar.artists_per_user": 40,
+    "ai.release_radar.max_per_user": 60,
+    "ai.release_radar.batch": 20,             # artists per MusicBrainz search request
+    # blend
+    "ai.blend.size": 50,
 }
 
 

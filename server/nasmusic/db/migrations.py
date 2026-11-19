@@ -279,3 +279,36 @@ def migrate_v3_to_v4(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
         raise
     log.warning("schema v3 -> v4 done")
     return True
+
+
+# ---------- v4 -> v5 (Release Radar, Blend): additive only ----------
+
+V5_TABLES = ("release_radar", "blends", "blend_members", "blend_tracks")
+
+
+def migrate_v4_to_v5(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """New tables only. Returns True if it migrated."""
+    if current_version(conn) != 4:
+        return False
+    if make_backup:
+        dest = backup(conn, "v4-backup")
+        if dest:
+            log.warning("schema v4 -> v5: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 4:
+            conn.execute("ROLLBACK")
+            return False
+        for t in V5_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (5)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v4 -> v5 done")
+    return True

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.4.1
+  version: 0.5.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -15,6 +15,8 @@ info:
     GET /stream and GET /art also accept `?token=<deviceToken>` (for <audio>/<img> in cross-origin clients);
     the server redacts it from its access log.
     v4: lyrics fall back to LRCLIB (source "lrclib"); admin console API under /admin/*; POST /me/bug-report.
+    v5 (discovery phase 2): Release Radar (/release-radar), Wrapped (/wrapped, /admin/wrapped), Blend (/blends);
+    For You returns the shelf kinds release_radar, blends and wrapped, with ShelfItem types blend and wrapped.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
     Times are ISO-8601 UTC strings. IDs are opaque strings.
 servers:
@@ -883,7 +885,10 @@ paths:
     get:
       summary: |
         For You (docs/v3-ux.md §3.2): typed shelves. Kinds: mixes, radio, because_you_played (1–3 shelves),
-        suggestions, to_get. Phase-2 kinds (release_radar, blends, wrapped) are reserved and not returned yet.
+        release_radar (two shelves: id "release_radar" = not owned, catalog items; id "release_radar:library" =
+        in your library, album items; both carry `release`), suggestions, to_get, blends (blend items, invites
+        first; a last item with id "new" and blend.status "new" offers to start one when someone can be invited),
+        wrapped (wrapped items: "Your <year> so far", and last year's in January–March).
         Order and hiding follow settings `foryou.shelves` / `foryou.hidden`. Empty shelves are omitted.
         because_you_played shelves have id "byp:track:<seed track id>" and track items.
       responses:
@@ -1035,6 +1040,147 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
         '404': { description: not a radio queue of yours }
         '503': { description: AI engine without radio support yet }
+  /release-radar:
+    get:
+      summary: |
+        Release Radar: albums, EPs and singles first released in the last ~8 weeks (or announced for the next
+        30 days) by the artists you play most, from MusicBrainz; refreshed weekly (Friday 04:00, job
+        `release_radar`). `notOwned` are catalog items ("mb:rg:<mbid>": cover via catalog/<id>/cover, add to
+        To get with POST /toget {catalogId}); `inLibrary` are albums you own, incl. albums by those artists added
+        to the library in that window. Every item has `release`.
+      responses:
+        '200':
+          description: the radar
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReleaseRadar' } } }
+  /wrapped:
+    get:
+      summary: |
+        Your listening year from your own play/skip events (the year so far for the current year; `final` once
+        it's over). Local time = your `timezone` setting, else the server's. Clients render the story cards and
+        image export themselves.
+      parameters:
+        - { name: year, in: query, schema: { type: integer, minimum: 2000, maximum: 2100 }, description: default the current year }
+      responses:
+        '200':
+          description: stats
+          content: { application/json: { schema: { $ref: '#/components/schemas/Wrapped' } } }
+        '404': { description: year out of range }
+  /wrapped/years:
+    get:
+      summary: Years you have plays in (always includes the current year), newest first.
+      responses:
+        '200':
+          description: years
+          content: { application/json: { schema: { type: array, items: { type: integer } } } }
+  /admin/wrapped:
+    get:
+      summary: Admin only. Server-wide Wrapped (aggregates over all users; no per-user breakdown).
+      parameters:
+        - { name: year, in: query, schema: { type: integer, minimum: 2000, maximum: 2100 } }
+      responses:
+        '200':
+          description: stats
+          content: { application/json: { schema: { $ref: '#/components/schemas/ServerWrapped' } } }
+        '403': { description: not an admin }
+  /blends:
+    get:
+      summary: Blends you're in or invited to (invites first).
+      responses:
+        '200':
+          description: blends (without tracks)
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Blend' } } } }
+    post:
+      summary: |
+        Start a blend and invite existing users by username. You join at once; each invitee must accept before
+        any of their listening is used. 404 unknown/disabled user, 403 user turned invites off
+        (setting `blends.allowInvites` = false), 409 someone is in 20 blends already, 422 yourself / > 8 people.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usernames]
+              properties:
+                name: { type: [string, 'null'], maxLength: 80, description: 'default "alice + bob"' }
+                usernames: { type: array, minItems: 1, maxItems: 7, items: { type: string } }
+      responses:
+        '201':
+          description: created
+          content: { application/json: { schema: { $ref: '#/components/schemas/Blend' } } }
+  /blends/candidates:
+    get:
+      summary: Other users you can invite (enabled, accepting invites).
+      responses:
+        '200':
+          description: users
+          content: { application/json: { schema: { type: array, items: { type: object, required: [userId, username], properties: { userId: { type: string }, username: { type: string } } } } } }
+  /blends/{blendId}:
+    parameters:
+      - { name: blendId, in: path, required: true, schema: { type: string } }
+    get:
+      summary: |
+        One blend. Members see `tracks` (rebuilt nightly and whenever someone joins or leaves); invitees see the
+        name and members only. 404 if you're not a member or invitee.
+      responses:
+        '200':
+          description: blend
+          content: { application/json: { schema: { $ref: '#/components/schemas/Blend' } } }
+        '404': { description: not found }
+    patch:
+      summary: Rename (joined members).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string, minLength: 1, maxLength: 80 } } } } }
+      responses:
+        '200':
+          description: blend
+          content: { application/json: { schema: { $ref: '#/components/schemas/Blend' } } }
+  /blends/{blendId}/invite:
+    post:
+      summary: Invite more people (joined members). Someone who left or declined is asked again.
+      parameters:
+        - { name: blendId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [usernames], properties: { usernames: { type: array, items: { type: string } } } } } }
+      responses:
+        '200':
+          description: blend
+          content: { application/json: { schema: { $ref: '#/components/schemas/Blend' } } }
+  /blends/{blendId}/accept:
+    post:
+      summary: Accept an invite (consent to your listening being used in this blend). The blend is rebuilt at once.
+      parameters:
+        - { name: blendId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: blend with tracks
+          content: { application/json: { schema: { $ref: '#/components/schemas/Blend' } } }
+        '404': { description: no pending invite }
+  /blends/{blendId}/decline:
+    post:
+      summary: Decline an invite.
+      parameters:
+        - { name: blendId, in: path, required: true, schema: { type: string } }
+      responses: { '204': { description: declined }, '404': { description: no pending invite } }
+  /blends/{blendId}/leave:
+    post:
+      summary: |
+        Leave (or withdraw from) a blend at any time. Your tracks and attribution are removed immediately; the blend
+        is deleted when nobody is left.
+      parameters:
+        - { name: blendId, in: path, required: true, schema: { type: string } }
+      responses: { '204': { description: left }, '404': { description: not a member } }
+  /blends/{blendId}/refresh:
+    post:
+      summary: Rebuild now (joined members).
+      parameters:
+        - { name: blendId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: blend
+          content: { application/json: { schema: { $ref: '#/components/schemas/Blend' } } }
   /me/bug-report:
     post:
       summary: |
@@ -1092,7 +1238,7 @@ paths:
     post:
       summary: Admin only. Start a job now (background). `backup` makes a manual database backup.
       parameters:
-        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, nightly, pretranscode, discovery, lyrics, cleanup, backup] } }
+        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, nightly, pretranscode, discovery, release_radar, blends, lyrics, cleanup, backup] } }
       responses:
         '200':
           description: the job's status (state running, or idle if it already finished)
@@ -1542,7 +1688,7 @@ components:
         `artUrl` is RELATIVE TO THE API BASE (/api/v1/), e.g. "art/<albumId>" or "catalog/<id>/cover"; null = no art.
       required: [type, id, title]
       properties:
-        type: { type: string, enum: [track, album, artist, playlist, mix, radio, queue, device, catalog, suggestion, toget, smart_list, genre, folder] }
+        type: { type: string, enum: [track, album, artist, playlist, mix, radio, queue, device, catalog, suggestion, toget, smart_list, genre, folder, blend, wrapped] }
         id: { type: string }
         title: { type: string }
         subtitle: { type: [string, 'null'] }
@@ -1574,6 +1720,149 @@ components:
         suggestion: { $ref: '#/components/schemas/Suggestion' }
         toget: { $ref: '#/components/schemas/ToGetItem' }
         playedAt: { type: [string, 'null'], format: date-time }
+        release: { $ref: '#/components/schemas/ReleaseInfo' }
+        addedAt: { type: [string, 'null'], description: 'release_radar:library — when the album was added' }
+        blend:
+          type: object
+          description: blends shelf — status "new" = the "Start a blend" card
+          properties:
+            status: { type: string, enum: [joined, invited, new] }
+            matchPct: { type: [integer, 'null'] }
+            trackCount: { type: integer }
+            members: { type: array, items: { type: string }, description: usernames }
+        wrapped:
+          type: object
+          properties:
+            year: { type: integer }
+            final: { type: boolean }
+    ReleaseInfo:
+      type: object
+      properties:
+        date: { type: [string, 'null'], description: 'YYYY[-MM[-DD]] first release date' }
+        type: { type: [string, 'null'], description: Album, EP, Single }
+        upcoming: { type: boolean, description: announced, not out yet }
+        artist: { type: [string, 'null'] }
+    ReleaseRadar:
+      type: object
+      required: [inLibrary, notOwned]
+      properties:
+        updatedAt: { type: [string, 'null'], description: last weekly refresh; null = never ran }
+        windowDays: { type: integer }
+        inLibrary: { type: array, items: { $ref: '#/components/schemas/ShelfItem' }, description: album items }
+        notOwned: { type: array, items: { $ref: '#/components/schemas/ShelfItem' }, description: catalog items }
+    WrappedCount:
+      type: object
+      properties:
+        plays: { type: integer }
+        minutes: { type: number }
+    WrappedArtist:
+      allOf:
+        - $ref: '#/components/schemas/WrappedCount'
+        - type: object
+          properties:
+            artist: { $ref: '#/components/schemas/Artist' }
+            artUrl: { type: [string, 'null'] }
+    WrappedStatsBase:
+      type: object
+      required: [year, final, totals, topTracks, topArtists, topAlbums, topGenres, byHour, byWeekday, byMonth]
+      properties:
+        year: { type: integer }
+        final: { type: boolean, description: the year is over }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time, description: end of the year, or now while it's running }
+        timezone: { type: string }
+        totals:
+          type: object
+          properties:
+            minutes: { type: integer }
+            plays: { type: integer }
+            skips: { type: integer }
+            tracks: { type: integer, description: distinct tracks played }
+            artists: { type: integer }
+            albums: { type: integer }
+            days: { type: integer, description: days with at least one play }
+        topTracks: { type: array, items: { allOf: [ { $ref: '#/components/schemas/WrappedCount' }, { type: object, properties: { track: { $ref: '#/components/schemas/Track' } } } ] } }
+        topArtists: { type: array, items: { $ref: '#/components/schemas/WrappedArtist' }, description: by minutes }
+        topAlbums: { type: array, items: { allOf: [ { $ref: '#/components/schemas/WrappedCount' }, { type: object, properties: { album: { $ref: '#/components/schemas/Album' } } } ] } }
+        topGenres: { type: array, items: { type: object, properties: { name: { type: string }, minutes: { type: number }, share: { type: number, description: 0..1 } } } }
+        byHour: { type: array, items: { type: number }, description: 24 values, minutes per local hour }
+        byWeekday: { type: array, items: { type: number }, description: '7 values, Monday first' }
+        byMonth: { type: array, items: { type: number }, description: 12 values }
+        peakHour: { type: [integer, 'null'] }
+        peakWeekday: { type: [integer, 'null'], description: 0 = Monday }
+        topDay: { oneOf: [ { type: object, properties: { date: { type: string, format: date }, minutes: { type: integer } } }, { type: 'null' } ] }
+        aura: { oneOf: [ { $ref: '#/components/schemas/AudioAura' }, { type: 'null' } ], description: null until tracks are analysed }
+    Wrapped:
+      allOf:
+        - $ref: '#/components/schemas/WrappedStatsBase'
+        - type: object
+          properties:
+            streaks:
+              type: object
+              properties:
+                longest: { type: integer, description: consecutive local days with plays }
+                longestFrom: { type: [string, 'null'], format: date }
+                longestTo: { type: [string, 'null'], format: date }
+                current: { type: integer, description: counting back from today (or yesterday); 0 for a past year }
+            discoveries:
+              type: object
+              description: artists / tracks you first played in this period
+              properties:
+                artists: { type: integer }
+                tracks: { type: integer }
+                share: { type: number, description: share of minutes spent on newly discovered artists }
+                topArtists: { type: array, items: { $ref: '#/components/schemas/WrappedArtist' } }
+            firstPlay: { oneOf: [ { type: object, properties: { track: { $ref: '#/components/schemas/Track' }, at: { type: string, format: date-time } } }, { type: 'null' } ] }
+    ServerWrapped:
+      allOf:
+        - $ref: '#/components/schemas/WrappedStatsBase'
+        - type: object
+          properties:
+            listeners: { type: integer, description: users with at least one play }
+            users: { type: integer, description: enabled accounts }
+    AudioAura:
+      type: object
+      description: Minutes-weighted average of the Essentia features of what you played.
+      properties:
+        label: { type: string, description: 'Electric, Fierce, Charged, Sunlit, Midnight, Drift, Golden, Velvet, Balanced' }
+        description: { type: string }
+        energy: { type: number }
+        danceability: { type: [number, 'null'] }
+        valence: { type: [number, 'null'], description: happy − sad, −1..1; null without mood models }
+        bpm: { type: [integer, 'null'] }
+        moods: { type: array, items: { type: object, properties: { name: { type: string, enum: [happy, sad, relaxed, aggressive, party] }, score: { type: number } } } }
+        colors: { type: array, items: { type: string }, minItems: 2, maxItems: 2, description: '"#rrggbb" gradient' }
+    BlendMember:
+      type: object
+      properties:
+        userId: { type: string }
+        username: { type: string }
+        status: { type: string, enum: [joined, invited] }
+        joinedAt: { type: [string, 'null'] }
+    Blend:
+      type: object
+      required: [id, name, members, myStatus]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        createdBy: { type: object, properties: { userId: { type: string }, username: { type: string } } }
+        myStatus: { type: string, enum: [joined, invited] }
+        invitedBy: { type: [string, 'null'], description: username, for an invite }
+        members: { type: array, items: { $ref: '#/components/schemas/BlendMember' } }
+        matchPct: { type: [integer, 'null'], description: 'taste match 0–100 of the joined members (mean of pairs); members only' }
+        pairs: { type: array, items: { type: object, properties: { a: { type: string }, b: { type: string }, aName: { type: string }, bName: { type: string }, pct: { type: [integer, 'null'] } } } }
+        trackCount: { type: integer }
+        createdAt: { type: string }
+        updatedAt: { type: string, description: last rebuild }
+        tracks:
+          type: array
+          description: members only (empty for invitees and in lists)
+          items:
+            type: object
+            properties:
+              track: { $ref: '#/components/schemas/Track' }
+              forUsers: { type: array, items: { type: string }, description: 'user ids whose taste put it here (first = main); render "because Alex plays…"' }
+              reason: { type: string, enum: [shared, top, match], description: "shared = two or more members love it; top = one member's favourite; match = theirs, likely to suit the others" }
     PinType:
       type: string
       enum: [album, artist, playlist, mix, queue, smart_list, genre, folder]

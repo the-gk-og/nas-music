@@ -216,3 +216,71 @@ def because_you_played(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, li
     except Exception:
         log.exception("because_you_played failed for user %s", user_id)
         return []
+
+
+# ---------------------------------------------------------------- discovery phase 2: Release Radar, Wrapped, Blend
+
+def run_weekly_release_radar(conn: sqlite3.Connection, cfg: AIConfig) -> dict[str, int]:
+    """Refresh every active user's Release Radar from MusicBrainz (≤ 1 request/s, batched by artist).
+    Returns {user_id: releases}. Never raises; on network failure the previous week's cache is kept."""
+    from . import release_radar
+    from .common import ensure_default_settings
+
+    try:
+        ensure_default_settings(conn)
+        return release_radar.run(conn, cfg)
+    except Exception:
+        log.exception("release radar failed")
+        return {}
+
+
+def release_radar(conn: sqlite3.Connection, cfg: AIConfig, user_id: str) -> dict:
+    """{updatedAt, windowDays, lookaheadDays, releases: [{mbid, title, artist, artistMbid, artistId, type, date,
+    coverUrl, score, upcoming}], recentlyAdded: [{albumId, artistId, addedAt}]}. Cheap (SQL only).
+    Ownership of `releases` is for the caller to decide."""
+    from . import release_radar as rr
+
+    return rr.for_user(conn, user_id)
+
+
+def wrapped(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, year: int) -> dict:
+    """The user's listening year (so far, for the current year) from their own events. Track / artist / album
+    entries are ids with plays and minutes; see nasmusic/ai/wrapped.py for the definitions."""
+    from . import wrapped as w
+
+    return w.user_wrapped(conn, user_id, year, w.user_timezone(conn, user_id, cfg.timezone))
+
+
+def wrapped_server(conn: sqlite3.Connection, cfg: AIConfig, year: int) -> dict:
+    """Server-wide aggregates for admins (no per-user breakdown)."""
+    from . import wrapped as w
+
+    return w.server_wrapped(conn, year, cfg.timezone)
+
+
+def wrapped_years(conn: sqlite3.Connection, cfg: AIConfig, user_id: str | None) -> list[int]:
+    """Years with plays (all users when user_id is None), newest first."""
+    from . import wrapped as w
+
+    return w.years(conn, user_id)
+
+
+def build_blend(conn: sqlite3.Connection, cfg: AIConfig, blend_id: str) -> int:
+    """Rebuild one blend's tracks and taste match from its joined members (fewer than 2 empties it).
+    Returns the number of tracks. Raises KeyError for an unknown blend. Fast enough to call on join/leave."""
+    from . import blend
+    from .common import load_settings
+
+    return blend.build(conn, cfg, blend_id, size=max(10, min(load_settings(conn).int("ai.blend.size"), 200)))
+
+
+def run_blends(conn: sqlite3.Connection, cfg: AIConfig) -> dict[str, int]:
+    """Nightly refresh of every blend. Never raises. Returns {blend_id: tracks}."""
+    from . import blend
+    from .common import load_settings
+
+    try:
+        return blend.build_all(conn, cfg, max(10, min(load_settings(conn).int("ai.blend.size"), 200)))
+    except Exception:
+        log.exception("blend refresh failed")
+        return {}

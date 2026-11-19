@@ -88,3 +88,34 @@ def because_you_played(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, li
         return []
     res = fn(conn, cfg, user_id, limit)
     return [r for r in (res or []) if isinstance(r, dict) and isinstance(r.get("track_ids"), list)][:limit]
+
+
+# ---------- discovery phase 2: Release Radar, Wrapped, Blend ----------
+
+
+def run_weekly_release_radar(conn: sqlite3.Connection, cfg: AIConfig) -> dict[str, int]:
+    return dict(_call("run_weekly_release_radar", conn, cfg) or {})
+
+
+def release_radar(conn: sqlite3.Connection, cfg: AIConfig, user_id: str) -> dict:
+    return _call("release_radar", conn, cfg, user_id)
+
+
+def wrapped(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, year: int) -> dict:
+    return _call("wrapped", conn, cfg, user_id, year)
+
+
+def wrapped_server(conn: sqlite3.Connection, cfg: AIConfig, year: int) -> dict:
+    return _call("wrapped_server", conn, cfg, year)
+
+
+def wrapped_years(conn: sqlite3.Connection, cfg: AIConfig, user_id: str | None) -> list[int]:
+    return list(_call("wrapped_years", conn, cfg, user_id) or [])
+
+
+def build_blend(conn: sqlite3.Connection, cfg: AIConfig, blend_id: str) -> int:
+    return int(_call("build_blend", conn, cfg, blend_id) or 0)
+
+
+def run_blends(conn: sqlite3.Connection, cfg: AIConfig) -> dict[str, int]:
+    return dict(_call("run_blends", conn, cfg) or {})
