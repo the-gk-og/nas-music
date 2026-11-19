@@ -7,7 +7,7 @@
   import type { Lyrics, LyricsSource, Track } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
 
-  let { track }: { track: Track } = $props();
+  let { track, embedded = false, big = false }: { track: Track; embedded?: boolean; big?: boolean } = $props();
 
   let lyrics = $state<Lyrics | null>(null);
   let missing = $state(false);
@@ -86,7 +86,7 @@
   });
 </script>
 
-<div class="lyrics" style:--size={ui.lyricsSize}>
+<div class="lyrics" class:embedded class:big style:--size={ui.lyricsSize * (big ? 1.45 : 1)}>
   <div class="head">
     <div class="src">
       <button class="srcbtn" onclick={() => (srcOpen = !srcOpen)}>
@@ -105,7 +105,7 @@
     </div>
     <button class="icon-btn" aria-label="Edit lyrics" onclick={edit}><Pencil size={20} /></button>
     <button class="icon-btn" aria-label="Text size" onclick={() => (ui.lyricsSize = ui.lyricsSize >= 1.5 ? 0.8 : +(ui.lyricsSize + 0.175).toFixed(3))}><Type size={20} /></button>
-    <button class="icon-btn" aria-label="Close lyrics" onclick={() => (ui.lyricsOpen = false)}><X size={22} /></button>
+    {#if !embedded}<button class="icon-btn" aria-label="Close lyrics" onclick={() => (ui.lyricsOpen = false)}><X size={22} /></button>{/if}
   </div>
 
   <div
@@ -227,5 +227,18 @@
   }
   .pad {
     height: 30%;
+  }
+  .embedded {
+    max-height: none;
+  }
+  /* Expressive motion: the active line grows in. */
+  :global([data-motion='expressive']) .synced {
+    transition:
+      color 0.3s,
+      transform 0.35s;
+    transform-origin: left center;
+  }
+  :global([data-motion='expressive']) .synced.active {
+    transform: scale(1.06);
   }
 </style>

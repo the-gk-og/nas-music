@@ -6,7 +6,11 @@
   import type { FolderListing } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
 
-  let { path = '' }: { path?: string } = $props();
+  let { path: initial = '', embedded = false }: { path?: string; embedded?: boolean } = $props();
+  // Embedded in Library: browse in place; standalone: follow the route.
+  let local = $state<string | null>(null);
+  const path = $derived(embedded ? (local ?? '') : initial);
+  const go = (p: string) => (embedded ? (local = p) : ui.go('folders', p));
   let listing = $state<FolderListing | null>(null);
   let error = $state<string | null>(null);
   $effect(() => {
@@ -18,11 +22,11 @@
 
 <div class="page">
   <div class="topbar">
-    {#if path}<button class="icon-btn" aria-label="Up" onclick={() => ui.go('folders', listing?.parent ?? path.split('/').slice(0, -1).join('/'))}><ArrowLeft size={24} /></button>{/if}
+    {#if path}<button class="icon-btn" aria-label="Up" onclick={() => go(listing?.parent ?? path.split('/').slice(0, -1).join('/'))}><ArrowLeft size={24} /></button>{/if}
     <div class="crumbs ellipsis">
-      <button onclick={() => ui.go('folders')}>Music</button>
+      <button onclick={() => go('')}>Music</button>
       {#each crumbs as c, i}
-        › <button onclick={() => ui.go('folders', crumbs.slice(0, i + 1).join('/'))}>{c}</button>
+        › <button onclick={() => go(crumbs.slice(0, i + 1).join('/'))}>{c}</button>
       {/each}
     </div>
     {#if listing?.tracks.length}
@@ -33,7 +37,7 @@
   {:else if !listing}<div class="empty">Loading…</div>
   {:else}
     {#each listing.folders as f (f.path)}
-      <button class="row-item" onclick={() => ui.go('folders', f.path)}>
+      <button class="row-item" onclick={() => go(f.path)}>
         <Folder size={26} fill="currentColor" />
         <div class="ellipsis"><div class="ellipsis">{f.name}</div><div class="sub">{f.trackCount} songs</div></div>
       </button>

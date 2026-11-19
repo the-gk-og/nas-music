@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { ArrowLeft } from '@lucide/svelte';
+  import { ArrowDown, ArrowLeft, ArrowUp } from '@lucide/svelte';
+  import { appearance } from '../lib/appearance.svelte';
+  import { ACCENTS, HOME_SHELVES, HOME_SHELF_TITLES, moveInList, type Motion } from '../lib/v3';
   import { WEB_SIGNALS, type SignalKey } from '../lib/events';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
@@ -16,6 +18,18 @@
 
   // Every context signal (also the Android-only ones), for "Erase collected context".
   const ALL_SIGNALS = ['listening', 'output', 'device', 'motion', 'location', 'weather', 'search', 'time', 'health'];
+
+  const shelfOrder = $derived([
+    ...appearance.prefs.homeShelves.order.filter((x) => (HOME_SHELVES as readonly string[]).includes(x)),
+    ...HOME_SHELVES.filter((x) => !appearance.prefs.homeShelves.order.includes(x)),
+  ]);
+  function moveShelf(i: number, d: number) {
+    void appearance.set('homeShelves', { ...appearance.prefs.homeShelves, order: moveInList(shelfOrder, i, i + d) });
+  }
+  function toggleShelf(id: string, on: boolean) {
+    const hidden = appearance.prefs.homeShelves.hidden.filter((x) => x !== id);
+    void appearance.set('homeShelves', { order: shelfOrder, hidden: on ? hidden : [...hidden, id] });
+  }
 
   const allOn = $derived(WEB_SIGNALS.every((s) => player.signals[s.key]));
 
@@ -68,6 +82,58 @@
     <div class="muted small">Server: {session.isMock ? 'built-in demo (mock)' : session.saved.origin || location.origin} · signed in as {session.saved.username}</div>
   </div>
 
+  <div class="section-title">Appearance</div>
+  <div class="pad form">
+    <div class="opt">
+      <div><div>Animations</div><div class="muted small">{appearance.reducedMotion ? 'Your system asks for reduced motion, so animations are off.' : 'Off is instant; Quick keeps transitions under 200 ms; Expressive adds parallax and animated lyrics.'}</div></div>
+      <div class="seg" role="radiogroup" aria-label="Animations">
+        {#each [['off', 'Off'], ['quick', 'Quick'], ['expressive', 'Expressive']] as [k, label]}
+          <button role="radio" aria-checked={appearance.prefs.animations === k} class:on={appearance.prefs.animations === k} onclick={() => appearance.set('animations', k as Motion)}>{label}</button>
+        {/each}
+      </div>
+    </div>
+    <div class="opt">
+      <div>Default view</div>
+      <div class="seg">
+        {#each [['grid', 'Grid'], ['list', 'List']] as [k, label]}
+          <button class:on={appearance.prefs.defaultView === k} onclick={() => appearance.set('defaultView', k as 'grid' | 'list')}>{label}</button>
+        {/each}
+      </div>
+    </div>
+    <div class="opt">
+      <div>Album page style</div>
+      <div class="seg">
+        {#each [['big', 'Big header'], ['simple', 'Simple list']] as [k, label]}
+          <button class:on={appearance.prefs.albumStyle === k} onclick={() => appearance.set('albumStyle', k as 'big' | 'simple')}>{label}</button>
+        {/each}
+      </div>
+    </div>
+    <div class="opt">
+      <div>Accent colour</div>
+      <div class="swatches">
+        {#each Object.entries(ACCENTS) as [name, c]}
+          <button class="sw" class:on={appearance.prefs.accent.toLowerCase() === name} style:background={c} aria-label={name} title={name[0].toUpperCase() + name.slice(1)} onclick={() => appearance.set('accent', name)}></button>
+        {/each}
+      </div>
+    </div>
+    <div>
+      <div>Home shelves</div>
+      <div class="muted small">Order and visibility. Empty shelves hide themselves.</div>
+      {#each shelfOrder as id, i (id)}
+        <div class="shelfrow">
+          <input type="checkbox" class="switch" aria-label="Show {HOME_SHELF_TITLES[id]}" checked={!appearance.prefs.homeShelves.hidden.includes(id)} onchange={(e) => toggleShelf(id, e.currentTarget.checked)} />
+          <span class="grow">{HOME_SHELF_TITLES[id]}</span>
+          <button class="icon-btn" aria-label="Move up" disabled={i === 0} onclick={() => moveShelf(i, -1)}><ArrowUp size={18} /></button>
+          <button class="icon-btn" aria-label="Move down" disabled={i === shelfOrder.length - 1} onclick={() => moveShelf(i, 1)}><ArrowDown size={18} /></button>
+        </div>
+      {/each}
+    </div>
+    <label class="sig inline">
+      <div><div>Only on this device</div><div class="muted small">Keep these appearance settings here instead of syncing them to your other devices.</div></div>
+      <input type="checkbox" class="switch" checked={appearance.localOnly} onchange={(e) => appearance.setLocalOnly(e.currentTarget.checked)} />
+    </label>
+  </div>
+
   <div class="section-title">Data &amp; recommendations</div>
   <p class="pad muted small">
     Plays, skips, favourites and ratings are always sent to your server. The signals below are off until you switch them on.
@@ -116,6 +182,55 @@
     padding: 12px 18px;
     border-bottom: 1px solid var(--line);
     cursor: pointer;
+  }
+  .opt {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .seg {
+    display: flex;
+    border: 1px solid #444;
+    border-radius: 999px;
+    overflow: hidden;
+    flex: none;
+  }
+  .seg button {
+    padding: 7px 14px;
+    color: var(--fg-2);
+  }
+  .seg button.on {
+    background: #fff;
+    color: #000;
+  }
+  .swatches {
+    display: flex;
+    gap: 8px;
+  }
+  .sw {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+  }
+  .sw.on {
+    border-color: #fff;
+    box-shadow: 0 0 0 2px #000 inset;
+  }
+  .shelfrow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 0;
+  }
+  .grow {
+    flex: 1;
+  }
+  .sig.inline {
+    padding: 8px 0;
+    border: 0;
   }
   .btns {
     display: flex;

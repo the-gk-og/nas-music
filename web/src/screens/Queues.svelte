@@ -6,6 +6,7 @@
   import { queueLabel, totalDurationS, type SortKey } from '../lib/queue';
   import { ui } from '../lib/ui.svelte';
 
+  let { compact = false }: { compact?: boolean } = $props();
   const q = $derived(player.viewQueue);
   const isPlaying = $derived(!!q && q.id === player.queue?.id);
   let pickerOpen = $state(false);
@@ -92,13 +93,13 @@
   const position = $derived(q && q.tracks.length ? `${q.index + 1} / ${q.tracks.length}` : '0 / 0');
 </script>
 
-<div class="page">
+<div class="page" class:compact>
   <div class="head">
     <div class="sel-row">
       <button class="selector" onclick={() => (pickerOpen = !pickerOpen)} aria-expanded={pickerOpen}>
         <span class="ellipsis">{q ? queueLabel(q) : 'No queue'}</span><ChevronDown size={22} />
       </button>
-      <button class="icon-btn" aria-label="Close queue view" onclick={() => ui.go('now')}><X size={26} /></button>
+      {#if !compact}<button class="icon-btn" aria-label="Open Now Playing" onclick={() => ui.go('now')}><X size={26} /></button>{/if}
     </div>
     {#if pickerOpen}
       <div class="picker" role="listbox">
@@ -300,5 +301,15 @@
   }
   .dragging {
     user-select: none;
+  }
+  .compact .selector {
+    font-size: 1rem;
+    padding: 8px 12px;
+  }
+  .compact :global(.thumb) {
+    width: 48px;
+  }
+  .compact :global(.title) {
+    font-size: 0.98rem;
   }
 </style>

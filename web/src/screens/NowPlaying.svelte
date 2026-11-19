@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    ChevronDown,
     Ellipsis,
     Heart,
     Info,
@@ -17,7 +18,9 @@
     VolumeX,
   } from '@lucide/svelte';
   import Cover from '../components/Cover.svelte';
-  import { dominantColor, tint } from '../lib/color';
+  import { appearance, withTransition } from '../lib/appearance.svelte';
+  import { gesture } from '../lib/gesture';
+  import { session } from '../lib/session.svelte';
   import { fmtTime } from '../lib/format';
   import { player } from '../lib/player.svelte';
   import { ui } from '../lib/ui.svelte';
@@ -25,14 +28,27 @@
 
   const s = $derived(player.shown);
   const t = $derived(s.track);
-  let bg = $state('rgb(30,30,30)');
+  let bg = $state<string | null>(null);
   let dragging = $state<number | null>(null);
   let volOpen = $state(false);
 
-  async function onCover(src: string) {
-    const c = await dominantColor(src);
-    if (c) bg = tint(c);
-  }
+  // Blurred, darkened cover as the background (§1: the one exception to true black).
+  $effect(() => {
+    const id = t?.albumId;
+    if (!id) return void (bg = null);
+    let live = true;
+    session.api.artSrc(id, 256).then((u) => live && (bg = u)).catch(() => {});
+    return () => (live = false);
+  });
+
+  const wide = $derived(appearance.form === 'desktop');
+  const minimise = () => withTransition(() => (history.length > 1 ? history.back() : ui.go('home')));
+  const upNext = $derived.by(() => {
+    if (player.isRemote) return null;
+    const q = player.queue;
+    if (!q || q.index + 1 >= q.tracks.length) return null;
+    return q.tracks[q.order?.length ? (q.order[q.order.indexOf(q.index) + 1] ?? q.index + 1) : q.index + 1] ?? null;
+  });
 
   const pos = $derived(dragging ?? s.position);
   const pct = $derived(s.duration ? (pos / s.duration) * 100 : 0);
@@ -40,23 +56,40 @@
   const abB = $derived(player.ab.b != null && s.duration ? (player.ab.b / s.duration) * 100 : null);
 </script>
 
-<div class="np" style:--tint={bg}>
+<div class="np" class:wide>
+  <div class="bg" aria-hidden="true">{#if bg}<img src={bg} alt="" />{/if}</div>
   <div class="top">
+    <button class="icon-btn" aria-label="Minimise" title="Minimise" onclick={minimise}><ChevronDown size={28} /></button>
     {#if player.remoteDevice}
       <button class="remote" onclick={() => ui.open({ kind: 'devices' })}><Speaker size={16} /> Playing on {player.remoteDevice.name}</button>
     {:else}<span></span>{/if}
     <button class="icon-btn" class:on={!!player.remoteDevice} aria-label="Devices" title="Devices" onclick={() => ui.open({ kind: 'devices' })}><Speaker size={24} /></button>
   </div>
 
+  <div class="body">
   <div class="stage">
-    {#if ui.lyricsOpen && t}
+    {#if ui.lyricsOpen && t && !wide}
       <Lyrics track={t} />
     {:else}
-      <button class="art" aria-label="Show lyrics" title="Tap for lyrics" onclick={() => (ui.lyricsOpen = true)} disabled={!t}>
-        {#if t}<Cover albumId={t.albumId} size={768} rounded={2} onsrc={onCover} />{:else}<div class="noart"></div>{/if}
-      </button>
+      <div
+        class="art"
+        role="button"
+        tabindex="0"
+        aria-label="Cover: tap for lyrics, swipe for next or previous, long-press for the song menu"
+        style:view-transition-name="np-cover"
+        onkeydown={(e) => e.key === 'Enter' && !wide && (ui.lyricsOpen = true)}
+        use:gesture={{
+          follow: true,
+          ontap: () => !wide && t && (ui.lyricsOpen = true),
+          onswipe: (d) => (d === 'left' ? player.next() : d === 'right' ? player.prev() : d === 'down' ? minimise() : d === 'up' ? ui.go('queue') : undefined),
+          onlongpress: () => t && ui.open({ kind: 'songMenu', ctx: { track: t } }),
+        }}
+      >
+        {#if t}<Cover albumId={t.albumId} size={768} rounded={6} />{:else}<div class="noart"></div>{/if}
+      </div>
     {/if}
   </div>
+  <div class="controls">
 
   <div class="meta">
     {#if t}
@@ -127,23 +160,120 @@
     <button class="icon-btn big" aria-label="Next" onclick={() => player.next()}><SkipForward size={40} fill="currentColor" /></button>
     <button class="icon-btn small" aria-label="Equalizer" onclick={() => ui.go('equalizer')}><SlidersVertical size={22} /></button>
   </div>
+  {#if upNext && !wide}
+    <button class="upnext" onclick={() => ui.go('queue')} use:gesture={{ onswipe: (d) => d === 'up' && ui.go('queue'), ontap: () => ui.go('queue') }}>
+      <span class="muted">Up next</span><span class="ellipsis">{upNext.title} · {upNext.artist}</span>
+    </button>
+  {/if}
+  </div>
+  {#if wide && t}
+    <div class="side"><Lyrics track={t} embedded big /></div>
+  {/if}
+  </div>
 </div>
 
 <style>
   .np {
+    position: relative;
     height: 100%;
     display: flex;
     flex-direction: column;
     padding: 4px 16px 12px;
-    background: radial-gradient(120% 80% at 50% 25%, var(--tint) 0%, color-mix(in srgb, var(--tint) 45%, #000) 60%, #0b0b0b 100%);
-    transition: background 0.6s;
+    background: #000;
     overflow-y: auto;
+    isolation: isolate;
+  }
+  .bg {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+  }
+  .bg img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: blur(60px) saturate(1.3) brightness(0.38);
+    transform: scale(1.35);
+  }
+  .bg::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.55));
+  }
+  .body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .controls {
+    display: flex;
+    flex-direction: column;
+  }
+  .wide .body {
+    flex-direction: row;
+    gap: 48px;
+    padding: 0 32px 16px;
+    align-items: center;
+  }
+  .wide .controls {
+    width: min(520px, 42vw);
+  }
+  .wide .stage {
+    flex: none;
+    min-height: 0;
+  }
+  .wide .body > .stage,
+  .wide .body > .controls {
+    order: 0;
+  }
+  .wide .body {
+    display: grid;
+    grid-template-columns: min(520px, 42vw) minmax(0, 1fr);
+    grid-template-rows: auto auto;
+  }
+  .wide .stage {
+    grid-column: 1;
+  }
+  .wide .controls {
+    grid-column: 1;
+  }
+  .wide .side {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: stretch;
+    min-height: 0;
+    min-width: 0;
+    max-height: 78vh;
+    display: flex;
+    padding-top: 12px;
+  }
+  .wide .art {
+    width: min(100%, 46vh);
+  }
+  .upnext {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+    margin: 12px auto 0;
+    padding: 8px 18px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    max-width: 100%;
+    font-size: 0.9rem;
   }
   .top {
     display: flex;
-    justify-content: space-between;
+    gap: 8px;
     align-items: center;
     min-height: 48px;
+  }
+  .top > span,
+  .top > .remote {
+    flex: 1;
   }
   .remote {
     display: flex;
@@ -162,6 +292,9 @@
   .art {
     width: min(100%, 52vh, 560px);
     box-shadow: 0 16px 50px rgba(0, 0, 0, 0.55);
+    cursor: pointer;
+    transition: transform 0.15s;
+    user-select: none;
   }
   .noart {
     aspect-ratio: 1;

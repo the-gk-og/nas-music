@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { ArrowLeft, Play, Shuffle } from '@lucide/svelte';
+  // Genre, smart list (Favourites, Recently added, …, All songs) and mix pages.
+  import PageHeader from '../components/PageHeader.svelte';
   import TrackList from '../components/TrackList.svelte';
   import type { PlayMeta } from '../lib/events';
+  import { fmtTime } from '../lib/format';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
-  import type { SmartListKind, Track } from '../lib/types';
-  import { ui } from '../lib/ui.svelte';
+  import type { ShelfItem, SmartListKind, Track } from '../lib/types';
 
   let { kind, param }: { kind: 'genre' | 'list' | 'mix'; param: string } = $props();
 
@@ -20,7 +21,7 @@
 
   let tracks = $state<Track[] | null>(null);
   let title = $state('');
-  let reasons = $state<Record<string, string>>({});
+  let reason = $state('');
   let error = $state<string | null>(null);
   let meta = $state<PlayMeta>({});
 
@@ -37,7 +38,7 @@
           const m = await session.api.mix(param);
           title = m.title;
           meta = { source: m.kind === 'more_like' ? 'more_like' : 'mix', mixId: m.id, addedFrom: 'mix' };
-          reasons = Object.fromEntries(m.tracks.map((x) => [x.track.id, x.reason]));
+          reason = m.tracks[0]?.reason ?? '';
           tracks = m.tracks.map((x) => x.track);
         } else {
           title = LIST_TITLES[param] ?? param;
@@ -49,30 +50,39 @@
       }
     })();
   });
+
+  const item = $derived<ShelfItem>({
+    type: kind === 'mix' ? 'mix' : kind === 'genre' ? 'genre' : 'smart_list',
+    id: param,
+    title,
+    artIds: (tracks ?? []).slice(0, 4).map((t) => t.albumId),
+    albumId: tracks?.[0]?.albumId ?? null,
+  });
 </script>
 
 <div class="page">
-  <div class="topbar">
-    <button class="icon-btn" aria-label="Back" onclick={() => ui.back()}><ArrowLeft size={24} /></button>
-    <h1>{title}</h1>
-    {#if tracks?.length}
-      <button class="icon-btn" aria-label="Shuffle" onclick={() => { if (!player.shuffle) player.toggleShuffle(); void player.playList(tracks!, Math.floor(Math.random() * tracks!.length), title, meta); }}><Shuffle size={22} /></button>
-      <button class="icon-btn" aria-label="Play" onclick={() => player.playList(tracks!, 0, title, meta)}><Play size={24} fill="currentColor" /></button>
-    {/if}
-  </div>
   {#if error}<div class="empty">{error}</div>
   {:else if !tracks}<div class="empty">Loading…</div>
   {:else}
-    {#if kind === 'mix' && tracks.length}
-      <p class="why muted">{reasons[tracks[0].id] ?? ''}</p>
-    {/if}
+    <PageHeader
+      {item}
+      kind={kind === 'mix' ? 'mix' : kind === 'genre' ? 'genre' : 'smart_list'}
+      label={kind === 'genre' ? 'Genre' : kind === 'mix' ? 'Mix' : 'Playlist'}
+      meta="{tracks.length} songs · {fmtTime(tracks.reduce((s, t) => s + t.durationS, 0))}"
+      onplay={tracks.length ? () => player.playList(tracks!, 0, title, meta) : undefined}
+      onshuffle={tracks.length ? () => {
+        if (!player.shuffle) player.toggleShuffle();
+        void player.playList(tracks!, Math.floor(Math.random() * tracks!.length), title, meta);
+      } : undefined}
+    />
+    {#if reason}<p class="why muted">{reason}</p>{/if}
     <TrackList {tracks} queueName={title} {meta} />
   {/if}
 </div>
 
 <style>
   .why {
-    margin: 8px 18px;
+    margin: 0 clamp(16px, 3vw, 32px) 8px;
     font-size: 0.9rem;
   }
 </style>

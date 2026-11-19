@@ -1,15 +1,18 @@
 <script lang="ts">
-  import { ArrowLeft, Ellipsis, Play, X } from '@lucide/svelte';
+  import { Pencil, Trash2, X } from '@lucide/svelte';
+  import PageHeader from '../components/PageHeader.svelte';
+  import { fmtTime } from '../lib/format';
+  import type { ShelfItem } from '../lib/types';
   import TrackRow from '../components/TrackRow.svelte';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
   import type { Playlist } from '../lib/types';
+  import { library } from '../lib/library.svelte';
   import { ui } from '../lib/ui.svelte';
 
   let { id }: { id: string } = $props();
   let pl = $state<Playlist | null>(null);
   let error = $state<string | null>(null);
-  let menu = $state(false);
   function load() {
     session.api.playlist(id).then((p) => (pl = p)).catch((e) => (error = e.message));
   }
@@ -17,19 +20,20 @@
 
   const tracks = $derived(pl?.tracks ?? []);
   const currentId = $derived(player.shown.track?.id);
+  const item = $derived<ShelfItem>({ type: 'playlist', id, title: pl?.name ?? '', artIds: tracks.slice(0, 4).map((t) => t.albumId), albumId: tracks[0]?.albumId ?? null });
 
   async function rename() {
-    menu = false;
     const name = await ui.prompt('Rename playlist', 'Name', pl?.name ?? '', 'Rename');
     if (!name) return;
     await session.api.renamePlaylist(id, name).catch((e) => ui.toast(e.message));
     load();
+    void library.refreshPlaylists();
   }
   async function del() {
-    menu = false;
     if (!(await ui.confirm('Delete playlist', `Delete "${pl?.name}"? The songs stay in your library.`, 'Delete'))) return;
     await session.api.deletePlaylist(id).catch((e) => ui.toast(e.message));
-    ui.go('playlists');
+    void library.refreshPlaylists();
+    ui.go('library', 'playlists');
   }
   async function removeAt(i: number) {
     await session.api.removeFromPlaylist(id, i).catch((e) => ui.toast(e.message));
@@ -44,20 +48,26 @@
 </script>
 
 <div class="page">
-  <div class="topbar">
-    <button class="icon-btn" aria-label="Back" onclick={() => ui.back()}><ArrowLeft size={24} /></button>
-    <h1>{pl?.name ?? ''}</h1>
-    {#if tracks.length}<button class="icon-btn" aria-label="Play" onclick={() => player.playList(tracks, 0, `Playlist: ${pl!.name}`, { source: 'library', addedFrom: 'playlist' })}><Play size={24} fill="currentColor" /></button>{/if}
-    <div class="rel">
-      <button class="icon-btn" aria-label="Playlist options" onclick={() => (menu = !menu)}><Ellipsis size={24} /></button>
-      {#if menu}
-        <div class="menu"><button onclick={rename}>Rename</button><button onclick={del}>Delete playlist</button></div>
-      {/if}
-    </div>
-  </div>
   {#if error}<div class="empty">{error}</div>
   {:else if !pl}<div class="empty">Loading…</div>
   {:else}
+    <PageHeader
+      {item}
+      kind="playlist"
+      label="Playlist"
+      meta="{tracks.length} songs · {fmtTime(tracks.reduce((s, t) => s + t.durationS, 0))}"
+      onplay={tracks.length ? () => player.playList(tracks, 0, `Playlist: ${pl!.name}`, { source: 'library', addedFrom: 'playlist' }) : undefined}
+      onshuffle={tracks.length ? () => {
+        if (!player.shuffle) player.toggleShuffle();
+        void player.playList(tracks, Math.floor(Math.random() * tracks.length), `Playlist: ${pl!.name}`, { source: 'library', addedFrom: 'playlist' });
+      } : undefined}
+      onradio={tracks.length ? () => player.startRadio({ type: 'playlist', id }, `${pl!.name} radio`) : undefined}
+    >
+      {#snippet menu()}
+        <button onclick={rename}><Pencil size={18} /> Rename</button>
+        <button onclick={del}><Trash2 size={18} /> Delete playlist</button>
+      {/snippet}
+    </PageHeader>
     {#each tracks as t, i (t.id + ':' + i)}
       <div class="r">
         <div class="grow">
@@ -94,24 +104,5 @@
   }
   .ord button {
     padding: 2px 6px;
-  }
-  .rel {
-    position: relative;
-  }
-  .menu {
-    position: absolute;
-    right: 0;
-    top: 46px;
-    z-index: 5;
-    background: var(--bg-2);
-    border-radius: 10px;
-    padding: 6px 0;
-    min-width: 180px;
-  }
-  .menu button {
-    display: block;
-    width: 100%;
-    padding: 10px 16px;
-    text-align: left;
   }
 </style>

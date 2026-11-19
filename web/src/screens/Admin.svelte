@@ -43,6 +43,28 @@
     }
     load();
   }
+  const adminCount = $derived((users ?? []).filter((u) => u.isAdmin && !u.disabled).length);
+
+  async function setAdmin(u: AdminUser, on: boolean) {
+    if (!on && u.isAdmin && adminCount <= 1) return ui.toast("Can't remove the last admin");
+    const self = u.id === session.saved.userId;
+    const ok = await ui.confirm(
+      on ? 'Make admin' : 'Remove admin',
+      on
+        ? `${u.username} will be able to create invites, manage users and make other admins.`
+        : self
+          ? 'You will lose access to this Admin screen.'
+          : `${u.username} will no longer be an admin.`,
+      on ? 'Make admin' : 'Remove admin',
+    );
+    if (!ok) return;
+    await patch(u, { isAdmin: on });
+    if (self && !on) {
+      session.saved = { ...session.saved, isAdmin: false };
+      ui.go('home');
+    }
+  }
+
   async function reset(u: AdminUser) {
     const pw = await ui.prompt(`Reset password for ${u.username}`, 'New password (min 8 characters)', '', 'Reset');
     if (!pw) return;
@@ -84,9 +106,13 @@
     <div class="item">
       <div class="grow">
         <div>{u.username}{#if u.id === session.saved.userId}<span class="muted"> (you)</span>{/if}</div>
-        <div class="muted small">{u.isAdmin ? 'admin' : 'user'}{u.disabled ? ' · disabled' : ''}{u.lastLogin ? ` · last login ${new Date(u.lastLogin).toLocaleDateString()}` : ''}</div>
+        <div class="muted small">{#if u.isAdmin}<span class="role">Admin</span>{:else}Listener{/if}{u.disabled ? ' · disabled' : ''}{u.lastLogin ? ` · last login ${new Date(u.lastLogin).toLocaleDateString()}` : ''}</div>
       </div>
-      <label class="small"><input type="checkbox" class="switch" checked={u.isAdmin} onchange={(e) => patch(u, { isAdmin: e.currentTarget.checked })} /> admin</label>
+      {#if u.isAdmin}
+        <button class="btn" disabled={adminCount <= 1} title={adminCount <= 1 ? 'The last admin can’t be removed' : ''} onclick={() => setAdmin(u, false)}>Remove admin</button>
+      {:else}
+        <button class="btn" disabled={u.disabled} onclick={() => setAdmin(u, true)}>Make admin</button>
+      {/if}
       <label class="small"><input type="checkbox" class="switch" checked={!u.disabled} disabled={u.id === session.saved.userId} onchange={(e) => patch(u, { disabled: !e.currentTarget.checked })} /> enabled</label>
       <button class="btn" onclick={() => reset(u)}>Reset password</button>
     </div>
@@ -123,6 +149,10 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  .role {
+    color: var(--accent);
+    font-weight: 700;
   }
   .code {
     font-family: monospace;

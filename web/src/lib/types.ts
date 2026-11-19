@@ -170,6 +170,9 @@ export interface Queue {
   durationS?: number;
   updatedAt?: string;
   tracks?: Track[];
+  /** v3: set on radio queues; the client tops them up via POST /radio/{id}/more. */
+  radio?: RadioSeed | null;
+  source?: { type: string; id?: string | null } | null;
 }
 
 export interface Invite {
@@ -292,3 +295,135 @@ export type ServerMessage =
   | { type: 'queues'; queueId: string }
   | { type: 'pong' }
   | { type: 'error'; detail: string };
+
+// ---- v3 (docs/v3-ux.md; api/openapi.yaml v3 from server core) ----
+
+export type ItemType =
+  | 'track'
+  | 'album'
+  | 'artist'
+  | 'playlist'
+  | 'mix'
+  | 'radio'
+  | 'queue'
+  | 'device'
+  | 'catalog'
+  | 'suggestion'
+  | 'toget'
+  | 'smart_list'
+  | 'genre'
+  | 'folder';
+
+export interface RadioSeed {
+  type: 'random' | 'track' | 'artist' | 'album' | 'playlist';
+  id?: string | null;
+  title?: string | null;
+}
+
+/** Generic card. `artUrl` is relative to the API base, e.g. "art/<albumId>" or "catalog/<id>/cover". */
+export interface ShelfItem {
+  type: ItemType;
+  id: string;
+  title: string;
+  subtitle?: string | null;
+  artUrl?: string | null;
+  track?: Track;
+  album?: Album;
+  artist?: Artist;
+  playlist?: Playlist;
+  queue?: Queue;
+  mix?: { kind?: string; trackCount?: number; durationS?: number };
+  seed?: RadioSeed;
+  device?: { kind?: DeviceKind; canPlay?: boolean; isActive?: boolean; playing?: boolean; nowPlaying?: Track | null };
+  progress?: { index?: number; count?: number; positionMs?: number; queueId?: string | null };
+  catalog?: CatalogItem;
+  suggestion?: Suggestion;
+  toget?: ToGetItem;
+  playedAt?: string | null;
+  // Client-side art hints (mock / pages): album id or up to four for a collage.
+  albumId?: string | null;
+  artIds?: string[];
+}
+
+export type ShelfKind =
+  | 'start_radio'
+  | 'devices'
+  | 'recently_played'
+  | 'continue_listening'
+  | 'pinned'
+  | 'mixes'
+  | 'radio'
+  | 'because_you_played'
+  | 'release_radar'
+  | 'suggestions'
+  | 'to_get'
+  | 'blends'
+  | 'wrapped';
+
+export interface Shelf {
+  id: string;
+  kind: ShelfKind | string;
+  title: string;
+  subtitle?: string | null;
+  layout?: 'button' | 'row' | 'grid2';
+  items: ShelfItem[];
+}
+
+export interface Feed {
+  shelves: Shelf[];
+}
+
+export interface CatalogItem {
+  /** Opaque, e.g. "dz:album:302127". */
+  id: string;
+  type: 'album' | 'track' | 'artist';
+  title: string;
+  artist?: string | null;
+  album?: string | null;
+  year?: number | null;
+  durationS?: number | null;
+  mbid?: string | null;
+  artUrl?: string | null;
+  hasPreview: boolean;
+  owned: boolean;
+  ownedId?: string | null;
+  toGet?: { id: string; status: string } | null;
+  links?: { name: string; url: string }[];
+}
+
+export interface SearchResults {
+  query?: string;
+  top?: ShelfItem | null;
+  tracks: Track[];
+  albums: Album[];
+  artists: Artist[];
+  playlists: Playlist[];
+  queues?: Queue[];
+  catalog: CatalogItem[];
+  catalogError?: string | null;
+}
+
+export type ToGetStatus = 'want' | 'got' | 'dismissed';
+
+export interface ToGetItem {
+  id: string;
+  type: 'album' | 'track';
+  title: string;
+  artist: string;
+  year?: number | null;
+  mbid?: string | null;
+  catalogId?: string | null;
+  artUrl?: string | null;
+  hasPreview?: boolean;
+  note?: string | null;
+  status: ToGetStatus;
+  source?: 'search' | 'suggestion' | 'manual';
+  suggestionId?: string | null;
+  ownedId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  gotAt?: string | null;
+  links?: { name: string; url: string }[];
+}
+
+export type PinType = 'album' | 'artist' | 'playlist' | 'mix' | 'queue' | 'smart_list' | 'genre' | 'folder';
