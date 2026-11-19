@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ChevronDown, Pencil, Type, X } from '@lucide/svelte';
   import { ApiError } from '../lib/api/client';
-  import { currentLineIndex, noLyricsMessage, SOURCE_LABEL, toLrc } from '../lib/lyrics';
+  import { currentLineIndex, lyricsAttribution, noLyricsMessage, SOURCE_LABEL, toLrc } from '../lib/lyrics';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
   import type { Lyrics, LyricsSource, Track } from '../lib/types';
@@ -18,6 +18,11 @@
   let userScrolledAt = 0;
 
   let source = $state<LyricsSource | undefined>(undefined);
+  // The server lists the sources it has (v2+); otherwise offer the file sources and your edit.
+  const sourceOptions = $derived<LyricsSource[]>(
+    lyrics?.sources?.length ? [...new Set<LyricsSource>([...lyrics.sources, 'user'])] : ['embedded', 'lrc_file', 'user'],
+  );
+  const attribution = $derived(lyricsAttribution(lyrics?.source));
 
   async function load(id: string) {
     loading = true;
@@ -94,7 +99,7 @@
       </button>
       {#if srcOpen}
         <div class="menu">
-          {#each ['embedded', 'lrc_file', 'user'] as const as k}
+          {#each sourceOptions as k}
             <button class="item" class:sel={(lyrics?.source ?? source ?? 'embedded') === k} onclick={() => pick(k)}>{SOURCE_LABEL[k]}</button>
           {/each}
           {#if lyrics?.source === 'user'}
@@ -135,11 +140,13 @@
           }}
         >{l.text || '♪'}</button>
       {/each}
+      {#if attribution}<p class="attr">{attribution}</p>{/if}
       <div class="pad"></div>
     {:else}
       {#each lyrics.lines as l}
         <p class="line">{l.text || ' '}</p>
       {/each}
+      {#if attribution}<p class="attr">{attribution}</p>{/if}
     {/if}
   </div>
 </div>
@@ -227,6 +234,11 @@
   }
   .pad {
     height: 30%;
+  }
+  .attr {
+    color: var(--fg-3);
+    font-size: 0.85rem;
+    margin: 18px 0 8px;
   }
   .embedded {
     max-height: none;

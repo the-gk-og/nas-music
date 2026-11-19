@@ -96,4 +96,10 @@ export const SOURCE_LABEL: Record<LyricsSource, string> = {
   embedded: 'Embedded lyrics',
   lrc_file: '.lrc file',
   user: 'Your edit',
+  lrclib: 'LRCLIB',
 };
+
+/** Attribution line shown under lyrics that came from an online source. */
+export function lyricsAttribution(source: LyricsSource | undefined): string | null {
+  return source === 'lrclib' ? 'Lyrics from LRCLIB' : null;
+}

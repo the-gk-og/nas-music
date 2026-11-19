@@ -52,7 +52,7 @@ export interface TrackInfo extends Track {
   fileBytes?: number | null;
 }
 
-export type LyricsSource = 'embedded' | 'lrc_file' | 'user';
+export type LyricsSource = 'embedded' | 'lrc_file' | 'user' | 'lrclib';
 
 export interface LyricLine {
   timeMs?: number | null;
@@ -66,6 +66,8 @@ export interface Lyrics {
   lines: LyricLine[];
   text: string;
   canEdit?: boolean;
+  /** Sources available for this track (server v2+). */
+  sources?: LyricsSource[];
 }
 
 export interface MixTrack {

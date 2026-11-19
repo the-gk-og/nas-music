@@ -20,6 +20,7 @@ import type {
 } from '../types';
 import type { MediaResolver } from './client';
 import { artSvg, buildLibrary, mockMixes, mockSuggestions, toneWav } from './mockData';
+import { AdminError, MockAdmin } from './mockAdmin';
 
 interface MockUser {
   id: string;
@@ -60,6 +61,7 @@ export class MockBackend {
   mixes = mockMixes(this.lib.tracks);
   latencyMs = 60;
   hub = new MockHub(this);
+  admin = new MockAdmin();
   pinsList: { type: PinType; id: string }[] = [];
   toget: ToGetItem[] = [];
   catalog: CatalogItem[] = [];
@@ -181,7 +183,7 @@ export class MockBackend {
       if (out === undefined) return new Response(null, { status: 204 });
       return new Response(JSON.stringify(out), { status: 200, headers: { 'Content-Type': 'application/json' } });
     } catch (e) {
-      const he = e instanceof HttpError ? e : new HttpError(500, String(e));
+      const he = e instanceof HttpError ? e : e instanceof AdminError ? new HttpError(e.status, e.detail) : new HttpError(500, String(e));
       return new Response(JSON.stringify({ detail: he.detail }), { status: he.status, headers: { 'Content-Type': 'application/json' } });
     }
   };
@@ -339,11 +341,11 @@ export class MockBackend {
       }
       const want = qs.get('source');
       const own = want && want !== 'user' ? undefined : this.lyricOverrides.get(id);
-      const fileSrc = hashSource(id) ? 'lrc_file' : 'embedded';
+      const fileSrc = hashSource(id) ? 'lrc_file' : id.endsWith('2') ? 'lrclib' : 'embedded';
       const raw = own ?? (want === 'user' || (want && want !== fileSrc) ? undefined : L.lyrics.get(id));
       if (raw == null) throw new HttpError(404, `no lyrics for ${t.fileName}`);
       const p = parseLrc(raw);
-      return { trackId: id, synced: p.synced, source: own != null ? 'user' : fileSrc, lines: p.lines, text: p.text, canEdit: true };
+      return { trackId: id, synced: p.synced, source: own != null ? 'user' : fileSrc, sources: [...(L.lyrics.has(id) ? [fileSrc] : []), ...(own != null ? ['user'] : [])], lines: p.lines, text: p.text, canEdit: true };
     }
     if ((r = m(/^\/tracks\/([^/]+)\/why$/))) {
       const t = this.track(r[1]);
@@ -559,6 +561,54 @@ export class MockBackend {
 
     // admin
     if (path.startsWith('/admin/') && !me.isAdmin) throw new HttpError(403, 'Admins only');
+    const A = this.admin;
+    if (path === '/admin/status') return A.status({ tracks: L.tracks.length, albums: L.albums.length, artists: L.artists.length });
+    if (path === '/admin/now-playing') {
+      const st = this.hub.state;
+      const t = L.tracks.find((x) => x.id === st.trackId);
+      return this.hub
+        .devices()
+        .filter((d) => d.online)
+        .map((d) => ({ userId: 'u1', username: 'admin', deviceId: d.id, deviceName: d.name, kind: d.kind, playing: d.isActive && st.playing, positionMs: d.isActive ? st.positionMs : 0, track: d.isActive && t ? this.pub(t) : null }));
+    }
+    if ((r = m(/^\/admin\/jobs\/([a-z]+)\/run$/)) && method === 'POST') return A.runJob(r[1]);
+    if (path === '/admin/jobs/history') return A.history.slice(0, Number(qs.get('limit') ?? 50));
+    if ((r = m(/^\/admin\/users\/([^/]+)\/devices$/)))
+      return this.hub.devices().filter((d) => r![1] === 'u1' || d.id !== 'mock-phone').map((d) => ({ id: d.id, name: d.name, kind: d.kind, online: d.online, lastSeen: iso() }));
+    if (path === '/admin/library/failed') return A.failed;
+    if (path === '/admin/library/failed/retry') return A.retry();
+    if ((r = m(/^\/admin\/library\/failed\/([^/]+)\/retry$/))) return A.retry(r[1]);
+    if (path === '/admin/health') return A.health();
+    if ((r = m(/^\/admin\/health\/([a-z_]+)\/fix$/)) && method === 'POST') return A.fix(r[1], (body.ids as string[] | undefined) ?? undefined);
+    if ((r = m(/^\/admin\/health\/([a-z_]+)$/))) return A.healthItems(r[1]);
+    if (path === '/admin/logs') return A.logsAfter(Number(qs.get('after') ?? 0), qs.get('level'), qs.get('q'), Number(qs.get('limit') ?? 500));
+    if (path === '/admin/reports') return A.reports.map(({ description: _d, logs: _l, context: _c, ...x }) => x);
+    if ((r = m(/^\/admin\/reports\/([^/]+)$/))) {
+      const rep = A.reports.find((x) => x.id === r![1]);
+      if (!rep) throw new HttpError(404, 'not found');
+      if (method === 'DELETE') {
+        A.reports = A.reports.filter((x) => x !== rep);
+        return undefined;
+      }
+      if (method === 'PATCH' && body.status) rep.status = body.status as 'open' | 'closed';
+      return rep;
+    }
+    if (path === '/admin/backups') {
+      if (method === 'POST') {
+        const b = { id: 'b' + Date.now(), createdAt: iso(), bytes: 49e6, kind: 'manual', note: (body.note as string) ?? null };
+        A.backups.unshift(b);
+        return b;
+      }
+      return A.backups;
+    }
+    if ((r = m(/^\/admin\/backups\/([^/]+)$/)) && method === 'DELETE') {
+      A.backups = A.backups.filter((b) => b.id !== r![1]);
+      return undefined;
+    }
+    if (path === '/admin/settings') {
+      if (method === 'PUT') return A.saveSettings(body as Partial<import('./admin').AdminSettings>);
+      return A.settings;
+    }
     if (path === '/admin/invites') {
       if (method === 'POST') {
         const code = Math.random().toString(36).slice(2, 10).toUpperCase();
@@ -572,7 +622,7 @@ export class MockBackend {
       this.invites = this.invites.filter((i) => i.code !== r![1]);
       return undefined;
     }
-    if (path === '/admin/users') return this.users.map(({ password: _p, ...u }) => u);
+    if (path === '/admin/users') return this.users.map(({ password: _p, ...u }) => ({ ...u, lastLogin: u.id === 'u1' ? iso() : null, deviceCount: u.id === 'u1' ? this.hub.devices().length : 0 }));
     if ((r = m(/^\/admin\/users\/([^/]+)$/))) {
       const u = this.users.find((x) => x.id === r![1]);
       if (!u) throw new HttpError(404, 'not found');

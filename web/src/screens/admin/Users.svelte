@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { ArrowLeft, Copy } from '@lucide/svelte';
-  import { session } from '../lib/session.svelte';
-  import type { AdminUser, Invite } from '../lib/types';
-  import { ui } from '../lib/ui.svelte';
+  import { ChevronDown, ChevronRight, Copy } from '@lucide/svelte';
+  import { adminApi } from '../../lib/api/admin';
+  import type { MyDevice } from '../../lib/types';
+  import { session } from '../../lib/session.svelte';
+  import type { AdminUser, Invite } from '../../lib/types';
+  import { ui } from '../../lib/ui.svelte';
 
   let invites = $state<Invite[] | null>(null);
   let users = $state<AdminUser[] | null>(null);
@@ -65,6 +67,16 @@
     }
   }
 
+  let devices = $state<Record<string, MyDevice[] | null>>({});
+  async function toggleDevices(id: string) {
+    if (devices[id]) return void (devices = { ...devices, [id]: null });
+    try {
+      devices = { ...devices, [id]: await adminApi(session.api).userDevices(id) };
+    } catch (e) {
+      ui.toast((e as { status?: number }).status === 404 ? 'This server can’t list a user’s devices yet' : (e as Error).message);
+    }
+  }
+
   async function reset(u: AdminUser) {
     const pw = await ui.prompt(`Reset password for ${u.username}`, 'New password (min 8 characters)', '', 'Reset');
     if (!pw) return;
@@ -73,11 +85,8 @@
   }
 </script>
 
-<div class="page">
-  <div class="topbar">
-    <button class="icon-btn" aria-label="Back" onclick={() => ui.back()}><ArrowLeft size={24} /></button>
-    <h1>Admin</h1>
-  </div>
+<div class="users">
+  <h2>Users &amp; invites</h2>
   {#if error}<div class="pad error">{error}</div>{/if}
 
   <div class="section-title">Invites</div>
@@ -104,9 +113,12 @@
   <div class="section-title">Users</div>
   {#each users ?? [] as u (u.id)}
     <div class="item">
+      <button class="icon-btn exp" aria-label="Show devices" aria-expanded={!!devices[u.id]} onclick={() => toggleDevices(u.id)}>
+        {#if devices[u.id]}<ChevronDown size={18} />{:else}<ChevronRight size={18} />{/if}
+      </button>
       <div class="grow">
         <div>{u.username}{#if u.id === session.saved.userId}<span class="muted"> (you)</span>{/if}</div>
-        <div class="muted small">{#if u.isAdmin}<span class="role">Admin</span>{:else}Listener{/if}{u.disabled ? ' · disabled' : ''}{u.lastLogin ? ` · last login ${new Date(u.lastLogin).toLocaleDateString()}` : ''}</div>
+        <div class="muted small">{#if u.isAdmin}<span class="role">Admin</span>{:else}Listener{/if}{u.disabled ? ' · disabled' : ''}{u.lastLogin ? ` · last active ${new Date(u.lastLogin).toLocaleString()}` : ' · never signed in'}{u.deviceCount != null ? ` · ${u.deviceCount} device${u.deviceCount === 1 ? '' : 's'}` : ''}</div>
       </div>
       {#if u.isAdmin}
         <button class="btn" disabled={adminCount <= 1} title={adminCount <= 1 ? 'The last admin can’t be removed' : ''} onclick={() => setAdmin(u, false)}>Remove admin</button>
@@ -116,12 +128,34 @@
       <label class="small"><input type="checkbox" class="switch" checked={!u.disabled} disabled={u.id === session.saved.userId} onchange={(e) => patch(u, { disabled: !e.currentTarget.checked })} /> enabled</label>
       <button class="btn" onclick={() => reset(u)}>Reset password</button>
     </div>
+    {#if devices[u.id]}
+      <div class="devs">
+        {#each devices[u.id]! as d (d.id)}
+          <div class="dev small">
+            <span class:ok={d.online}>●</span> {d.name} <span class="muted">· {d.kind}{d.appVersion ? ` ${d.appVersion}` : ''} · {d.online ? 'online now' : d.lastSeen ? `last seen ${new Date(d.lastSeen).toLocaleString()}` : 'never seen'}</span>
+          </div>
+        {:else}<div class="muted small">No devices.</div>{/each}
+      </div>
+    {/if}
   {/each}
 </div>
 
 <style>
   .pad {
-    padding: 8px 18px;
+    padding: 8px 0;
+  }
+  .section-title {
+    margin: 18px 0 6px;
+  }
+  .exp {
+    width: 32px;
+    height: 32px;
+  }
+  .devs {
+    padding: 4px 0 10px 44px;
+    border-bottom: 1px solid var(--line);
+    display: grid;
+    gap: 4px;
   }
   .inline {
     display: flex;
@@ -137,7 +171,7 @@
     gap: 12px;
     align-items: center;
     flex-wrap: wrap;
-    padding: 10px 18px;
+    padding: 10px 0;
     border-bottom: 1px solid var(--line);
   }
   .grow {
