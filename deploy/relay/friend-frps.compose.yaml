@@ -1,0 +1,31 @@
+# nas-music relay — runs on the FRIEND'S server (Portainer / Dockhand stack).
+# It only forwards encrypted TCP: HTTPS is terminated on the NAS (Caddy), so this box can't see the
+# music or logins. The NAS connects OUT to this server on port 2333 (token + TLS); visitors reach the
+# NAS through ports 80/443 here.
+#
+# Router on the friend's network: forward TCP 80, 443 and 2333 -> this server's LAN IP.
+# Replace FRP_TOKEN with the token the NAS owner sends you (never commit it).
+
+services:
+  frps:
+    image: fatedier/frps:v0.71.1
+    container_name: nasmusic-relay
+    restart: unless-stopped
+    command: ["-c", "/etc/frp/frps.toml"]
+    ports:
+      - "80:80"        # HTTP  (Let's Encrypt checks + redirect to HTTPS), forwarded to the NAS
+      - "443:443"      # HTTPS for music.whoactuallyneeds.men, forwarded to the NAS (encrypted end-to-end)
+      - "2333:2333"    # the NAS's tunnel connection (token-authenticated, TLS)
+    configs:
+      - source: frps_config
+        target: /etc/frp/frps.toml
+
+configs:
+  frps_config:
+    content: |
+      bindPort = 2333
+      auth.method = "token"
+      auth.token = "FRP_TOKEN"
+      transport.tls.force = true
+      # Only these public ports may be opened by the NAS.
+      allowPorts = [{ single = 80 }, { single = 443 }]

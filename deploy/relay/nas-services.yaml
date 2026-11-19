@@ -1,0 +1,39 @@
+# Add these two services under `services:` in the nasmusic Dockhand stack (same file as the nasmusic
+# service), and the two volumes under `volumes:`. Only add them once the friend's relay is running and
+# /data/relay/{frpc.toml,Caddyfile} exist (see README.md in this folder).
+
+  caddy:
+    image: caddy:2.11.9
+    container_name: nasmusic-caddy
+    restart: unless-stopped
+    command: ["caddy", "run", "--config", "/relay/Caddyfile", "--adapter", "caddyfile"]
+    volumes:
+      - type: volume            # only the relay/ folder of the data volume, read-only
+        source: nasmusic-data
+        target: /relay
+        read_only: true
+        volume:
+          subpath: relay
+      - caddy-data:/data        # certificates (keep!)
+      - caddy-config:/config
+    depends_on:
+      - nasmusic
+
+  frpc:
+    image: fatedier/frpc:v0.71.1
+    container_name: nasmusic-frpc
+    restart: unless-stopped
+    command: ["-c", "/relay/frpc.toml"]
+    volumes:
+      - type: volume
+        source: nasmusic-data
+        target: /relay
+        read_only: true
+        volume:
+          subpath: relay
+    depends_on:
+      - caddy
+
+# and under the top-level `volumes:` (next to nasmusic-data:)
+#  caddy-data:
+#  caddy-config:

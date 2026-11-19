@@ -1,0 +1,23 @@
+# nas-music relay HTTPS — lives on the NAS at /data/relay/Caddyfile.
+# Caddy gets a Let's Encrypt certificate for the music hostname automatically (through the relay's
+# ports 80/443) and forwards to the nasmusic server's internal HTTP port.
+{
+	servers {
+		listener_wrappers {
+			# frp sends a PROXY protocol header with the real visitor IP. Only accept it from the
+			# Docker networks (Caddy publishes no host ports; only frpc can reach it).
+			proxy_protocol {
+				timeout 5s
+				allow 172.16.0.0/12 10.0.0.0/8 192.168.0.0/16
+			}
+			tls
+		}
+	}
+}
+
+music.whoactuallyneeds.men {
+	reverse_proxy nasmusic:8080 {
+		# stream audio and the Connect WebSocket without buffering
+		flush_interval -1
+	}
+}

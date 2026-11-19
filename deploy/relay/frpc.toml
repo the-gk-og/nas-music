@@ -1,0 +1,26 @@
+# nas-music relay client — lives on the NAS at /data/relay/frpc.toml (inside the nasmusic data volume).
+# Replace FRIEND_ADDRESS (friend's DDNS name or public IP) and FRP_TOKEN (same as the friend's stack).
+
+serverAddr = "FRIEND_ADDRESS"
+serverPort = 2333
+auth.method = "token"
+auth.token = "FRP_TOKEN"
+transport.tls.enable = true
+
+# Public port 80/443 on the friend's server -> Caddy on the NAS. PROXY protocol v2 carries the real
+# visitor IP to Caddy (and from there to nasmusic as X-Forwarded-For).
+[[proxies]]
+name = "nasmusic-http"
+type = "tcp"
+localIP = "caddy"
+localPort = 80
+remotePort = 80
+transport.proxyProtocolVersion = "v2"
+
+[[proxies]]
+name = "nasmusic-https"
+type = "tcp"
+localIP = "caddy"
+localPort = 443
+remotePort = 443
+transport.proxyProtocolVersion = "v2"

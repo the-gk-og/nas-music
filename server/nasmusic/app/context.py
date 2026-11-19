@@ -95,6 +95,12 @@ def client_ip(request: Request) -> str:
     # Only trust that header on the internal plain-HTTP port, which only cloudflared can reach.
     c: AppContext = request.app.state.ctx
     server = request.scope.get("server") or (None, None)
-    if server[1] == c.cfg.http_port and request.headers.get("cf-connecting-ip"):
-        return request.headers["cf-connecting-ip"]
+    if server[1] == c.cfg.http_port:
+        if request.headers.get("cf-connecting-ip"):
+            return request.headers["cf-connecting-ip"]
+        # Behind the frp relay, Caddy (same Docker network, PROXY protocol from frp) sets X-Forwarded-For
+        # to the real visitor. Caddy replaces any X-Forwarded-For a visitor sends, so the last hop is it.
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            return xff.split(",")[-1].strip() or (request.client.host if request.client else "?")
     return request.client.host if request.client else "?"

@@ -19,3 +19,4 @@ android/.idea/
 # models (CC BY-NC-SA, downloaded at install)
 models/
 deploy/.env
+deploy/relay/private/
