@@ -15,7 +15,7 @@ from nasmusic.app import events as events_mod
 from nasmusic.app.context import AppContext, ctx, db, device
 from nasmusic.auth import Device
 from nasmusic.core import ai_config, now_iso
-from nasmusic.library import art, lrclib, lyrics, queries
+from nasmusic.library import art, lrclib, lyrics, overrides, queries
 from nasmusic.stream import clamp_bitrate, media_type
 from nasmusic.stream.transcode import TranscodeError
 from nasmusic.sync import manifest as build_manifest
@@ -229,10 +229,15 @@ def _lyrics_options(conn: Conn, c: AppContext, uid: str, track_id: str) -> dict[
         parsed = lyrics.from_raw(ov[0], "user")
         if parsed:
             opts["user"] = parsed
+    shared = overrides.lyrics_override(conn, track_id)  # an admin's edit, for everyone
+    if shared:
+        parsed = lyrics.from_raw(shared, "library")
+        if parsed:
+            opts["library"] = parsed
     src = c.cfg.library_root / row["path"]
     if src.is_file():
         opts.update(lyrics.read_all(src))
-    if not any(k in opts for k in ("embedded", "lrc_file")) and c.cfg.lrclib_enabled and c.lrclib is not None:
+    if not any(k in opts for k in ("library", "embedded", "lrc_file")) and c.cfg.lrclib_enabled and c.lrclib is not None:
         cache = lrclib.fetch(conn, c.lrclib, track_id)  # cached; asks lrclib.net at most once per 30 days
         if cache is not None and cache["status"] == "found" and cache["raw"]:
             parsed = lyrics.from_raw(cache["raw"], "lrclib")
@@ -246,13 +251,15 @@ def _lyrics_response(track_id: str, chosen: lyrics.Lyrics, opts: dict) -> dict:
 
 
 @router.get("/tracks/{track_id}/lyrics")
-def track_lyrics(track_id: str, source: Literal["user", "embedded", "lrc_file", "lrclib"] | None = None,
+def track_lyrics(track_id: str, source: Literal["user", "library", "embedded", "lrc_file", "lrclib"] | None = None,
                  me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
     opts = _lyrics_options(conn, c, me.user_id, track_id)
     if source is not None:
         chosen = opts.get(source)
     elif "user" in opts:
         chosen = opts["user"]
+    elif "library" in opts:
+        chosen = opts["library"]
     else:
         files = [o for k, o in opts.items() if k != "user"]
         synced = [o for o in files if o.synced]

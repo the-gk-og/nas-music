@@ -27,6 +27,7 @@ import {
   type QueueModel,
   type SortKey,
 } from './queue';
+import { library } from './library.svelte';
 import { session } from './session.svelte';
 import type { CommandAction, ConnectDevice, PlaybackState, Queue, RadioSeed, RepeatMode, Track } from './types';
 import { appendNew, needsTopUp } from './v3';
@@ -886,6 +887,7 @@ export class Player {
         onError: (detail, source) => {
           if (source === 'speaker') ui.toast(detail);
         },
+        onPlaylistChanged: (pid, rev, deleted) => library.playlistChanged(pid, rev, deleted),
       },
     });
     this.connect.start();

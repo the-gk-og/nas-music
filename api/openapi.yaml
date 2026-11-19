@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.4.1
+  version: 0.5.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,6 +10,9 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    0.5.0 (schema v5): admin tag editing (/admin/tags/*; edits are server-side overrides, every track/album/
+    artist/search response shows the effective tags) and collaborative playlists (members, entry ids,
+    conflict-safe entry operations, activity, Connect `playlist` messages). Old index-based playlist calls work.
     v3 (docs/v3-ux.md phase 1): Home / For You shelf feeds, pins, global search incl. an online catalogue,
     To get list, radio. `artUrl` fields in shelves/catalogue are relative to the API base (/api/v1/).
     GET /stream and GET /art also accept `?token=<deviceToken>` (for <audio>/<img> in cross-origin clients);
@@ -235,7 +238,7 @@ paths:
         "not found" is retried after 30 days). A background job pre-fetches them for favourites and today's mixes.
       parameters:
         - { name: trackId, in: path, required: true, schema: { type: string } }
-        - { name: source, in: query, schema: { type: string, enum: [user, embedded, lrc_file, lrclib] }, description: 'default: your edit, else the file (embedded, then sidecar), else LRCLIB' }
+        - { name: source, in: query, schema: { type: string, enum: [user, library, embedded, lrc_file, lrclib] }, description: 'default: your edit, else an admin''s library-wide edit (v5, `library`), else the file (embedded, then sidecar), else LRCLIB' }
       responses:
         '200':
           description: lyrics
@@ -606,7 +609,7 @@ paths:
     get:
       responses:
         '200':
-          description: the user's playlists, most recently updated first
+          description: the user's own playlists and the ones shared with them (v5; see `role`), most recently updated first
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Playlist' } } } }
     post:
       requestBody:
@@ -630,8 +633,9 @@ paths:
         '200':
           description: playlist with tracks
           content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
-        '404': { description: not found (or not yours) }
+        '404': { description: not found (or no access) }
     patch:
+      summary: Rename. Owner only (403 for members).
       requestBody:
         required: true
         content: { application/json: { schema: { type: object, properties: { name: { type: string, minLength: 1, maxLength: 200 } } } } }
@@ -639,10 +643,16 @@ paths:
         '200':
           description: updated
           content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+        '403': { description: not the owner }
     delete:
-      responses: { '204': { description: deleted } }
+      summary: "Owner only. Members get a Connect `playlist` message with `deleted: true`."
+      responses: { '204': { description: deleted }, '403': { description: not the owner } }
   /playlists/{playlistId}/tracks:
     post:
+      summary: |
+        Add tracks (owner or editor). v5: prefer `afterEntryId` — insert right after that entry ("" = at the
+        top); it keeps its meaning however others edited the list meanwhile. Else `position` (index, legacy),
+        else append. Each new entry records who added it.
       parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
       requestBody:
         required: true
@@ -652,15 +662,19 @@ paths:
               type: object
               required: [trackIds]
               properties:
-                trackIds: { type: array, items: { type: string }, maxItems: 5000 }
-                position: { type: [integer, 'null'], description: insert before this position; omitted/null = append }
+                trackIds: { type: array, items: { type: string }, maxItems: 10000 }
+                position: { type: [integer, 'null'], description: insert before this index; omitted/null = append }
+                afterEntryId: { type: [string, 'null'], description: 'v5: insert after this entry; "" = at the top' }
       responses:
         '200':
           description: playlist after the change
           content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+        '403': { description: viewer }
         '404': { description: playlist or a track not found }
+        '409': { description: afterEntryId is no longer in the playlist (refetch) }
   /playlists/{playlistId}/tracks/{position}:
     delete:
+      summary: Legacy, index-based. Prefer DELETE /playlists/{playlistId}/entries/{entryId}.
       parameters:
         - { name: playlistId, in: path, required: true, schema: { type: string } }
         - { name: position, in: path, required: true, schema: { type: integer } }
@@ -670,12 +684,112 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
   /playlists/{playlistId}/move:
     post:
+      summary: Legacy, index-based. Prefer POST /playlists/{playlistId}/entries/{entryId}/move.
       parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Move' } } } }
       responses:
         '200':
           description: playlist after the change
           content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+  /playlists/{playlistId}/entries/{entryId}:
+    delete:
+      summary: v5. Remove one entry (owner or editor). Already removed (by someone else) = no-op, still 200.
+      parameters:
+        - { name: playlistId, in: path, required: true, schema: { type: string } }
+        - { name: entryId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: playlist after the change
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+        '403': { description: viewer }
+  /playlists/{playlistId}/entries/remove:
+    post:
+      summary: v5. Remove several entries (multi-select). Unknown ids are ignored.
+      parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [entryIds], properties: { entryIds: { type: array, items: { type: string }, minItems: 1 } } } } }
+      responses:
+        '200':
+          description: playlist after the change
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+  /playlists/{playlistId}/entries/{entryId}/move:
+    post:
+      summary: v5. Move an entry right after another (`afterEntryId` null = to the top). Owner or editor.
+      parameters:
+        - { name: playlistId, in: path, required: true, schema: { type: string } }
+        - { name: entryId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { afterEntryId: { type: [string, 'null'] } } } } }
+      responses:
+        '200':
+          description: playlist after the change
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+        '409': { description: the entry or afterEntryId is gone (refetch) }
+  /playlists/{playlistId}/members:
+    parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
+    get:
+      summary: v5. Owner first, then members. Anyone with access may read it.
+      responses:
+        '200':
+          description: members
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PlaylistMember' } } } }
+    post:
+      summary: v5. Owner only. Invite (add) a user by id or username, or change their role.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId: { type: string }
+                username: { type: string }
+                role: { type: string, enum: [editor, viewer], default: editor }
+      responses:
+        '200':
+          description: members after the change
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PlaylistMember' } } } }
+        '403': { description: not the owner }
+        '404': { description: no such (enabled) user }
+        '422': { description: that's the owner, or too many members (50) }
+  /playlists/{playlistId}/members/{userId}:
+    parameters:
+      - { name: playlistId, in: path, required: true, schema: { type: string } }
+      - { name: userId, in: path, required: true, schema: { type: string } }
+    patch:
+      summary: v5. Owner only. Change a member's role.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [role], properties: { role: { type: string, enum: [editor, viewer] } } } } }
+      responses:
+        '200':
+          description: members after the change
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PlaylistMember' } } } }
+    delete:
+      summary: v5. The owner removes a member, or a member leaves (their own userId). The owner can't leave (422).
+      responses: { '204': { description: removed } }
+  /playlists/{playlistId}/activity:
+    get:
+      summary: v5. Who did what, newest first.
+      parameters:
+        - { name: playlistId, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 500 } }
+        - { name: before, in: query, schema: { type: integer }, description: 'older than this activity id (paging)' }
+      responses:
+        '200':
+          description: activity
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PlaylistActivity' } } } }
+  /users:
+    get:
+      summary: v5. Other enabled users on this server (id + username), to share a playlist with.
+      responses:
+        '200':
+          description: users
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, required: [id, username], properties: { id: { type: string }, username: { type: string } } } }
   /queues:
     get:
       responses:
@@ -796,8 +910,11 @@ paths:
         Client → server: `hello`, `state` (PlaybackState, active device only), `command`, `transfer`, `ping`.
         Server → client: `welcome {deviceId, devices, state}`, `devices {devices}`, `state` (PlaybackState),
         `command {action, args, fromDeviceId}`, `takeover {state}`, `release`, `queues {queueId}`, `pong`,
-        `error {detail, source?}` (`source: speaker` = a speaker problem worth showing the user). Speakers (`kind: speaker`, see /cast/speakers) are listed as devices too; the server
-        plays on their behalf. The server sends WebSocket protocol pings every 20 s (keeps the Cloudflare tunnel open);
+        `error {detail, source?}` (`source: speaker` = a speaker problem worth showing the user), and (v5)
+        `playlist {playlistId, rev, deleted}` — sent to every device of the owner and every member when a playlist
+        changes (refetch it unless you already have that `rev`; `deleted: true` = deleted, or you lost access).
+        Clients must ignore message types they don't know. Speakers (`kind: speaker`, see /cast/speakers) are
+        listed as devices too; the server plays on their behalf. The server sends WebSocket protocol pings every 20 s (keeps the Cloudflare tunnel open);
         clients still send `ping` every 25 s. A newer socket from the same device replaces the older one.
       responses:
         '101': { description: switching protocols }
@@ -1136,6 +1253,136 @@ paths:
           content: { application/json: { schema: { type: object, required: [id], properties: { id: { type: string } } } } }
         '413': { description: too large }
         '429': { description: too many reports today }
+  /admin/tags/tracks/{trackId}:
+    get:
+      summary: |
+        Admin only (v5). A track's tags as the file has them, the overrides, and the effective tags. The music
+        library is read-only: edits are stored on the server and layered over the file's tags, survive rescans
+        (also when the file itself changes), and are what every other endpoint, search and the AI see.
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: tags
+          content: { application/json: { schema: { $ref: '#/components/schemas/TrackTagDetail' } } }
+        '403': { description: not an admin }
+  /admin/tags/edit:
+    post:
+      summary: |
+        Admin only (v5). Edit and/or revert tags on one or many tracks (bulk = multi-select) in one logged
+        batch. `revert` lists field names (title, artist, albumArtist, album, trackNo, discNo, year, genre,
+        lyrics, cover) to put back to the file's tags; ["*"] = all ("revert to file tags"). Editing artist,
+        album artist or album regroups tracks into albums/artists (album and artist ids may change; track ids
+        never do). Overriding an artist drops the file's MusicBrainz artist id for it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackIds]
+              properties:
+                trackIds: { type: array, items: { type: string }, minItems: 1, maxItems: 5000 }
+                set: { $ref: '#/components/schemas/TagValues' }
+                revert: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { $ref: '#/components/schemas/TagEditResult' } } }
+        '404': { description: unknown track }
+        '422': { description: bad field/value, or nothing to change }
+  /admin/tags/albums/{albumId}:
+    post:
+      summary: Admin only (v5). Same as /admin/tags/edit for every track of the album (album-level edit).
+      parameters: [ { name: albumId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                set: { $ref: '#/components/schemas/TagValues' }
+                revert: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { $ref: '#/components/schemas/TagEditResult' } } }
+  /admin/tags/albums/{albumId}/cover:
+    parameters: [ { name: albumId, in: path, required: true, schema: { type: string } } ]
+    put:
+      summary: |
+        Admin only (v5). Upload album art: the raw image is the request body (JPEG/PNG/WebP, max 15 MB).
+        It wins over folder and embedded art. GET /art/{albumId} then serves it (clients caching art by URL
+        should refetch it for this album).
+      requestBody:
+        required: true
+        content: { image/*: { schema: { type: string, format: binary } } }
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { $ref: '#/components/schemas/TagEditResult' } } }
+        '413': { description: too large }
+        '422': { description: not an image }
+    delete:
+      summary: Admin only (v5). Back to the folder/embedded art.
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { $ref: '#/components/schemas/TagEditResult' } } }
+  /admin/tags/history:
+    get:
+      summary: Admin only (v5). Tag edit audit log, newest first.
+      parameters:
+        - { name: trackId, in: query, schema: { type: string } }
+        - { name: albumId, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 1000 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: log
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/TagEditLogEntry' } } } }
+  /admin/tags/musicbrainz:
+    get:
+      summary: |
+        Admin only (v5). Tag suggestions from MusicBrainz (free; the server sends at most ~1 request/s with a
+        generic User-Agent). `trackId` → recordings; `albumId` → releases. `q` / `artist` override the search
+        terms (default: the current tags). 502 if MusicBrainz is unreachable or rate limiting.
+      parameters:
+        - { name: trackId, in: query, schema: { type: string } }
+        - { name: albumId, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: artist, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: suggestions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kind: { type: string, enum: [recordings, releases] }
+                  results: { type: array, items: { $ref: '#/components/schemas/TagSuggestion' } }
+  /admin/tags/musicbrainz/release/{mbid}:
+    get:
+      summary: Admin only (v5). A MusicBrainz release with its track list, to apply album-wide.
+      parameters: [ { name: mbid, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: release
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  releaseMbid: { type: string }
+                  album: { type: string }
+                  albumArtist: { type: [string, 'null'] }
+                  year: { type: [integer, 'null'] }
+                  genre: { type: [string, 'null'] }
+                  discCount: { type: integer }
+                  tracks:
+                    type: array
+                    items: { type: object, properties: { discNo: { type: integer }, trackNo: { type: integer }, title: { type: string }, artist: { type: [string, 'null'] }, recordingMbid: { type: string } } }
   /admin/users/{userId}/devices:
     get:
       summary: Admin only. A user's devices (online from Connect).
@@ -1823,6 +2070,12 @@ components:
         updatedAt: { type: string, format: date-time }
         trackCount: { type: integer }
         durationS: { type: number }
+        ownerId: { type: string, description: v5 }
+        owner: { type: [string, 'null'], description: 'v5: owner username' }
+        role: { type: string, enum: [owner, editor, viewer], description: 'v5: the caller''s role' }
+        rev: { type: integer, description: 'v5: bumped on every change (compare with Connect `playlist` messages)' }
+        memberCount: { type: integer, description: 'v5: members besides the owner' }
+        collaborative: { type: boolean, description: 'v5: memberCount > 0' }
     PlaylistDetail:
       allOf:
         - $ref: '#/components/schemas/Playlist'
@@ -1830,6 +2083,107 @@ components:
           required: [tracks]
           properties:
             tracks: { type: array, items: { $ref: '#/components/schemas/Track' }, description: 'in order; array index = position. Tracks whose file is gone stay listed with missing=true.' }
+            entries:
+              type: array
+              description: 'v5: parallel to `tracks` (same length and order): the entry id to use in entry operations, and who added it'
+              items: { $ref: '#/components/schemas/PlaylistEntry' }
+    PlaylistEntry:
+      type: object
+      required: [id, trackId, addedAt]
+      properties:
+        id: { type: string }
+        trackId: { type: string }
+        addedAt: { type: string, format: date-time }
+        addedById: { type: [string, 'null'] }
+        addedBy: { type: [string, 'null'], description: username (null if that user was deleted) }
+    PlaylistMember:
+      type: object
+      required: [userId, username, role]
+      properties:
+        userId: { type: string }
+        username: { type: string }
+        role: { type: string, enum: [owner, editor, viewer] }
+        addedAt: { type: string, format: date-time }
+    PlaylistActivity:
+      type: object
+      required: [id, at, action]
+      properties:
+        id: { type: integer }
+        at: { type: string, format: date-time }
+        userId: { type: [string, 'null'] }
+        user: { type: [string, 'null'] }
+        action: { type: string, enum: [create, rename, add, remove, move, member_add, member_role, member_remove, leave] }
+        trackId: { type: [string, 'null'], description: 'add/remove/move: the (first) track' }
+        trackTitle: { type: [string, 'null'] }
+        detail: { type: object, description: 'count, from/to (rename), user/role (members)' }
+    TagValues:
+      type: object
+      description: 'Tag fields. In an edit, omitted = unchanged; null or "" = clear the tag (lyrics: back to the file''s).'
+      properties:
+        title: { type: [string, 'null'] }
+        artist: { type: [string, 'null'] }
+        albumArtist: { type: [string, 'null'] }
+        album: { type: [string, 'null'] }
+        trackNo: { type: [integer, 'null'] }
+        discNo: { type: [integer, 'null'] }
+        year: { type: [integer, 'null'] }
+        genre: { type: [string, 'null'] }
+        lyrics: { type: [string, 'null'], description: 'only in edits: LRC or plain text, shown to everyone (lyrics source `library`)' }
+    TagEditResult:
+      type: object
+      required: [batchId, changed]
+      properties:
+        batchId: { type: string }
+        changed: { type: integer, description: number of (track, field) changes logged }
+        albumId: { type: string, description: 'cover upload only: the album id afterwards' }
+    TrackTagDetail:
+      type: object
+      required: [trackId, path, file, effective, overridden]
+      properties:
+        trackId: { type: string }
+        path: { type: string }
+        albumId: { type: string }
+        file: { $ref: '#/components/schemas/TagValues', description: what the music file says }
+        effective: { $ref: '#/components/schemas/TagValues', description: 'what everyone sees (file + overrides)' }
+        overridden: { type: array, items: { type: string }, description: 'field names with an override (incl. lyrics, cover)' }
+        overrides:
+          type: array
+          items:
+            type: object
+            properties: { field: { type: string }, value: {}, updatedAt: { type: string }, updatedBy: { type: [string, 'null'] } }
+        lyrics: { type: [string, 'null'], description: the library-wide lyrics override }
+        hasCoverOverride: { type: boolean }
+    TagEditLogEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        batchId: { type: string, description: one admin action; a bulk edit is one batch }
+        trackId: { type: string }
+        trackTitle: { type: string }
+        path: { type: string }
+        at: { type: string, format: date-time }
+        user: { type: [string, 'null'] }
+        action: { type: string, enum: [set, revert] }
+        field: { type: string }
+        oldValue: { description: effective value before (lyrics truncated to 200 chars) }
+        newValue: { description: effective value after }
+    TagSuggestion:
+      type: object
+      description: 'A MusicBrainz candidate. Recordings: title/artist/album/... per release. Releases: album-level fields.'
+      properties:
+        score: { type: [integer, 'null'] }
+        recordingMbid: { type: [string, 'null'] }
+        releaseMbid: { type: [string, 'null'] }
+        title: { type: [string, 'null'] }
+        artist: { type: [string, 'null'] }
+        album: { type: [string, 'null'] }
+        albumArtist: { type: [string, 'null'] }
+        year: { type: [integer, 'null'] }
+        trackNo: { type: [integer, 'null'] }
+        discNo: { type: [integer, 'null'] }
+        country: { type: [string, 'null'] }
+        trackCount: { type: [integer, 'null'] }
+        format: { type: [string, 'null'] }
     Queue:
       type: object
       required: [id, name, slot, currentIndex, positionMs, trackCount, durationS, createdAt, updatedAt]
@@ -2025,8 +2379,8 @@ components:
       properties:
         trackId: { type: string }
         synced: { type: boolean, description: 'true when every line has a timeMs (LRC timestamps)' }
-        source: { type: string, enum: [user, embedded, lrc_file, lrclib] }
-        sources: { type: array, items: { type: string, enum: [user, embedded, lrc_file, lrclib] }, description: 'every source that has lyrics for this track (for the source dropdown)' }
+        source: { type: string, enum: [user, library, embedded, lrc_file, lrclib], description: 'library = edited by an admin for everyone (v5)' }
+        sources: { type: array, items: { type: string, enum: [user, library, embedded, lrc_file, lrclib] }, description: 'every source that has lyrics for this track (for the source dropdown)' }
         canEdit: { type: boolean, description: 'always true in v2: the caller may PUT their own lyrics' }
         lines:
           type: array

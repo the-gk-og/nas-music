@@ -48,6 +48,10 @@ class ConnectClient(
     private val _events = kotlinx.coroutines.channels.Channel<ConnectMessage>(64)
     val events: kotlinx.coroutines.flow.Flow<ConnectMessage> = _events.receiveAsFlow()
 
+    /** v5: live playlist changes for open playlist screens (dropped when nobody listens). */
+    private val _playlistChanges = kotlinx.coroutines.flow.MutableSharedFlow<ConnectMessage.PlaylistChanged>(extraBufferCapacity = 16)
+    val playlistChanges: kotlinx.coroutines.flow.SharedFlow<ConnectMessage.PlaylistChanged> = _playlistChanges
+
     /** Called on takeover so the app can start the playback service (set by the container). */
     @Volatile var onTakeover: () -> Unit = {}
     /** A speaker the server plays on reported a problem ("Kitchen: the speaker couldn't play this track"). */
@@ -148,6 +152,7 @@ class ConnectClient(
             }
             is ConnectMessage.Command, ConnectMessage.Release, is ConnectMessage.QueuesChanged -> _events.trySend(m)
             is ConnectMessage.Error -> if (m.source == "speaker" && m.detail.isNotBlank()) onSpeakerError(m.detail)
+            is ConnectMessage.PlaylistChanged -> _playlistChanges.tryEmit(m)
             else -> Unit
         }
     }

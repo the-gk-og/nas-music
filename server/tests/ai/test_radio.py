@@ -63,7 +63,8 @@ def test_artist_album_playlist_seeds(conn, cfg, synth):
     conn.execute("INSERT INTO playlists (id, user_id, name, created_at, updated_at) VALUES ('p1', ?, 'Mine', ?, ?)",
                  (USER, iso(), iso()))
     for k, tr in enumerate(synth.by_cluster(1)[:4] + synth.by_cluster(5)[:4]):
-        conn.execute("INSERT INTO playlist_tracks VALUES ('p1', ?, ?, ?)", (k, tr["id"], iso()))
+        conn.execute("INSERT INTO playlist_tracks (id, playlist_id, position, track_id, added_at) "
+                         "VALUES (?, 'p1', ?, ?, ?)", (f"e{k}", k, tr["id"], iso()))
     _, ids = api.radio_start(conn, cfg, USER, {"type": "playlist", "id": "p1"})
     assert {cl[i] for i in ids} & {1, 5}
     # someone else's playlist is not yours to seed from

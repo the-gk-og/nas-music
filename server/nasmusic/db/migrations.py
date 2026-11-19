@@ -279,3 +279,70 @@ def migrate_v3_to_v4(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
         raise
     log.warning("schema v3 -> v4 done")
     return True
+
+
+# ---------- v4 -> v5 (admin tag overrides, collaborative playlists) ----------
+
+V5_TABLES = ("tag_overrides", "tag_edits", "playlist_members", "playlist_activity")
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _rebuild_playlist_tracks(conn: sqlite3.Connection, stmts: list[str]) -> None:
+    """v4 playlist_tracks (PK playlist_id+position, dense INTEGER positions) -> v5 (entry id PK, fractional
+    REAL position, added_by). Order is kept; positions become 1.0, 2.0, ...; added_by = the playlist owner."""
+    if "id" in _columns(conn, "playlist_tracks"):
+        return  # already v5-shaped (a v1 database upgraded by this code base creates it that way)
+    conn.execute(_create_table(stmts, "playlist_tracks", "playlist_tracks__v5"))
+    rows = conn.execute(
+        "SELECT pt.playlist_id, pt.position, pt.track_id, pt.added_at, p.user_id FROM playlist_tracks pt "
+        "JOIN playlists p ON p.id = pt.playlist_id ORDER BY pt.playlist_id, pt.position").fetchall()
+    conn.executemany(
+        "INSERT INTO playlist_tracks__v5 (id, playlist_id, position, track_id, added_at, added_by) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [(uuid.uuid4().hex, r[0], float(r[1] + 1), r[2], r[3], r[4]) for r in rows])
+    conn.execute("DROP TABLE playlist_tracks")
+    conn.execute("ALTER TABLE playlist_tracks__v5 RENAME TO playlist_tracks")
+
+
+def migrate_v4_to_v5(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """New tables, two nullable/defaulted columns, and a rebuild of playlist_tracks (data kept, in one
+    transaction with foreign keys off). Returns True if it migrated."""
+    if current_version(conn) != 4:
+        return False
+    if make_backup:
+        dest = backup(conn, "v4-backup")
+        if dest:
+            log.warning("schema v4 -> v5: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if current_version(conn) != 4:
+                conn.execute("ROLLBACK")
+                return False
+            for t in V5_TABLES:
+                if not _table_exists(conn, t):
+                    conn.execute(_create_table(stmts, t))
+            if "file_tags" not in _columns(conn, "tracks"):
+                conn.execute("ALTER TABLE tracks ADD COLUMN file_tags TEXT")
+            if "rev" not in _columns(conn, "playlists"):
+                conn.execute("ALTER TABLE playlists ADD COLUMN rev INTEGER NOT NULL DEFAULT 0")
+            _rebuild_playlist_tracks(conn, stmts)
+            _create_indexes(conn, stmts)
+            bad = conn.execute("PRAGMA foreign_key_check(playlist_tracks)").fetchall()
+            if bad:
+                log.warning("schema v5: %d playlist entries point at missing rows (kept)", len(bad))
+            conn.execute("DELETE FROM schema_version")
+            conn.execute("INSERT INTO schema_version (version) VALUES (5)")
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+    log.warning("schema v4 -> v5 done")
+    return True

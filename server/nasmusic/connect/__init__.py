@@ -153,6 +153,13 @@ class Hub:
         """A queue changed (REST API): tell all the user's devices to refetch it."""
         self._call_soon(self._broadcast, uid, {"type": "queues", "queueId": queue_id})
 
+    def notify_playlist(self, uids, playlist_id: str, rev: int | None, deleted: bool = False) -> None:
+        """A playlist changed (REST API): tell every device of everyone with access (owner + members) to
+        refetch it. `rev` lets a client skip a refetch it already has; `deleted` = gone or access removed."""
+        msg = {"type": "playlist", "playlistId": playlist_id, "rev": rev, "deleted": deleted}
+        for uid in set(uids):
+            self._call_soon(self._broadcast, uid, msg)
+
     def disconnect_device(self, device_id: str) -> None:
         """A device was signed out / revoked: close its socket."""
         self._call_soon(self._close_device, device_id)

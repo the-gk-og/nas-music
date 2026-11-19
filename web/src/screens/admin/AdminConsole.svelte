@@ -1,6 +1,6 @@
 <script lang="ts">
   // Admin console: desktop-first (section list on the left), chips on phones.
-  import { Activity, ArrowLeft, Bug, DatabaseBackup, HeartPulse, Library, ScrollText, Settings, Users } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Bug, DatabaseBackup, HeartPulse, Library, ScrollText, Settings, Tags, Users } from '@lucide/svelte';
   import { appearance } from '../../lib/appearance.svelte';
   import { session } from '../../lib/session.svelte';
   import { ui } from '../../lib/ui.svelte';
@@ -11,12 +11,14 @@
   import Logs from './Logs.svelte';
   import Reports from './Reports.svelte';
   import ServerSettings from './ServerSettings.svelte';
+  import TagsAdmin from './TagsAdmin.svelte';
   import UsersSection from './Users.svelte';
 
   const SECTIONS = [
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
     { id: 'users', label: 'Users & invites', icon: Users },
     { id: 'library', label: 'Library', icon: Library },
+    { id: 'tags', label: 'Tags', icon: Tags },
     { id: 'health', label: 'Health & pruning', icon: HeartPulse },
     { id: 'logs', label: 'Logs & jobs', icon: ScrollText },
     { id: 'reports', label: 'Bug reports', icon: Bug },
@@ -50,6 +52,7 @@
       {#if section === 'dashboard'}<Dashboard />
       {:else if section === 'users'}<UsersSection />
       {:else if section === 'library'}<LibraryAdmin />
+      {:else if section === 'tags'}<TagsAdmin />
       {:else if section === 'health'}<Health />
       {:else if section === 'logs'}<Logs />
       {:else if section === 'reports'}<Reports />

@@ -22,6 +22,7 @@
     Share2,
     Sparkles,
     Speaker,
+    Tags,
     User,
     X,
   } from '@lucide/svelte';
@@ -37,6 +38,8 @@
   import Art from './Art.svelte';
   import Avatar from './Avatar.svelte';
   import DevicesList from './DevicesList.svelte';
+  import PlaylistShareSheet from './PlaylistShareSheet.svelte';
+  import TagEditSheet from './TagEditSheet.svelte';
   import { isPlayable, openItem, playItem, radioFor } from '../lib/items';
   import { isPinType, library } from '../lib/library.svelte';
   import { samples } from '../lib/samples.svelte';
@@ -58,7 +61,7 @@
   $effect(() => {
     if (d?.kind !== 'addToPlaylist') return;
     playlists = null;
-    session.api.playlists().then((p) => (playlists = p)).catch(() => (playlists = []));
+    session.api.playlists().then((p) => (playlists = p.filter((x) => x.role !== 'viewer'))).catch(() => (playlists = []));
   });
 
   // ---- prompt value / lyrics editor ----
@@ -189,6 +192,7 @@
       <button onclick={() => { ui.close(); void player.startRadio({ type: 'track', id: t.id }, `${t.title} radio`); }}><Radio />Start radio</button>
       <button onclick={() => moreLike(t.id)}><Sparkles />More like this</button>
       <button onclick={() => ui.open({ kind: 'songInfo', trackId: t.id })}><Info />Song info</button>
+      {#if session.isAdmin}<button onclick={() => ui.open({ kind: 'tagEdit', trackIds: [t.id], title: t.title })}><Tags />Edit tags</button>{/if}
       <button onclick={() => share(t.id)}><Share2 />Share</button>
     </div>
   </Sheet>
@@ -227,6 +231,10 @@
     </div>
     <div class="foot"><span></span><button class="btn text" onclick={() => ui.close()}>Cancel</button></div>
   </Sheet>
+{:else if d?.kind === 'tagEdit'}
+  <TagEditSheet trackIds={d.trackIds} albumId={d.albumId} title={d.title} />
+{:else if d?.kind === 'playlistShare'}
+  <PlaylistShareSheet playlistId={d.playlistId} />
 {:else if d?.kind === 'addToQueue'}
   <Sheet label="Add to a queue">
     <div class="pad">

@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { ListEnd, ListPlus } from '@lucide/svelte';
+  import { ListEnd, ListPlus, Tags } from '@lucide/svelte';
   import Card from '../components/Card.svelte';
   import PageHeader from '../components/PageHeader.svelte';
   import Shelf from '../components/Shelf.svelte';
   import TrackList from '../components/TrackList.svelte';
   import { fmtTime } from '../lib/format';
+  import { library } from '../lib/library.svelte';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
   import type { Album, ShelfItem, Track } from '../lib/types';
@@ -15,6 +16,7 @@
   let more = $state<Album[]>([]);
   let error = $state<string | null>(null);
   $effect(() => {
+    void library.tagsRev; // reload after an admin tag edit
     session.api
       .album(id)
       .then((a) => {
@@ -50,6 +52,9 @@
         <button onclick={() => player.addToQueue(album!.tracks, 'next')}><ListEnd size={18} /> Play next</button>
         <button onclick={() => player.addToQueue(album!.tracks, 'end')}><ListEnd size={18} /> Add to queue</button>
         <button onclick={() => ui.open({ kind: 'addToPlaylist', tracks: album!.tracks })}><ListPlus size={18} /> Add to playlist</button>
+        {#if session.isAdmin}
+          <button onclick={() => ui.open({ kind: 'tagEdit', trackIds: album!.tracks.map((t) => t.id), albumId: album!.id, title: album!.title })}><Tags size={18} /> Edit album tags</button>
+        {/if}
       {/snippet}
     </PageHeader>
     <TrackList tracks={album.tracks} queueName={name} {meta} showAlbum={false} />

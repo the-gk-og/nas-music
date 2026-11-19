@@ -67,6 +67,8 @@ export type Dialog =
   | { kind: 'speed' }
   | { kind: 'lyricsEditor'; track: Track; raw: string }
   | { kind: 'devices' }
+  | { kind: 'tagEdit'; trackIds: string[]; albumId?: string; title: string }
+  | { kind: 'playlistShare'; playlistId: string }
   | { kind: 'itemMenu'; item: import('./types').ShelfItem }
   | { kind: 'profile' }
   | { kind: 'catalog'; item: import('./types').CatalogItem }

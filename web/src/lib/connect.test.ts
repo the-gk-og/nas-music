@@ -57,6 +57,7 @@ beforeEach(() => {
     onState: vi.fn(),
     onDevices: vi.fn(),
     onQueueChanged: vi.fn(),
+    onPlaylistChanged: vi.fn(),
     onStatus: vi.fn(),
   };
   c = new ConnectClient({
@@ -150,6 +151,14 @@ describe('ConnectClient', () => {
     s.recv({ type: 'queues', queueId: 'q7' });
     expect(handlers.onCommand).toHaveBeenCalledWith('next', {}, 'phone');
     expect(handlers.onQueueChanged).toHaveBeenCalledWith('q7');
+  });
+
+  it('delivers playlist changes (v5)', () => {
+    const s = connect();
+    s.recv({ type: 'playlist', playlistId: 'p1', rev: 4, deleted: false });
+    s.recv({ type: 'playlist', playlistId: 'p2', rev: null, deleted: true });
+    expect(handlers.onPlaylistChanged).toHaveBeenCalledWith('p1', 4, false);
+    expect(handlers.onPlaylistChanged).toHaveBeenCalledWith('p2', null, true);
   });
 
   it('pings every 25 s and reconnects when no pong arrives', () => {

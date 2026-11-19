@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 
 from nasmusic.config import Config
 from nasmusic.core import now_iso
-from nasmusic.library import art, tags
+from nasmusic.library import art, overrides, tags
 
 log = logging.getLogger(__name__)
 
@@ -135,6 +135,35 @@ def _folder_art(rel_dir: str, images: dict[str, list[str]]) -> str | None:
     return None
 
 
+def upsert_names(conn: sqlite3.Connection, rel: str, t: tags.TrackTags, now: str) -> tuple[str, str]:
+    """Create/update the artist and album rows the (effective) tags `t` of file `rel` belong to.
+    Returns (track artist id, album id)."""
+    rel_dir = PurePosixPath(rel).parent.as_posix()
+    track_artist = t.artist or t.albumartist or UNKNOWN_ARTIST
+    album_artist = t.albumartist or t.artist or UNKNOWN_ARTIST
+    # MBIDs only apply when they belong to the name we use.
+    aa_mbid = t.mb_albumartist or (t.mb_artist if not t.albumartist else None)
+    aa_id = artist_id(album_artist, aa_mbid)
+    ta_id = artist_id(track_artist, t.mb_artist if t.artist else aa_mbid)
+    album_title = t.album or (PurePosixPath(rel_dir).name if rel_dir not in ("", ".") else UNKNOWN_ALBUM)
+    al_id = album_id(aa_id, album_title)
+    for aid, name, mbid in ((aa_id, album_artist, aa_mbid), (ta_id, track_artist, None)):
+        conn.execute(
+            "INSERT INTO artists (id, name, sort_name, mbid) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET name = excluded.name, sort_name = excluded.sort_name, "
+            "mbid = COALESCE(excluded.mbid, artists.mbid)",
+            (aid, name, sort_name(name), mbid or (aid[3:] if aid.startswith("mb:") else None)),
+        )
+    conn.execute(
+        "INSERT INTO albums (id, artist_id, title, year, mbid, art_path, added_at) "
+        "VALUES (?, ?, ?, ?, ?, NULL, ?) "
+        "ON CONFLICT(id) DO UPDATE SET title = excluded.title, "
+        "mbid = COALESCE(excluded.mbid, albums.mbid)",
+        (al_id, aa_id, album_title, t.year, t.mb_releasegroup, now),
+    )
+    return ta_id, al_id
+
+
 def scan(cfg: Config, conn: sqlite3.Connection, full: bool = False) -> ScanResult:
     """Scan the library. `full` re-reads tags of every file. Serialised by a process-wide lock."""
     with _scan_lock:
@@ -179,37 +208,19 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool) -> ScanResult:
     embedded_candidates: dict[str, bytes | None] = {}
     conn.execute("BEGIN IMMEDIATE")
     try:
+        all_overrides = overrides.load_all(conn)
         for f, t, mf in changed:
             rel_dir = PurePosixPath(f.rel).parent.as_posix()
-            track_artist = t.artist or t.albumartist or UNKNOWN_ARTIST
-            album_artist = t.albumartist or t.artist or UNKNOWN_ARTIST
-            # MBIDs only apply when they belong to the name we use.
-            aa_mbid = t.mb_albumartist or (t.mb_artist if not t.albumartist else None)
-            aa_id = artist_id(album_artist, aa_mbid)
-            ta_id = artist_id(track_artist, t.mb_artist if t.artist else aa_mbid)
-            album_title = t.album or (PurePosixPath(rel_dir).name if rel_dir not in ("", ".") else UNKNOWN_ALBUM)
-            al_id = album_id(aa_id, album_title)
-            for aid, name, mbid in ((aa_id, album_artist, aa_mbid), (ta_id, track_artist, None)):
-                conn.execute(
-                    "INSERT INTO artists (id, name, sort_name, mbid) VALUES (?, ?, ?, ?) "
-                    "ON CONFLICT(id) DO UPDATE SET name = excluded.name, sort_name = excluded.sort_name, "
-                    "mbid = COALESCE(excluded.mbid, artists.mbid)",
-                    (aid, name, sort_name(name), mbid or (aid[3:] if aid.startswith("mb:") else None)),
-                )
-            conn.execute(
-                "INSERT INTO albums (id, artist_id, title, year, mbid, art_path, added_at) "
-                "VALUES (?, ?, ?, ?, ?, NULL, ?) "
-                "ON CONFLICT(id) DO UPDATE SET title = excluded.title, "
-                "mbid = COALESCE(excluded.mbid, albums.mbid)",
-                (al_id, aa_id, album_title, t.year, t.mb_releasegroup, now),
-            )
             tid = track_id(f.rel)
+            file_tags = overrides.file_tags_json(t)
+            t = overrides.apply(t, all_overrides.get(tid))
+            ta_id, al_id = upsert_names(conn, f.rel, t, now)
             prev = existing.get(f.rel)
             conn.execute(
                 "INSERT INTO tracks (id, path, album_id, artist_id, title, track_no, disc_no, year, genre, "
                 "duration_s, flac_bytes, mtime, mbid, added_at, missing, composer, lyricist, comment, album_artist, "
-                "codec, bitrate, sample_rate, bits_per_sample, channels, folder) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "codec, bitrate, sample_rate, bits_per_sample, channels, folder, file_tags) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET album_id = excluded.album_id, artist_id = excluded.artist_id, "
                 "title = excluded.title, track_no = excluded.track_no, disc_no = excluded.disc_no, "
                 "year = excluded.year, genre = excluded.genre, duration_s = excluded.duration_s, "
@@ -217,11 +228,11 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool) -> ScanResult:
                 "composer = excluded.composer, lyricist = excluded.lyricist, comment = excluded.comment, "
                 "album_artist = excluded.album_artist, codec = excluded.codec, bitrate = excluded.bitrate, "
                 "sample_rate = excluded.sample_rate, bits_per_sample = excluded.bits_per_sample, "
-                "channels = excluded.channels, folder = excluded.folder",
+                "channels = excluded.channels, folder = excluded.folder, file_tags = excluded.file_tags",
                 (tid, f.rel, al_id, ta_id, t.title or Path(f.rel).stem, t.track_no, t.disc_no, t.year,
                  t.genre, t.duration_s, f.size, f.mtime, t.mb_track, now, t.composer, t.lyricist, t.comment,
                  t.albumartist, t.codec, t.bitrate, t.sample_rate, t.bits_per_sample, t.channels,
-                 "" if rel_dir in ("", ".") else rel_dir),
+                 "" if rel_dir in ("", ".") else rel_dir, file_tags),
             )
             if prev is None:
                 res.added += 1
@@ -270,10 +281,13 @@ def _sync_albums(cfg: Config, conn: sqlite3.Connection, images: dict[str, list[s
     ):
         first_dir.setdefault(r["album_id"], PurePosixPath(r["path"]).parent.as_posix())
     current = {r["id"]: r["art_path"] for r in conn.execute("SELECT id, art_path FROM albums")}
+    covers = overrides.album_covers(conn)
     for al_id, d in first_dir.items():
-        want = _folder_art("" if d == "." else d, images)
+        want = covers.get(al_id) or _folder_art("" if d == "." else d, images)
         if want != current.get(al_id):
             conn.execute("UPDATE albums SET art_path = ? WHERE id = ?", (want, al_id))
+            if current.get(al_id) and current[al_id].startswith(art.UPLOAD_PREFIX):
+                art.forget_resized(cfg.data_dir, al_id)  # back from an uploaded cover to an older file
         if want:
             continue
         if al_id in touched or not art.embedded_state_known(cfg.data_dir, al_id):

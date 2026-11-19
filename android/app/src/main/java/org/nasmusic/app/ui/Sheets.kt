@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QuestionMark
@@ -91,6 +92,7 @@ fun GlobalSheets(c: AppContainer) {
     ui.songInfo?.let { SongInfoSheet(c, it) { ui.songInfo = null } }
     ui.addToPlaylist?.let { AddToPlaylistDialog(c, it.map { t -> t.id }) { ui.addToPlaylist = null } }
     ui.addToQueue?.let { AddToQueueDialog(c, it.map { t -> t.id }) { ui.addToQueue = null } }
+    ui.tagEdit?.let { TagEditDialog(c, it) { ui.tagEdit = null; ui.tagsRev++ } }
     if (ui.devicesOpen) DevicesSheet(c) { ui.devicesOpen = false }
     if (ui.speedOpen) SpeedPitchDialog(c) { ui.speedOpen = false }
     if (ui.abOpen) AbRepeatDialog(c) { ui.abOpen = false }
@@ -137,6 +139,9 @@ private fun SongMenuSheet(c: AppContainer, target: SongMenuTarget, onDismiss: ()
                 }
             }
             MenuItem(Icons.Default.Info, "Song info") { close { ui.songInfo = t.id } }
+            if (c.secureStore.config.value?.isAdmin == true) {
+                MenuItem(Icons.Default.Edit, "Edit tags") { close { ui.tagEdit = TagEditTarget(listOf(t.id), t.title) } }
+            }
             if (isCurrent) {
                 MenuItem(Icons.Default.QuestionMark, "Why this song?") {
                     close {
@@ -243,7 +248,7 @@ private fun AddToPlaylistDialog(c: AppContainer, trackIds: List<String>, onDismi
     val scope = rememberCoroutineScope()
     var lists by remember { mutableStateOf<List<Playlist>?>(null) }
     var newName by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) { lists = runCatching { c.api.playlists() }.getOrDefault(emptyList()) }
+    LaunchedEffect(Unit) { lists = runCatching { c.api.playlists().filter { it.role != "viewer" } }.getOrDefault(emptyList()) }
     fun add(id: String, name: String) = scope.launch {
         runCatching { c.api.addToPlaylist(id, TrackIdsBody(trackIds)) }
             .onSuccess { ui.toast = "Added to $name" }.onFailure { ui.toast = "Couldn't add to $name" }

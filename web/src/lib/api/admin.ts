@@ -141,6 +141,97 @@ export interface SettingsSaveResult {
   restartRequired: string[];
 }
 
+// ---- v5 tag editing (/admin/tags) ----
+
+export interface TagValues {
+  title?: string | null;
+  artist?: string | null;
+  albumArtist?: string | null;
+  album?: string | null;
+  trackNo?: number | null;
+  discNo?: number | null;
+  year?: number | null;
+  genre?: string | null;
+  lyrics?: string | null;
+}
+export type TagField = keyof TagValues | 'cover';
+
+export interface TrackTagDetail {
+  trackId: string;
+  path: string;
+  albumId: string;
+  file: TagValues;
+  effective: TagValues;
+  overridden: TagField[];
+  lyrics: string | null;
+  hasCoverOverride: boolean;
+}
+
+export interface TagEditResult {
+  batchId: string;
+  changed: number;
+  albumId?: string;
+}
+
+export interface TagEditLogEntry {
+  id: number;
+  batchId: string;
+  trackId: string;
+  trackTitle: string;
+  path: string;
+  at: string;
+  user: string | null;
+  action: 'set' | 'revert';
+  field: string;
+  oldValue: unknown;
+  newValue: unknown;
+}
+
+export interface TagSuggestion {
+  score?: number | null;
+  recordingMbid?: string | null;
+  releaseMbid?: string | null;
+  title?: string | null;
+  artist?: string | null;
+  album?: string | null;
+  albumArtist?: string | null;
+  year?: number | null;
+  trackNo?: number | null;
+  discNo?: number | null;
+  country?: string | null;
+  trackCount?: number | null;
+  format?: string | null;
+}
+
+export interface MbRelease {
+  releaseMbid: string;
+  album: string;
+  albumArtist: string | null;
+  year: number | null;
+  genre: string | null;
+  discCount: number;
+  tracks: { discNo: number; trackNo: number; title: string; artist: string | null; recordingMbid: string }[];
+}
+
+export function tagsApi(c: ApiClient) {
+  const enc = encodeURIComponent;
+  return {
+    track: (id: string) => c.get<TrackTagDetail>(`/admin/tags/tracks/${enc(id)}`),
+    edit: (trackIds: string[], set: TagValues = {}, revert: string[] = []) =>
+      c.post<TagEditResult>('/admin/tags/edit', { trackIds, set, revert }),
+    editAlbum: (albumId: string, set: TagValues = {}, revert: string[] = []) =>
+      c.post<TagEditResult>(`/admin/tags/albums/${enc(albumId)}`, { set, revert }),
+    uploadCover: (albumId: string, file: Blob) =>
+      c.putRaw<TagEditResult>(`/admin/tags/albums/${enc(albumId)}/cover`, file, file.type || 'application/octet-stream'),
+    revertCover: (albumId: string) => c.del<TagEditResult>(`/admin/tags/albums/${enc(albumId)}/cover`),
+    history: (q: { trackId?: string; albumId?: string; limit?: number; offset?: number } = {}) =>
+      c.get<TagEditLogEntry[]>('/admin/tags/history', q),
+    musicbrainz: (q: { trackId?: string; albumId?: string; q?: string; artist?: string }) =>
+      c.get<{ kind: 'recordings' | 'releases'; results: TagSuggestion[] }>('/admin/tags/musicbrainz', q),
+    mbRelease: (mbid: string) => c.get<MbRelease>(`/admin/tags/musicbrainz/release/${enc(mbid)}`),
+  };
+}
+
 export function adminApi(c: ApiClient) {
   const enc = encodeURIComponent;
   return {

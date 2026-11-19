@@ -115,6 +115,15 @@ data class Playlist(
     val createdAt: String? = null,
     val updatedAt: String? = null,
     val tracks: List<Track> = emptyList(),
+    // v5: collaborative playlists
+    val ownerId: String? = null,
+    val owner: String? = null,
+    val role: String = "owner",
+    val rev: Int = 0,
+    val memberCount: Int = 0,
+    val collaborative: Boolean = false,
+    /** Parallel to [tracks]. */
+    val entries: List<PlaylistEntry> = emptyList(),
 )
 
 @Serializable

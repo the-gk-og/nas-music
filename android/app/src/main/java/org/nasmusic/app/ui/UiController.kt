@@ -13,6 +13,10 @@ class UiController(val nav: NavHostController) {
     var songInfo by mutableStateOf<String?>(null)
     var addToPlaylist by mutableStateOf<List<Track>?>(null)
     var addToQueue by mutableStateOf<List<Track>?>(null)
+    /** v5: admin tag editor. */
+    var tagEdit by mutableStateOf<TagEditTarget?>(null)
+    /** Bumped after a tag edit so open screens reload. */
+    var tagsRev by mutableStateOf(0)
     var devicesOpen by mutableStateOf(false)
     var speedOpen by mutableStateOf(false)
     var abOpen by mutableStateOf(false)

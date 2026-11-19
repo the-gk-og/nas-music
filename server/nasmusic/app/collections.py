@@ -1,6 +1,6 @@
-"""Per-user playlists and Musicolet-style queues (max 20, numbered by slot).
+"""Per-user Musicolet-style queues (max 20, numbered by slot); playlists live in nasmusic.app.playlists.
 
-Positions are dense (0..n-1). Edits read the id list, change it in Python and rewrite the rows in one
+Queue positions are dense (0..n-1). Edits read the id list, change it in Python and rewrite the rows in one
 transaction, which is simple and fast enough for lists of a few thousand tracks."""
 from __future__ import annotations
 
@@ -22,6 +22,14 @@ class NotFound(Exception):
 
 class BadRequest(Exception):
     pass
+
+
+class Forbidden(Exception):
+    pass
+
+
+class Conflict(Exception):
+    """The client's view is stale (an entry it referred to was moved/removed by someone else)."""
 
 
 @contextmanager
@@ -57,92 +65,6 @@ def _move(items: list, frm: int, to: int) -> list:
 def _tracks(conn: sqlite3.Connection, uid: str, ids: list[str]) -> list[dict]:
     by_id = queries.tracks_by_ids(conn, uid, ids, include_missing=True)
     return [by_id[i] for i in ids if i in by_id]
-
-
-# ---------- playlists ----------
-
-
-def _playlist_row(conn: sqlite3.Connection, uid: str, pid: str) -> sqlite3.Row:
-    row = conn.execute("SELECT * FROM playlists WHERE id = ? AND user_id = ?", (pid, uid)).fetchone()
-    if row is None:
-        raise NotFound("no such playlist")
-    return row
-
-
-def _playlist_ids(conn: sqlite3.Connection, pid: str) -> list[str]:
-    return [r[0] for r in conn.execute(
-        "SELECT track_id FROM playlist_tracks WHERE playlist_id = ? ORDER BY position", (pid,))]
-
-
-def _playlist_summary(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
-    s = conn.execute("SELECT COUNT(*), COALESCE(SUM(t.duration_s), 0) FROM playlist_tracks p "
-                     "JOIN tracks t ON t.id = p.track_id WHERE p.playlist_id = ?", (row["id"],)).fetchone()
-    return {"id": row["id"], "name": row["name"], "createdAt": row["created_at"], "updatedAt": row["updated_at"],
-            "trackCount": s[0], "durationS": round(s[1], 3)}
-
-
-def list_playlists(conn: sqlite3.Connection, uid: str) -> list[dict]:
-    rows = conn.execute("SELECT * FROM playlists WHERE user_id = ? ORDER BY updated_at DESC, name", (uid,))
-    return [_playlist_summary(conn, r) for r in rows.fetchall()]
-
-
-def get_playlist(conn: sqlite3.Connection, uid: str, pid: str) -> dict:
-    row = _playlist_row(conn, uid, pid)
-    return {**_playlist_summary(conn, row), "tracks": _tracks(conn, uid, _playlist_ids(conn, pid))}
-
-
-def _write_playlist(conn: sqlite3.Connection, pid: str, ids: list[str], added: dict[str, str] | None = None) -> None:
-    old = {r["track_id"]: r["added_at"] for r in conn.execute(
-        "SELECT track_id, added_at FROM playlist_tracks WHERE playlist_id = ?", (pid,))}
-    now = now_iso()
-    conn.execute("DELETE FROM playlist_tracks WHERE playlist_id = ?", (pid,))
-    conn.executemany("INSERT INTO playlist_tracks (playlist_id, position, track_id, added_at) VALUES (?, ?, ?, ?)",
-                     [(pid, i, t, (added or {}).get(t) or old.get(t) or now) for i, t in enumerate(ids)])
-    conn.execute("UPDATE playlists SET updated_at = ? WHERE id = ?", (now, pid))
-
-
-def create_playlist(conn: sqlite3.Connection, uid: str, name: str, track_ids: list[str] | None = None) -> dict:
-    ids = list(track_ids or [])
-    _check_tracks(conn, ids)
-    pid = uuid.uuid4().hex
-    now = now_iso()
-    with _tx(conn):
-        conn.execute("INSERT INTO playlists (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                     (pid, uid, name.strip()[:200] or "Playlist", now, now))
-        _write_playlist(conn, pid, ids)
-    return get_playlist(conn, uid, pid)
-
-
-def rename_playlist(conn: sqlite3.Connection, uid: str, pid: str, name: str) -> dict:
-    _playlist_row(conn, uid, pid)
-    conn.execute("UPDATE playlists SET name = ?, updated_at = ? WHERE id = ?", (name.strip()[:200], now_iso(), pid))
-    return get_playlist(conn, uid, pid)
-
-
-def delete_playlist(conn: sqlite3.Connection, uid: str, pid: str) -> None:
-    if conn.execute("DELETE FROM playlists WHERE id = ? AND user_id = ?", (pid, uid)).rowcount != 1:
-        raise NotFound("no such playlist")
-
-
-def edit_playlist(conn: sqlite3.Connection, uid: str, pid: str, *, add: list[str] | None = None,
-                  position: int | None = None, remove: int | None = None,
-                  move: tuple[int, int] | None = None) -> dict:
-    _playlist_row(conn, uid, pid)
-    if add:
-        _check_tracks(conn, add)
-    with _tx(conn):
-        ids = _playlist_ids(conn, pid)
-        if add is not None:
-            at = len(ids) if position is None else max(0, min(position, len(ids)))
-            ids[at:at] = add
-        if remove is not None:
-            if not 0 <= remove < len(ids):
-                raise BadRequest("position out of range")
-            ids.pop(remove)
-        if move is not None:
-            ids = _move(ids, *move)
-        _write_playlist(conn, pid, ids)
-    return get_playlist(conn, uid, pid)
 
 
 # ---------- queues ----------
@@ -322,7 +244,9 @@ def edit_queue(conn: sqlite3.Connection, uid: str, qid: str, *, add: list[str] |
 
 def queue_to_playlist(conn: sqlite3.Connection, uid: str, qid: str, name: str) -> dict:
     _queue_row(conn, uid, qid)
-    return create_playlist(conn, uid, name, _queue_ids(conn, qid))
+    from nasmusic.app import playlists
+
+    return playlists.create_playlist(conn, uid, name, _queue_ids(conn, qid))
 
 
 def queue_track_at(conn: sqlite3.Connection, uid: str, qid: str, index: int) -> str | None:
