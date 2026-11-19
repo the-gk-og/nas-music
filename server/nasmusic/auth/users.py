@@ -126,10 +126,14 @@ def ensure_admin(conn: sqlite3.Connection, username: str, password_hash: str | N
 
 def list_all(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
-        "SELECT u.*, (SELECT COUNT(*) FROM devices d WHERE d.user_id = u.id AND d.revoked = 0) AS devices "
+        "SELECT u.*, (SELECT COUNT(*) FROM devices d WHERE d.user_id = u.id AND d.revoked = 0) AS devices, "
+        "(SELECT MAX(last_seen) FROM devices d WHERE d.user_id = u.id) AS seen, "
+        "(SELECT MAX(received_at) FROM events e WHERE e.user_id = u.id) AS evt "
         "FROM users u ORDER BY u.username COLLATE NOCASE"
     ).fetchall()
-    return [{**_user(r).as_api(), "disabled": bool(r["disabled"]), "deviceCount": r["devices"]} for r in rows]
+    return [{**_user(r).as_api(), "disabled": bool(r["disabled"]), "deviceCount": r["devices"],
+             "lastActivity": max((x for x in (r["last_login"], r["seen"], r["evt"]) if x), default=None)}
+            for r in rows]
 
 
 def admin_view(conn: sqlite3.Connection, user_id: str) -> dict | None:

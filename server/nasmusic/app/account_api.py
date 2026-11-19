@@ -178,6 +178,49 @@ def my_pair_code(me: Device = Depends(device), conn: Conn = Depends(db), c: AppC
             "qrPayload": qr.payload(c.cfg, c.server_id, c.cert_sha256, code)}
 
 
+class BugReportIn(BaseModel):
+    description: str | None = Field(default=None, max_length=5000)
+    appVersion: str | None = Field(default=None, max_length=50)
+    platform: str | None = Field(default=None, max_length=100)
+    logs: str
+    crash: str | None = None
+    extra: dict | None = None
+
+
+@router.post("/me/bug-report")
+async def bug_report(request: Request, me: Device = Depends(device), c: AppContext = Depends(ctx)):
+    from starlette.concurrency import run_in_threadpool
+
+    from nasmusic.app import bugreports
+    from nasmusic.core import open_db
+
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > bugreports.MAX_BYTES:
+        raise HTTPException(413, "bug report too large (max 2 MB)")
+    buf = bytearray()
+    async for chunk in request.stream():
+        buf += chunk
+        if len(buf) > bugreports.MAX_BYTES:
+            raise HTTPException(413, "bug report too large (max 2 MB)")
+    try:
+        body = BugReportIn.model_validate_json(bytes(buf))
+    except ValueError as e:
+        raise HTTPException(422, "invalid bug report") from e
+
+    def store() -> str:
+        conn = open_db(c.cfg)
+        try:
+            return bugreports.create(conn, me.user_id, me.id, body.model_dump(), len(buf))
+        finally:
+            conn.close()
+
+    try:
+        rid = await run_in_threadpool(store)
+    except bugreports.TooMany as e:
+        raise HTTPException(429, "too many bug reports today") from e
+    return {"id": rid}
+
+
 @router.get("/me/settings")
 def get_settings(me: Device = Depends(device), conn: Conn = Depends(db)):
     return {"settings": userdata.get_settings(conn, me.user_id)}

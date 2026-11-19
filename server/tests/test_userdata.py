@@ -140,5 +140,6 @@ def test_admin_cannot_read_other_users_context(client, bob, conn, meteo):
     assert client.get(f"{API}/me/data").json()["events"]["count"] == 0
     assert client.get(f"{API}/me/data/export").json()["events"] == []
     users = client.get(f"{API}/admin/users").json()
-    assert all(set(u) == {"id", "username", "isAdmin", "createdAt", "lastLogin", "disabled", "deviceCount"}
+    assert all(set(u) == {"id", "username", "isAdmin", "createdAt", "lastLogin", "disabled", "deviceCount",
+                          "lastActivity"}
                for u in users)

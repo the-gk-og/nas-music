@@ -195,6 +195,16 @@ class Jobs:
         self.scheduler = sched
         return sched
 
+    def reschedule(self) -> None:
+        """Apply a changed timezone (admin settings) to the cron jobs."""
+        if self.scheduler is None:
+            return
+        tz = ZoneInfo(self.cfg.timezone)
+        for job_id, kw in (("nightly", {"hour": 2, "minute": 0}),
+                           ("discovery", {"day_of_week": "sun", "hour": 3, "minute": 0}),
+                           ("cleanup", {"hour": 4, "minute": 30})):
+            self.scheduler.reschedule_job(job_id, trigger="cron", timezone=tz, **kw)
+
     def next_runs(self) -> dict[str, str | None]:
         if self.scheduler is None:
             return {}
