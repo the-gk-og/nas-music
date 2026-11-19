@@ -311,7 +311,8 @@ def test_a_second_user_takes_the_speaker(tc, conn, speaker):
         _state_until(b, lambda s: s["activeDeviceId"] == sid and s["playing"])
         lost = _state_until(a, lambda s: s["activeDeviceId"] is None)
         assert lost["playing"] is False
-        assert "someone else" in until(a, "error")["detail"]
+        err = until(a, "error")
+        assert "someone else" in err["detail"] and err["source"] == "speaker"
         # Alice's commands no longer reach the speaker.
         n = len(speaker.calls)
         a.send_json({"type": "command", "action": "pause", "targetDeviceId": sid})

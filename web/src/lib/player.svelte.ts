@@ -883,7 +883,9 @@ export class Player {
         onCommand: (action, args) => void this.execute(action, args),
         onQueueChanged: (qid) => void this.queueChangedElsewhere(qid),
         // Speakers (and the hub) report problems this way: "Kitchen: the speaker couldn't play this track".
-        onError: (detail) => ui.toast(detail),
+        onError: (detail, source) => {
+          if (source === 'speaker') ui.toast(detail);
+        },
       },
     });
     this.connect.start();

@@ -796,7 +796,7 @@ paths:
         Client → server: `hello`, `state` (PlaybackState, active device only), `command`, `transfer`, `ping`.
         Server → client: `welcome {deviceId, devices, state}`, `devices {devices}`, `state` (PlaybackState),
         `command {action, args, fromDeviceId}`, `takeover {state}`, `release`, `queues {queueId}`, `pong`,
-        `error {detail}`. Speakers (`kind: speaker`, see /cast/speakers) are listed as devices too; the server
+        `error {detail, source?}` (`source: speaker` = a speaker problem worth showing the user). Speakers (`kind: speaker`, see /cast/speakers) are listed as devices too; the server
         plays on their behalf. The server sends WebSocket protocol pings every 20 s (keeps the Cloudflare tunnel open);
         clients still send `ping` every 25 s. A newer socket from the same device replaces the older one.
       responses:

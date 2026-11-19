@@ -50,6 +50,8 @@ class ConnectClient(
 
     /** Called on takeover so the app can start the playback service (set by the container). */
     @Volatile var onTakeover: () -> Unit = {}
+    /** A speaker the server plays on reported a problem ("Kitchen: the speaker couldn't play this track"). */
+    @Volatile var onSpeakerError: (String) -> Unit = {}
 
     @Volatile private var socket: WebSocket? = null
     private var loop: Job? = null
@@ -145,6 +147,7 @@ class ConnectClient(
                 onTakeover()
             }
             is ConnectMessage.Command, ConnectMessage.Release, is ConnectMessage.QueuesChanged -> _events.trySend(m)
+            is ConnectMessage.Error -> if (m.source == "speaker" && m.detail.isNotBlank()) onSpeakerError(m.detail)
             else -> Unit
         }
     }

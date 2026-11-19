@@ -245,12 +245,12 @@ class Hub:
         self._pause_in_place(u.state)
         u.state["activeDeviceId"] = None
         await self._changed(uid, u, force_persist=True)
-        await self._broadcast(uid, {"type": "error",
+        await self._broadcast(uid, {"type": "error", "source": "speaker",
                                     "detail": "someone else started playing on that speaker"})
         await self._broadcast_devices(uid, u)
 
     async def speaker_error(self, uid: str, detail: str) -> None:
-        await self._broadcast(uid, {"type": "error", "detail": detail})
+        await self._broadcast(uid, {"type": "error", "source": "speaker", "detail": detail})
 
     async def _broadcast(self, uid: str, msg: dict, exclude: str | None = None) -> None:
         u = self.users.get(uid)

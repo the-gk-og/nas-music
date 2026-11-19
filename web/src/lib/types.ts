@@ -301,7 +301,7 @@ export type ServerMessage =
   | { type: 'release' }
   | { type: 'queues'; queueId: string }
   | { type: 'pong' }
-  | { type: 'error'; detail: string };
+  | { type: 'error'; detail: string; source?: 'speaker' };
 
 // ---- v3 (docs/v3-ux.md; api/openapi.yaml v3 from server core) ----
 

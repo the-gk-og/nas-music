@@ -23,6 +23,7 @@ class NasMusicApp : Application(), SingletonImageLoader.Factory {
         container.eq.start()
         container.contextCollector.start()
         container.connect.start()
+        org.nasmusic.app.cast.NativeCast.init(container)   // Google Cast (full flavour); no-op in foss
         container.startServerInfoRefresh()
         container.startAppearancePush()
         // Streaming is the default; the nightly download only exists while "Offline favourites" is on.

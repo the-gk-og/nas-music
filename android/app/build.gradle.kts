@@ -42,6 +42,20 @@ android {
         }
     }
 
+    // Two builds of the same app (same applicationId, so either installs as an update over the other):
+    //   foss (default) - no Google code at all; speakers come from the server's casting (Connect devices).
+    //   full           - adds the Google Cast SDK for a native Cast button (owner-approved exception).
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("foss") {
+            dimension = "distribution"
+            isDefault = true
+        }
+        create("full") {
+            dimension = "distribution"
+        }
+    }
+
     buildTypes {
         release {
             // No R8 shrinking: keeps reflection/serialization behaviour identical to the tested debug build.
@@ -110,6 +124,11 @@ dependencies {
     implementation(libs.zxing.android.embedded)
     implementation(libs.tink.android)
     implementation(libs.palette)
+
+    // Google Cast SDK: `full` flavour ONLY. Never add Google Play Services to `implementation`.
+    "fullImplementation"(libs.play.services.cast.framework)
+    "fullImplementation"(libs.androidx.mediarouter)
+    "fullImplementation"(libs.androidx.appcompat)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
