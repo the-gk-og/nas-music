@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -69,7 +70,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -140,8 +140,9 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
         } else {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(tint.copy(alpha = 0.55f), tint.copy(alpha = 0.25f), MaterialTheme.colorScheme.background))))
         }
-        // Pieces shared by the portrait and landscape layouts.
-        val header: @Composable () -> Unit = {
+        // Phone landscape (wider than tall): cover left, sized to the height; controls right.
+        // Portrait / side pane: the familiar column. The cover always fits both dimensions.
+        val topBar: @Composable () -> Unit = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 if (!compact) IconButton(onClick = { ui.nav.popBackStack() }) { Icon(Icons.Default.KeyboardArrowDown, "Minimise") }
                 s.remote?.let {
@@ -152,17 +153,13 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                 }
             }
         }
-        val coverCard: @Composable (Modifier) -> Unit = { modifier ->
-            // Cover ⇄ lyrics flip card
-            BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
-                // Square, as large as fits: never taller than the space, so it can't overlap the title.
-                val side = minOf(maxWidth, maxHeight)
+        val cover: @Composable () -> Unit = {
                 if (flip <= 90f) {
                     AsyncImage(
                         model = item.mediaMetadata.artworkUri?.toString(),
                         contentDescription = "Album art. Tap for lyrics, swipe to skip, long-press for the song menu",
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(side)
+                        modifier = Modifier.aspectRatio(1f).clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
                             .graphicsLayer {
                                 rotationY = flip; cameraDistance = 12f * density
                                 if (motion.enabled) { translationX = dragX; translationY = dragY.coerceAtLeast(0f) / 2 }
@@ -192,9 +189,9 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                         LyricsPanel(c, trackId, s.positionMs, onClose = { showLyrics = false })
                     }
                 }
-            }
-        }
-        val details: @Composable () -> Unit = {
+                    }
+        val controls: @Composable () -> Unit = {
+
             Spacer(Modifier.height(12.dp))
             Text(track.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(track.artist, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, maxLines = 1,
@@ -258,22 +255,26 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                 }
             }
         }
+        // Insets come from the Scaffold (safeDrawing).
         BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            val landscape = maxWidth > maxHeight * 1.15f
-            if (landscape) {
-                // Landscape (phone on its side, or a wide pane): cover left, everything else right.
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                    coverCard(Modifier.fillMaxHeight().weight(0.9f).padding(vertical = 8.dp))
-                    Column(Modifier.weight(1.1f).fillMaxHeight().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
-                        header()
-                        details()
+            if (!compact && maxWidth > maxHeight) {
+                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(0.45f).fillMaxHeight().padding(vertical = 12.dp), contentAlignment = Alignment.Center) { cover() }
+                    Spacer(Modifier.width(20.dp))
+                    Column(
+                        Modifier.weight(0.55f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        topBar()
+                        controls()
                     }
                 }
             } else {
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    header()
-                    coverCard(Modifier.weight(1f).fillMaxWidth())
-                    details()
+                    topBar()
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { cover() }
+                    controls()
                 }
             }
         }

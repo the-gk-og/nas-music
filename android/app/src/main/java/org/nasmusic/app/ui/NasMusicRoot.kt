@@ -155,8 +155,8 @@ private fun MainScaffold(c: AppContainer) {
     val wide = layout != ShellLayout.PHONE
     val sidePane = layout == ShellLayout.TABLET_SIDE_PANE
     val fullScreenNow = current == "now" && !sidePane
-    // With the side pane, Now Playing is already on screen: don't show it twice.
-    LaunchedEffect(sidePane, current) { if (sidePane && current == "now") nav.popBackStack() }
+    // With the side pane showing Now Playing, the main area shows the Queue instead (never twice).
+    LaunchedEffect(sidePane, current) { if (sidePane && current == "now") nav.goTab("queue") }
     val motion = LocalMotion.current
 
     CompositionLocalProvider(LocalUi provides ui) {
