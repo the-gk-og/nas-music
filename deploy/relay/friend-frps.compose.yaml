@@ -3,7 +3,8 @@
 # music or logins. The NAS connects OUT to this server on port 2333 (token + TLS); visitors reach the
 # NAS through ports 80/443 here.
 #
-# Router on the friend's network: forward TCP 80, 443 and 2333 -> this server's LAN IP.
+# Router on the friend's network (TCP): public 80 -> server:18080, public 443 -> server:18443,
+# public 2333 -> server:2333. (18080/18443 because the server already uses 80/443 itself.)
 # Replace FRP_TOKEN with the token the NAS owner sends you (never commit it).
 
 services:
@@ -13,8 +14,8 @@ services:
     restart: unless-stopped
     command: ["-c", "/etc/frp/frps.toml"]
     ports:
-      - "80:80"        # HTTP  (Let's Encrypt checks + redirect to HTTPS), forwarded to the NAS
-      - "443:443"      # HTTPS for music.whoactuallyneeds.men, forwarded to the NAS (encrypted end-to-end)
+      - "18080:80"     # HTTP  (router: public 80  -> this server 18080) Let's Encrypt + redirect
+      - "18443:443"    # HTTPS (router: public 443 -> this server 18443), encrypted end-to-end
       - "2333:2333"    # the NAS's tunnel connection (token-authenticated, TLS)
     configs:
       - source: frps_config
