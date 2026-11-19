@@ -81,10 +81,17 @@ def cmd_serve(args) -> None:
     ]
     if cfg.http_port:
         servers.append(_Server(uvicorn.Config(app, port=cfg.http_port, **common)))
+    if cfg.cast_enabled and cfg.cast_port:
+        from nasmusic.app.cast_api import cast_app
+
+        # Speakers fetch signed media URLs over plain HTTP here; nothing else is served on this port.
+        servers.append(_Server(uvicorn.Config(cast_app(ctx), port=cfg.cast_port, **common)))
     if not args.no_scheduler:
         jobs.start(initial_scan=not args.no_scan)
     log.info("serving HTTPS on %s:%d%s", cfg.bind_host, cfg.https_port,
              f" and HTTP on {cfg.bind_host}:{cfg.http_port}" if cfg.http_port else "")
+    if cfg.cast_enabled and cfg.cast_port:
+        log.info("casting: speakers fetch media from %s (cast port %d)", cfg.cast_base_url, cfg.cast_port)
     try:
         asyncio.run(_run_servers(servers))
     finally:

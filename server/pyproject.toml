@@ -18,6 +18,8 @@ dependencies = [
     "qrcode[pil]>=7.4",
     "cryptography>=43",
     "pillow>=10.4",
+    "pychromecast>=14",
+    "async-upnp-client>=0.40",
 ]
 
 [project.optional-dependencies]

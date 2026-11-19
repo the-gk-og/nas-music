@@ -78,6 +78,30 @@ class Conn:
             return False
 
 
+class SpeakerConn:
+    """A server-side speaker posing as a Connect device: messages the Hub would send to an active phone go
+    to its SpeakerSession instead (which runs them in its own task)."""
+
+    kind = "speaker"
+    can_play = True
+    ws = None
+
+    def __init__(self, uid: str, session):
+        self.uid, self.session = uid, session
+        self.device_id = session.device_id
+        self.name = session.r.name
+
+    async def send(self, msg: dict) -> bool:
+        t = msg.get("type")
+        if t == "takeover":
+            self.session.spawn(self.session.takeover(self.uid, msg.get("state") or {}))
+        elif t == "release":
+            self.session.spawn(self.session.release(self.uid))
+        elif t == "command":
+            self.session.spawn(self.session.command(self.uid, str(msg.get("action")), msg.get("args") or {}))
+        return True
+
+
 @dataclass
 class UserHub:
     state: dict = field(default_factory=default_state)
@@ -101,6 +125,18 @@ class Hub:
         self.grace_s, self.persist_every_s = grace_s, persist_every_s
         self.users: dict[str, UserHub] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
+        self.speakers = None   # nasmusic.cast.SpeakerRegistry (attach_speakers)
+
+    def attach_speakers(self, registry) -> None:
+        """Offer the registry's speakers as Connect devices to every user (see nasmusic.cast)."""
+        from nasmusic.cast import CastHooks
+
+        self.speakers = registry
+        hooks = registry.hooks
+        registry.hooks = CastHooks(
+            media=hooks.media, queue_track=hooks.queue_track, queue_len=hooks.queue_len,
+            report=self.speaker_report, lost=self.speaker_lost, error=self.speaker_error)
+        registry.on_change = self._broadcast_devices_all
 
     # ---------- thread-safe API for sync code ----------
 
@@ -158,11 +194,63 @@ class Hub:
         active = u.state.get("activeDeviceId")
         out = [{"id": c.device_id, "name": c.name, "kind": c.kind, "canPlay": c.can_play, "online": True,
                 "isActive": c.device_id == active} for c in u.conns.values()]
-        if active and active not in u.conns and active in u.known:
+        speakers = self.speakers.devices() if self.speakers is not None else []
+        for d in speakers:
+            out.append({"id": d["id"], "name": d["name"], "kind": "speaker", "canPlay": True, "online": True,
+                        "isActive": d["id"] == active, "castType": d.get("castType")})
+        if (active and active not in u.conns and active in u.known
+                and not any(d["id"] == active for d in speakers)):
             k = u.known[active]
             out.append({"id": active, "name": k["name"], "kind": k["kind"], "canPlay": k["canPlay"],
                         "online": False, "isActive": True})
         return out
+
+    def _target(self, uid: str, u: UserHub, device_id: str | None):
+        """The Conn (phone/browser socket) or SpeakerConn for a device id, or None if it's not reachable."""
+        if not device_id:
+            return None
+        c = u.conns.get(device_id)
+        if c is not None:
+            return c
+        sess = self.speakers.get(device_id) if self.speakers is not None else None
+        return SpeakerConn(uid, sess) if sess is not None else None
+
+    async def _broadcast_devices_all(self) -> None:
+        for uid, u in list(self.users.items()):
+            await self._broadcast_devices(uid, u)
+
+    # ---------- speaker callbacks (nasmusic.cast.SpeakerSession) ----------
+
+    async def speaker_report(self, uid: str, device_id: str, partial: dict) -> bool:
+        """A speaker playing for `uid` reports its state, like an active phone's `state` message.
+        Returns False if it's no longer the active device (it should stop)."""
+        u = await self._user(uid)
+        if u.state.get("activeDeviceId") != device_id:
+            return False
+        was = u.state.get("playing")
+        for k, types in STATE_FIELDS.items():
+            v = partial.get(k, ...)
+            if v is ... or (isinstance(v, bool) and bool not in types):
+                continue
+            if isinstance(v, types):
+                u.state[k] = v
+        await self._changed(uid, u, force_persist=bool(was) and not u.state.get("playing"))
+        return True
+
+    async def speaker_lost(self, uid: str, device_id: str) -> None:
+        """Another user took this speaker over: `uid` has no active device any more."""
+        u = await self._user(uid)
+        if u.state.get("activeDeviceId") != device_id:
+            return
+        self._pause_in_place(u.state)
+        u.state["activeDeviceId"] = None
+        await self._changed(uid, u, force_persist=True)
+        await self._broadcast(uid, {"type": "error",
+                                    "detail": "someone else started playing on that speaker"})
+        await self._broadcast_devices(uid, u)
+
+    async def speaker_error(self, uid: str, detail: str) -> None:
+        await self._broadcast(uid, {"type": "error", "detail": detail})
 
     async def _broadcast(self, uid: str, msg: dict, exclude: str | None = None) -> None:
         u = self.users.get(uid)
@@ -228,6 +316,8 @@ class Hub:
     async def handle(self, ws: WebSocket, dev: Device) -> None:
         """Serve one accepted socket until it closes."""
         self.loop = asyncio.get_running_loop()
+        if self.speakers is not None:
+            self.speakers.start()
         uid = dev.user_id
         try:
             first = await asyncio.wait_for(ws.receive_text(), HELLO_TIMEOUT_S)
@@ -327,15 +417,17 @@ class Hub:
         if u.release_task:
             u.release_task.cancel()
             u.release_task = None
-        if prev and prev != target.device_id and prev in u.conns:
-            await u.conns[prev].send({"type": "release"})
+        if prev and prev != target.device_id:
+            old = self._target(uid, u, prev)
+            if old is not None:
+                await old.send({"type": "release"})
         await self._changed(uid, u, force_persist=True)
         await target.send({"type": "takeover", "state": dict(u.state)})
         await self._broadcast_devices(uid, u)
 
     async def _on_transfer(self, uid: str, u: UserHub, conn: Conn, msg: dict) -> None:
         to = msg.get("toDeviceId") or conn.device_id
-        target = u.conns.get(to)
+        target = self._target(uid, u, to)
         if target is None:
             await conn.send({"type": "error", "detail": "that device is offline"})
             return
@@ -344,6 +436,15 @@ class Hub:
             return
         play = msg.get("play")
         await self._make_active(uid, u, target, None if play is None else bool(play))
+
+    async def _play_extra(self, uid: str, action: str, args: dict) -> dict | None:
+        if action != "playQueue":
+            return None
+        idx = int(args.get("index") or 0)
+        track = None
+        if self._queue_track is not None:
+            track = await asyncio.to_thread(self._queue_track, uid, str(args.get("queueId")), idx)
+        return {"queueId": args.get("queueId"), "index": idx, "trackId": track, "positionMs": 0}
 
     async def _on_command(self, uid: str, u: UserHub, conn: Conn, msg: dict) -> None:
         action, args = msg.get("action"), msg.get("args") if isinstance(msg.get("args"), dict) else {}
@@ -367,18 +468,18 @@ class Hub:
 
         active_id = u.state.get("activeDeviceId")
         target_id = msg.get("targetDeviceId") or active_id
-        target = u.conns.get(target_id) if target_id else None
+        target = self._target(uid, u, target_id)
+        if isinstance(target, SpeakerConn) and target_id != active_id:
+            # Playing straight onto a speaker that isn't active yet: make it active with that queue.
+            if action in ("play", "playQueue"):
+                await self._make_active(uid, u, target, True, await self._play_extra(uid, action, args))
+            else:
+                await conn.send({"type": "error", "detail": "that speaker isn't playing for you"})
+            return
         if target is None:
             # No reachable player: a play from a device that can play makes it the active device.
             if action in ("play", "playQueue") and conn.can_play:
-                extra = None
-                if action == "playQueue":
-                    idx = int(args.get("index") or 0)
-                    track = None
-                    if self._queue_track is not None:
-                        track = await asyncio.to_thread(self._queue_track, uid, str(args.get("queueId")), idx)
-                    extra = {"queueId": args.get("queueId"), "index": idx, "trackId": track, "positionMs": 0}
-                await self._make_active(uid, u, conn, True, extra)
+                await self._make_active(uid, u, conn, True, await self._play_extra(uid, action, args))
                 return
             await conn.send({"type": "error",
                              "detail": "the active device is offline" if active_id else "no active device"})
