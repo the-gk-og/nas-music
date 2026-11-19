@@ -246,3 +246,36 @@ def migrate_v2_to_v3(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
 def _folder(path: str) -> str:
     d = posixpath.dirname(path)
     return "" if d in ("", ".") else d
+
+
+# ---------- v3 -> v4 (LRCLIB lyrics cache, bug reports): additive only ----------
+
+V4_TABLES = ("lyrics_cache", "bug_reports")
+
+
+def migrate_v3_to_v4(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """New tables only. Returns True if it migrated."""
+    if current_version(conn) != 3:
+        return False
+    if make_backup:
+        dest = backup(conn, "v3-backup")
+        if dest:
+            log.warning("schema v3 -> v4: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 3:
+            conn.execute("ROLLBACK")
+            return False
+        for t in V4_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (4)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v3 -> v4 done")
+    return True

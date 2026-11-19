@@ -1,7 +1,7 @@
--- nas-music shared schema v3 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v4 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
--- columns. Existing v1/v2 databases are upgraded by nasmusic.db.migrations.
+-- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. Older databases are upgraded by nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -261,6 +261,34 @@ CREATE TABLE IF NOT EXISTS catalog_items (
     preview_ref TEXT,                  -- Deezer API URL resolved to a fresh preview link on demand
     fetched_at  TEXT NOT NULL
 );
+
+-- ---------- v4: LRCLIB lyrics cache, bug reports ----------
+
+-- Lyrics fetched from lrclib.net for tracks whose files have none (shared; not per user).
+CREATE TABLE IF NOT EXISTS lyrics_cache (
+    track_id     TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    status       TEXT NOT NULL CHECK (status IN ('found','not_found','instrumental')),
+    synced       INTEGER NOT NULL DEFAULT 0,
+    raw          TEXT,                 -- LRC (synced) or plain text
+    lrclib_id    INTEGER,
+    fetched_at   TEXT NOT NULL,
+    retry_after  TEXT                  -- not_found/instrumental: ask again after this time
+);
+
+CREATE TABLE IF NOT EXISTS bug_reports (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id   TEXT,
+    created_at  TEXT NOT NULL,
+    app_version TEXT,
+    platform    TEXT,
+    description TEXT,
+    logs        TEXT NOT NULL,
+    crash       TEXT,
+    extra       TEXT,                  -- JSON
+    bytes       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS bug_reports_created ON bug_reports(created_at);
 
 -- ---------- AI-owned tables ----------
 
