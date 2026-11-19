@@ -8,7 +8,10 @@
   import { ui } from '../lib/ui.svelte';
   import Sheet from './Sheet.svelte';
 
-  let { trackIds, albumId, title }: { trackIds: string[]; albumId?: string; title: string } = $props();
+  let { trackIds, albumId: startAlbum, title }: { trackIds: string[]; albumId?: string; title: string } = $props();
+  // Editing album/album artist changes the album's id: follow it so later saves/cover uploads hit the new one.
+  let movedAlbum = $state<string | null>(null);
+  const albumId = $derived(startAlbum ? (movedAlbum ?? startAlbum) : undefined);
 
   const T = $derived(tagsApi(session.api));
   const single = $derived(trackIds.length === 1 && !albumId);
@@ -85,6 +88,7 @@
   async function done(msg: string, newAlbum?: string) {
     ui.toast(msg);
     library.tagsChanged(albumId ?? details?.[0]?.albumId ?? null, newAlbum ?? null);
+    if (startAlbum && newAlbum) movedAlbum = newAlbum;
     await load();
     if (showHistory) await loadHistory();
   }
@@ -113,7 +117,8 @@
     busy = true;
     try {
       const r = albumId ? await T.editAlbum(albumId, {}, fieldsToRevert) : await T.edit(trackIds, {}, fieldsToRevert);
-      await done(`Reverted (${r.changed})`);
+      const now = await T.track(trackIds[0]);
+      await done(`Reverted (${r.changed})`, now.albumId);
     } catch (e) {
       ui.toast((e as Error).message);
     }
