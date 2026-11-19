@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -14,6 +14,7 @@ info:
     To get list, radio. `artUrl` fields in shelves/catalogue are relative to the API base (/api/v1/).
     GET /stream and GET /art also accept `?token=<deviceToken>` (for <audio>/<img> in cross-origin clients);
     the server redacts it from its access log.
+    v4: lyrics fall back to LRCLIB (source "lrclib"); admin console API under /admin/*; POST /me/bug-report.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
     Times are ISO-8601 UTC strings. IDs are opaque strings.
 servers:
@@ -227,9 +228,14 @@ paths:
         SYNCEDLYRICS; MP3 USLT/SYLT; M4A ©lyr) or a sidecar `.lrc` file with the same name. Synced (LRC)
         lyrics are preferred when both exist. The app caches these for downloaded tracks so they work offline.
         v2: the caller's own edit (PUT) wins over the file (`source: "user"`); `?source=` picks one explicitly.
+        v4: also ID3 USLT (any language/description), SYLT, TXXX:LYRICS/UNSYNCEDLYRICS/SYNCEDLYRICS, COMM frames
+        holding LRC, APEv2 `Lyrics`, any Vorbis key containing "lyric", MP4 ©lyr and ----:...:LYRICS, and `.lrc`
+        / `.txt` sidecars matched case-insensitively (`lrc_file` = any sidecar). When the file has none and the
+        admin hasn't turned LRCLIB off, lyrics come from lrclib.net (`source: "lrclib"`, cached on the server;
+        "not found" is retried after 30 days). A background job pre-fetches them for favourites and today's mixes.
       parameters:
         - { name: trackId, in: path, required: true, schema: { type: string } }
-        - { name: source, in: query, schema: { type: string, enum: [user, embedded, lrc_file] }, description: 'default: user edit, else best from the file' }
+        - { name: source, in: query, schema: { type: string, enum: [user, embedded, lrc_file, lrclib] }, description: 'default: your edit, else the file (embedded, then sidecar), else LRCLIB' }
       responses:
         '200':
           description: lyrics
@@ -1029,10 +1035,467 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
         '404': { description: not a radio queue of yours }
         '503': { description: AI engine without radio support yet }
+  /me/bug-report:
+    post:
+      summary: |
+        Send app logs / a crash dump to the server admins (stored on this server only, kept 30 days).
+        Total body ≤ 2 MB (413 otherwise); at most 20 reports per user per day (429).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BugReportIn' } } }
+      responses:
+        '200':
+          description: stored
+          content: { application/json: { schema: { type: object, required: [id], properties: { id: { type: string } } } } }
+        '413': { description: too large }
+        '429': { description: too many reports today }
+  /admin/users/{userId}/detail:
+    get:
+      summary: Admin only. One user with devices and last activity.
+      parameters: [ { name: userId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: user detail
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminUserDetail' } } }
+        '404': { description: not found }
+  /admin/users/{userId}/devices/{deviceId}:
+    delete:
+      summary: Admin only. Sign one of a user's devices out.
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string } }
+        - { name: deviceId, in: path, required: true, schema: { type: string } }
+      responses: { '204': { description: revoked }, '404': { description: not found } }
+  /admin/status:
+    get:
+      summary: Admin only. Library, analysis (with ETA), lyrics cache and job status in one call (console dashboard).
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminStatus' } } }
+  /admin/jobs:
+    get:
+      summary: Admin only. Every background job with its last runs (newest first, up to 20) and next scheduled run.
+      responses:
+        '200':
+          description: jobs
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/JobStatus' } } } }
+  /admin/jobs/{name}:
+    post:
+      summary: Admin only. Start a job now in the background (no-op if it is already running).
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, nightly, pretranscode, discovery, lyrics, cleanup] } }
+      responses:
+        '202':
+          description: accepted
+          content: { application/json: { schema: { type: object, properties: { started: { type: boolean, description: false = already running } } } } }
+  /admin/analysis/failed:
+    get:
+      summary: Admin only. Tracks whose audio analysis failed (for the active model).
+      responses:
+        '200':
+          description: failures
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    track: { $ref: '#/components/schemas/HealthTrack' }
+                    error: { type: [string, 'null'] }
+                    modelVersion: { type: string }
+                    updatedAt: { type: string, format: date-time }
+  /admin/analysis/retry:
+    post:
+      summary: Admin only. Forget failures (all, or the given tracks) so the next analysis run retries them; starts it.
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { trackIds: { type: [array, 'null'], items: { type: string } } } } } }
+      responses:
+        '200':
+          description: how many will be retried
+          content: { application/json: { schema: { type: object, properties: { retried: { type: integer } } } } }
+  /admin/health/library:
+    get:
+      summary: Admin only. Library health summary (counts). Details via the endpoints below. The music files themselves are never modified.
+      responses:
+        '200':
+          description: summary
+          content: { application/json: { schema: { $ref: '#/components/schemas/LibraryHealth' } } }
+  /admin/health/missing:
+    get:
+      summary: Admin only. Tracks whose files vanished from the library.
+      parameters:
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 1000 } }
+      responses:
+        '200':
+          description: tracks
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/HealthTrack' } } } }
+    delete:
+      summary: |
+        Admin only. Remove missing tracks from the DATABASE (all, or `trackIds`), with everything that refers
+        to them: per-user state, listening events, playlist/queue/mix entries, analysis, lyrics. Not undoable
+        except from a backup (one is made automatically first).
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { trackIds: { type: [array, 'null'], items: { type: string } } } } } }
+      responses:
+        '200':
+          description: removed
+          content: { application/json: { schema: { type: object, properties: { removed: { type: integer }, backup: { type: string } } } } }
+  /admin/health/duplicates:
+    get:
+      summary: Admin only. Groups of probable duplicates (same recording MBID, or same normalised artist + title and duration within 2 s).
+      responses:
+        '200':
+          description: groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    reason: { type: string, enum: [mbid, name] }
+                    key: { type: string }
+                    tracks: { type: array, items: { $ref: '#/components/schemas/HealthTrack' } }
+  /admin/health/missing-tags:
+    get:
+      summary: Admin only. Tracks missing artist, album, title (file-name fallback), year, genre or track number.
+      parameters:
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 1000 } }
+      responses:
+        '200':
+          description: tracks with the missing fields
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    track: { $ref: '#/components/schemas/HealthTrack' }
+                    missing: { type: array, items: { type: string, enum: [artist, album, title, year, genre, trackNo] } }
+  /admin/health/missing-art:
+    get:
+      summary: Admin only. Albums without cover art (no folder image, nothing embedded).
+      responses:
+        '200':
+          description: albums
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Album' } } } }
+  /admin/health/unanalysed:
+    get:
+      summary: Admin only. Present tracks with no features for the active analysis model.
+      parameters:
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 1000 } }
+      responses:
+        '200':
+          description: tracks
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/HealthTrack' } } } }
+  /admin/health/cache:
+    get:
+      summary: Admin only. Orphaned cache files (art and Opus for albums/tracks that no longer exist, stale transcodes).
+      responses:
+        '200':
+          description: orphans
+          content: { application/json: { schema: { $ref: '#/components/schemas/CacheReport' } } }
+  /admin/health/cache/clean:
+    post:
+      summary: Admin only. Delete the orphaned cache files.
+      responses:
+        '200':
+          description: removed
+          content: { application/json: { schema: { $ref: '#/components/schemas/CacheReport' } } }
+  /admin/server:
+    get:
+      summary: Admin only. Server health.
+      responses:
+        '200':
+          description: health
+          content: { application/json: { schema: { $ref: '#/components/schemas/ServerHealth' } } }
+  /admin/opus-cache:
+    delete:
+      summary: Admin only. Empty the Opus transcode cache (files are recreated on demand / by pre-transcode).
+      responses:
+        '200':
+          description: removed
+          content: { application/json: { schema: { type: object, properties: { files: { type: integer }, bytes: { type: integer } } } } }
+  /admin/logs:
+    get:
+      summary: Admin only. Recent server log records from an in-memory ring buffer (last 2000), oldest first. Tokens are redacted.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 2000 } }
+        - { name: level, in: query, schema: { type: string, enum: [DEBUG, INFO, WARNING, ERROR], default: INFO } }
+        - { name: after, in: query, schema: { type: integer }, description: only records with seq > after }
+      responses:
+        '200':
+          description: records
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/LogRecord' } } } }
+  /admin/logs/stream:
+    get:
+      summary: |
+        Admin only. Live tail as Server-Sent Events (text/event-stream): each `data:` line is a LogRecord JSON.
+        Starts with records after `after`. A comment line is sent every 15 s to keep proxies open.
+        Browsers' EventSource can't send headers: use the nm_session cookie (same origin) or `?token=`.
+      parameters:
+        - { name: after, in: query, schema: { type: integer } }
+        - { name: level, in: query, schema: { type: string, enum: [DEBUG, INFO, WARNING, ERROR], default: INFO } }
+        - { name: token, in: query, schema: { type: string } }
+      responses:
+        '200': { description: text/event-stream }
+  /admin/backups:
+    get:
+      summary: Admin only. Database backups in the data directory (manual, and the automatic ones made before migrations and prunes), newest first.
+      responses:
+        '200':
+          description: backups
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Backup' } } } }
+    post:
+      summary: Admin only. Make a consistent backup of the database now (SQLite online backup).
+      responses:
+        '200':
+          description: created
+          content: { application/json: { schema: { $ref: '#/components/schemas/Backup' } } }
+  /admin/backups/{name}:
+    parameters: [ { name: name, in: path, required: true, schema: { type: string } } ]
+    get:
+      summary: Admin only. Download (attachment, application/vnd.sqlite3).
+      responses: { '200': { description: the file }, '404': { description: not found } }
+    delete:
+      responses: { '204': { description: deleted }, '404': { description: not found } }
+  /admin/now-playing:
+    get:
+      summary: Admin only. What every user's devices are doing right now (Connect).
+      responses:
+        '200':
+          description: per user with any online device or an active player
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    user: { type: object, properties: { id: { type: string }, username: { type: string } } }
+                    devices: { type: array, items: { $ref: '#/components/schemas/ConnectDevice' } }
+                    state: { $ref: '#/components/schemas/PlaybackState' }
+                    track: { oneOf: [ { $ref: '#/components/schemas/Track' }, { type: 'null' } ] }
+  /admin/settings:
+    get:
+      summary: Admin only. Editable server settings (stored in the database, overriding config.toml).
+      responses:
+        '200':
+          description: settings
+          content: { application/json: { schema: { $ref: '#/components/schemas/ServerSettings' } } }
+    put:
+      summary: |
+        Admin only. Change settings; a null value removes the override (back to config.toml). Validated (422 with
+        the reason). Applied immediately (timezone reschedules the jobs; cache size applies to the next trim).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ServerSettingValues' } } }
+      responses:
+        '200':
+          description: settings after the change
+          content: { application/json: { schema: { $ref: '#/components/schemas/ServerSettings' } } }
+        '422': { description: invalid value }
+  /admin/bug-reports:
+    get:
+      summary: Admin only. Bug reports from the last 30 days, newest first (without the logs).
+      responses:
+        '200':
+          description: reports
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/BugReportSummary' } } } }
+  /admin/bug-reports/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      responses:
+        '200':
+          description: the full report
+          content: { application/json: { schema: { $ref: '#/components/schemas/BugReport' } } }
+        '404': { description: not found }
+    delete:
+      responses: { '204': { description: deleted }, '404': { description: not found } }
 components:
   securitySchemes:
     device: { type: http, scheme: bearer }
   schemas:
+    HealthTrack:
+      type: object
+      required: [id, path, title]
+      properties:
+        id: { type: string }
+        path: { type: string, description: relative to the library root }
+        title: { type: string }
+        artist: { type: [string, 'null'] }
+        album: { type: [string, 'null'] }
+        albumId: { type: [string, 'null'] }
+        durationS: { type: [number, 'null'] }
+        fileBytes: { type: [integer, 'null'] }
+        codec: { type: [string, 'null'] }
+        missing: { type: boolean }
+    AdminUserDetail:
+      allOf:
+        - $ref: '#/components/schemas/AdminUser'
+        - type: object
+          properties:
+            devices: { type: array, items: { $ref: '#/components/schemas/Device' } }
+            lastActivity: { type: [string, 'null'], format: date-time, description: latest of last login, device last seen, last event }
+            eventCount: { type: integer }
+    JobRun:
+      type: object
+      properties:
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        durationS: { type: number }
+        ok: { type: boolean }
+        result: { type: [object, 'null'] }
+        error: { type: [string, 'null'] }
+    JobStatus:
+      type: object
+      required: [name, running]
+      properties:
+        name: { type: string }
+        running: { type: boolean }
+        next: { type: [string, 'null'], description: next scheduled run (server timezone), null if not scheduled }
+        last: { oneOf: [ { $ref: '#/components/schemas/JobRun' }, { type: 'null' } ] }
+        history: { type: array, items: { $ref: '#/components/schemas/JobRun' } }
+    AdminStatus:
+      type: object
+      properties:
+        library:
+          type: object
+          properties:
+            tracks: { type: integer }
+            albums: { type: integer }
+            artists: { type: integer }
+            missing: { type: integer }
+            hours: { type: number }
+            gb: { type: number }
+            users: { type: integer }
+            lastScan: { oneOf: [ { $ref: '#/components/schemas/JobRun' }, { type: 'null' } ] }
+        analysis:
+          type: object
+          properties:
+            model: { type: string, description: version being written (may be a fallback) }
+            configured: { type: string }
+            fallbackReason: { type: [string, 'null'] }
+            analysed: { type: integer }
+            total: { type: integer }
+            pending: { type: integer }
+            failed: { type: integer }
+            pct: { type: number }
+            running: { type: boolean }
+            ratePerHour: { type: [number, 'null'], description: tracks analysed in the last hour }
+            etaS: { type: [number, 'null'], description: estimated seconds to finish at the recent rate }
+        lyrics:
+          type: object
+          properties:
+            lrclibEnabled: { type: boolean }
+            cached: { type: integer }
+            found: { type: integer }
+            notFound: { type: integer }
+        jobs: { type: array, items: { $ref: '#/components/schemas/JobStatus' } }
+    LibraryHealth:
+      type: object
+      properties:
+        tracks: { type: integer }
+        missing: { type: integer }
+        duplicateGroups: { type: integer }
+        missingTags: { type: integer }
+        missingArt: { type: integer }
+        unanalysed: { type: integer }
+        orphanedCache: { type: object, properties: { files: { type: integer }, bytes: { type: integer } } }
+        backups: { type: object, properties: { count: { type: integer }, bytes: { type: integer } } }
+    CacheReport:
+      type: object
+      properties:
+        files: { type: integer }
+        bytes: { type: integer }
+        byKind: { type: object, additionalProperties: { type: object, properties: { files: { type: integer }, bytes: { type: integer } } }, description: 'art, opus' }
+    ServerHealth:
+      type: object
+      properties:
+        version: { type: string }
+        serverId: { type: string }
+        startedAt: { type: string, format: date-time }
+        uptimeS: { type: number }
+        python: { type: string }
+        sqlite: { type: string }
+        cpu: { type: object, properties: { cores: { type: integer }, percent: { type: [number, 'null'] }, load1: { type: [number, 'null'] }, load5: { type: [number, 'null'] }, load15: { type: [number, 'null'] } } }
+        memory: { type: object, properties: { totalBytes: { type: [integer, 'null'] }, availableBytes: { type: [integer, 'null'] }, processRssBytes: { type: [integer, 'null'] } } }
+        disks:
+          type: object
+          description: '"data" (data volume) and "library" (music)'
+          additionalProperties: { type: object, properties: { path: { type: string }, totalBytes: { type: integer }, freeBytes: { type: integer } } }
+        dataDirBytes: { type: integer, description: size of everything in the data volume }
+        databaseBytes: { type: integer }
+        opusCache: { type: object, properties: { files: { type: integer }, bytes: { type: integer }, limitBytes: { type: integer } } }
+        artCacheBytes: { type: integer }
+    LogRecord:
+      type: object
+      properties:
+        seq: { type: integer }
+        at: { type: string, format: date-time }
+        level: { type: string }
+        logger: { type: string }
+        message: { type: string }
+    Backup:
+      type: object
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [manual, migration, prune] }
+        bytes: { type: integer }
+        createdAt: { type: string, format: date-time }
+    ServerSettingValues:
+      type: object
+      description: Any subset; null removes an override.
+      properties:
+        serverName: { type: [string, 'null'], maxLength: 60 }
+        lanUrl: { type: [string, 'null'], description: 'public LAN address incl. port, e.g. https://192.168.68.2:8443 (QR, /server-info)' }
+        tunnelUrl: { type: [string, 'null'], description: 'https://host[:port][/path]; "" disables the tunnel address' }
+        timezone: { type: [string, 'null'], description: IANA zone, e.g. Australia/Sydney }
+        opusCacheGb: { type: [number, 'null'], minimum: 0.5, maximum: 10000 }
+        lrclibEnabled: { type: [boolean, 'null'] }
+    ServerSettings:
+      type: object
+      properties:
+        values: { $ref: '#/components/schemas/ServerSettingValues', description: effective values }
+        overrides: { type: object, description: 'only the keys set in the database' }
+        fromConfig: { type: object, description: 'the config.toml values (what removing an override returns to)' }
+    BugReportIn:
+      type: object
+      required: [logs]
+      properties:
+        description: { type: [string, 'null'], maxLength: 5000 }
+        appVersion: { type: [string, 'null'], maxLength: 50 }
+        platform: { type: [string, 'null'], maxLength: 100, description: 'e.g. "Android 15 · Pixel 8"' }
+        logs: { type: string, description: app log text }
+        crash: { type: [string, 'null'], description: crash dump / stack trace }
+        extra: { type: [object, 'null'], description: free-form diagnostic fields }
+    BugReportSummary:
+      type: object
+      properties:
+        id: { type: string }
+        user: { type: object, properties: { id: { type: string }, username: { type: string } } }
+        deviceId: { type: [string, 'null'] }
+        deviceName: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        appVersion: { type: [string, 'null'] }
+        platform: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+        hasCrash: { type: boolean }
+        bytes: { type: integer }
+        expiresAt: { type: string, format: date-time }
+    BugReport:
+      allOf:
+        - $ref: '#/components/schemas/BugReportSummary'
+        - type: object
+          properties:
+            logs: { type: string }
+            crash: { type: [string, 'null'] }
+            extra: { type: [object, 'null'] }
     ShelfFeed:
       type: object
       required: [shelves]
@@ -1194,6 +1657,7 @@ components:
           properties:
             disabled: { type: boolean }
             deviceCount: { type: integer, description: active (non-revoked) devices }
+            lastActivity: { type: [string, 'null'], format: date-time, description: 'v4: latest of last login, device last seen, last event' }
     Device:
       type: object
       required: [id, name, kind, createdAt, online, current]
@@ -1426,8 +1890,8 @@ components:
       properties:
         trackId: { type: string }
         synced: { type: boolean, description: 'true when every line has a timeMs (LRC timestamps)' }
-        source: { type: string, enum: [user, embedded, lrc_file] }
-        sources: { type: array, items: { type: string, enum: [user, embedded, lrc_file] }, description: 'every source that has lyrics for this track (for the source dropdown)' }
+        source: { type: string, enum: [user, embedded, lrc_file, lrclib] }
+        sources: { type: array, items: { type: string, enum: [user, embedded, lrc_file, lrclib] }, description: 'every source that has lyrics for this track (for the source dropdown)' }
         canEdit: { type: boolean, description: 'always true in v2: the caller may PUT their own lyrics' }
         lines:
           type: array
