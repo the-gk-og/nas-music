@@ -130,8 +130,13 @@ private fun MainScaffold(c: AppContainer) {
     val conf = LocalConfiguration.current
     val wide = conf.screenWidthDp >= 600
     // Tablet / foldable landscape: Now Playing lives in a side pane (docs/v3-ux.md §6).
-    val sidePane = conf.screenWidthDp >= 840 && conf.orientation == Configuration.ORIENTATION_LANDSCAPE
+    // Only real tablets get the side pane: a phone turned sideways is wide but short (~400dp), and
+    // Now Playing doesn't fit in a 38%-wide pane there (it uses its own two-column layout instead).
+    val sidePane = conf.screenWidthDp >= 840 && conf.screenHeightDp >= 600 &&
+        conf.orientation == Configuration.ORIENTATION_LANDSCAPE
     val fullScreenNow = current == "now" && !sidePane
+    // With the side pane showing Now Playing, don't also show it in the main area (it appeared twice).
+    LaunchedEffect(sidePane, current) { if (sidePane && current == "now") nav.goTab("queue") }
     val motion = LocalMotion.current
 
     CompositionLocalProvider(LocalUi provides ui) {
