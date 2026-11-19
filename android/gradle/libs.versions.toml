@@ -34,8 +34,8 @@ palette = "1.0.0"
 junit = "4.13.2"
 robolectric = "4.16"
 androidxTestCore = "1.6.1"
-playServicesCast = "23.0.0"
-mediarouter = "1.9.0"
+playServicesCast = "22.3.1"
+mediarouter = "1.8.1"
 appcompat = "1.7.1"
 
 [libraries]

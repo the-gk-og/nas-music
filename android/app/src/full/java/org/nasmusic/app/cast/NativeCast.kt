@@ -55,8 +55,6 @@ object NativeCast {
 
     private var cast: CastContext? = null
     private val ready = mutableStateOf(false)
-    private var lastTrackIds: List<String> = emptyList()
-    private var lastWindowStart = 0
     private var endedAt: Pair<Int, Long>? = null
 
     fun init(c: AppContainer) {
@@ -124,7 +122,6 @@ object NativeCast {
         val start = (index - BEFORE).coerceAtLeast(0)
         val window = ids.subList(start, minOf(ids.size, start + MAX_ITEMS))
         val position = now.positionMs
-        val play = now.isPlaying
         c.player.pause()
         c.scope.launch {
             val signed = runCatching { c.api.castSign(CastSignRequest(window)).items }.getOrElse {
@@ -132,6 +129,12 @@ object NativeCast {
                 return@launch
             }
             val byId = now.queue.associateBy { it.mediaId }
+            // Queue position of each signed item (the server skips unknown ids; a track may repeat).
+            var w = 0
+            val positions = signed.map { s ->
+                while (w < window.size && window[w] != s.trackId) w++
+                (start + w).also { w++ }
+            }
             val items = signed.mapIndexed { i, s ->
                 val md = byId[s.trackId]?.mediaMetadata
                 val meta = MediaMetadata(MediaMetadata.MEDIA_TYPE_MUSIC_TRACK).apply {
@@ -144,20 +147,18 @@ object NativeCast {
                     .setContentType(s.contentType)
                     .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
                     .setMetadata(meta)
-                    .setCustomData(JSONObject().put("trackId", s.trackId).put("index", start + window.indexOf(s.trackId).coerceAtLeast(i)))
+                    .setCustomData(JSONObject().put("trackId", s.trackId).put("index", positions[i]))
                     .build()
                 MediaQueueItem.Builder(info).setAutoplay(true).setPreloadTime(10.0).build()
             }
             if (items.isEmpty()) return@launch
-            lastTrackIds = window
-            lastWindowStart = start
-            val startAt = window.indexOf(ids[index]).coerceAtLeast(0).coerceAtMost(items.size - 1)
+            val startAt = positions.indexOfFirst { it >= index }.let { if (it < 0) items.size - 1 else it }
             withContext(Dispatchers.Main) {
                 val req = MediaLoadRequestData.Builder()
                     .setQueueData(MediaQueueData.Builder().setItems(items).setStartIndex(startAt)
                         .setRepeatMode(MediaStatus.REPEAT_MODE_REPEAT_OFF).build())
                     .setCurrentTime(position)
-                    .setAutoplay(play || true)
+                    .setAutoplay(true)   // casting starts playing, even from a paused phone
                     .build()
                 session.remoteMediaClient?.load(req)
             }

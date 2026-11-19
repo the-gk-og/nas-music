@@ -34,6 +34,8 @@ services:
     ports:
       - "8443:8443"              # LAN HTTPS for the app (self-signed cert, pinned at pairing)
       - "127.0.0.1:8080:8080"    # plain HTTP for the host-network cloudflared only
+      - "8090:8090"              # casting: speakers fetch signed media URLs (plain HTTP, LAN only).
+                                 # Speaker discovery needs network_mode: host; see deploy/README.md "Casting".
     environment:
       NASMUSIC_CONFIG: /data/config.toml
     volumes:

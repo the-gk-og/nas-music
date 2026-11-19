@@ -1,8 +1,12 @@
 name: android
 
-# Pull requests: build + unit tests only.
-# Pushes to main that touch the app: build an APK signed with the permanent release key
-# (GitHub secrets), version 0.1.<run number>, and publish it as a GitHub Release.
+# Two flavours (CLAUDE.md): `foss` (no Google code; casting via the server) and `full` (adds the Google
+# Cast SDK). Every run checks that the foss APK contains no Google Play Services classes, and that the check
+# does find them in the full APK (so it can't silently stop working).
+# Pull requests: build both debug APKs + unit tests.
+# Pushes to main that touch the app: both APKs signed with the permanent release key (GitHub secrets),
+# version 0.1.<run number>, published as one GitHub Release:
+#   nasmusic-foss-v0.1.N.apk, nasmusic-full-v0.1.N.apk
 
 on:
   push:
@@ -40,7 +44,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Unit tests
-        run: ./gradlew testDebugUnitTest
+        run: ./gradlew testFossDebugUnitTest testFullDebugUnitTest
 
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -61,13 +65,22 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          ./gradlew assembleRelease
-          mv app/build/outputs/apk/release/app-release.apk "nas-music-v0.1.${VERSION_CODE}.apk"
+          ./gradlew assembleFossRelease assembleFullRelease
+          mv app/build/outputs/apk/foss/release/app-foss-release.apk "nasmusic-foss-v0.1.${VERSION_CODE}.apk"
+          mv app/build/outputs/apk/full/release/app-full-release.apk "nasmusic-full-v0.1.${VERSION_CODE}.apk"
           rm -f "$RUNNER_TEMP/release.jks"
 
-      - name: Build debug APK (pull requests)
+      - name: Build debug APKs (pull requests)
         if: github.event_name == 'pull_request'
-        run: ./gradlew assembleDebug
+        run: |
+          ./gradlew assembleFossDebug assembleFullDebug
+          mv app/build/outputs/apk/foss/debug/app-foss-debug.apk "nasmusic-foss-v0.1.${VERSION_CODE}.apk"
+          mv app/build/outputs/apk/full/debug/app-full-debug.apk "nasmusic-full-v0.1.${VERSION_CODE}.apk"
+
+      - name: FOSS APK has no Google Play Services code
+        run: |
+          scripts/check-no-gms.sh "nasmusic-foss-v0.1.${VERSION_CODE}.apk"
+          scripts/check-no-gms.sh --expect-gms "nasmusic-full-v0.1.${VERSION_CODE}.apk"
 
       - name: Publish GitHub Release
         if: github.event_name != 'pull_request'
@@ -75,8 +88,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v0.1.${VERSION_CODE}"
-          gh release create "$tag" "nas-music-${tag}.apk" \
+          gh release create "$tag" "nasmusic-foss-${tag}.apk" "nasmusic-full-${tag}.apk" \
             --target "${{ github.sha }}" \
             --title "nas-music ${tag}" \
-            --notes "Android app build ${tag} from ${GITHUB_SHA::7}. Installs as an update over any earlier release." \
+            --notes "Android app build ${tag} from ${GITHUB_SHA::7}. Installs as an update over any earlier release.
+          nasmusic-foss: no Google code; cast to speakers through the server (Devices list).
+          nasmusic-full: also has a Google Cast button (needs Google Play Services on the phone)." \
             --latest
