@@ -12,7 +12,7 @@ import logging
 import sqlite3
 from typing import Literal
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -218,11 +218,22 @@ class SignBody(BaseModel):
     format: Literal["original", "opus", "mp3"] = "original"
 
 
+def sign_base(request: Request, cfg: Config) -> str:
+    """Where the speaker should fetch from. A phone that reached us through the public address (the internal
+    HTTP port, behind the relay/tunnel) may be casting to a speaker on another network, which can't reach the
+    LAN-only cast port — so hand out public links. On the LAN, use the fast direct cast port."""
+    server = request.scope.get("server") or (None, None)
+    if cfg.tunnel_url and server[1] == cfg.http_port:
+        return cfg.tunnel_url.rstrip("/")
+    return cfg.cast_base_url
+
+
 @router.post("/cast/sign")
-def sign_urls(body: SignBody, c: AppContext = Depends(ctx), conn: sqlite3.Connection = Depends(db)):
+def sign_urls(body: SignBody, request: Request, c: AppContext = Depends(ctx),
+              conn: sqlite3.Connection = Depends(db)):
     """Signed media + art URLs for tracks, for a client that casts by itself (the Google Cast button)."""
     key = cast_key(c)
-    base = c.cfg.cast_base_url
+    base = sign_base(request, c.cfg)
     marks = ",".join("?" * len(body.trackIds))
     rows = {
         r["id"]: r

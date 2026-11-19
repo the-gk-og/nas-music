@@ -358,3 +358,28 @@ def test_refresh_endpoint_is_admin_only(client, bob):
     assert client.post("/api/v1/cast/speakers/refresh").status_code == 200
     assert bob.post("/api/v1/cast/speakers/refresh").status_code == 403
     assert bob.get("/api/v1/cast/speakers").status_code == 200
+
+
+def test_sign_base_uses_public_address_when_reached_through_the_relay(cfg):
+    """Phone away from home (came in on the internal HTTP port via the relay/tunnel): public links, so a
+    speaker on another network can fetch them. On the LAN port: the direct cast port."""
+    from dataclasses import replace
+
+    from starlette.requests import Request
+
+    from nasmusic.app.cast_api import sign_base
+
+    def req(port):
+        return Request({"type": "http", "server": ("nasmusic", port), "headers": []})
+
+    assert sign_base(req(cfg.http_port), cfg) == "https://music.example.com"
+    assert sign_base(req(cfg.https_port), cfg) == "http://192.168.1.50:8090"
+    assert sign_base(req(cfg.http_port), replace(cfg, tunnel_url=None)) == "http://192.168.1.50:8090"
+
+
+def test_public_signed_link_is_served_by_the_main_app(client, conn, anon, app):
+    """The relay forwards to the main app, so the signed /cast/media path must work there without a session."""
+    ids = list(track_ids(conn).values())
+    url = client.post("/api/v1/cast/sign", json={"trackIds": ids[:1]}).json()["items"][0]["url"]
+    path = url.split("://", 1)[1].split("/", 1)[1]
+    assert anon.get("/" + path).status_code == 200
