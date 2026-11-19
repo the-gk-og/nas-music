@@ -313,7 +313,11 @@ def test_a_second_user_takes_the_speaker(tc, conn, speaker):
         assert lost["playing"] is False
         err = until(a, "error")
         assert "someone else" in err["detail"] and err["source"] == "speaker"
-        # Alice's commands no longer reach the speaker.
+        # Alice's commands no longer reach the speaker. (Wait for Bob's load to land first; it's async.)
+        import time
+        deadline = time.monotonic() + 5
+        while not any(c[0] == "load" and c[1] == ids[1] for c in speaker.calls) and time.monotonic() < deadline:
+            time.sleep(0.02)
         n = len(speaker.calls)
         a.send_json({"type": "command", "action": "pause", "targetDeviceId": sid})
         until(a, "error")

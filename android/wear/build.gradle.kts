@@ -36,6 +36,7 @@ val phoneShared = tasks.register<Sync>("syncPhoneSharedSources") {
         include(
             "org/nasmusic/app/net/**",
             "org/nasmusic/app/data/api/**",
+            "org/nasmusic/app/eq/EqSettings.kt", // plain data classes referenced by NasMusicApi
             "org/nasmusic/app/data/FeedRepository.kt",
             "org/nasmusic/app/connect/ConnectProtocol.kt",
             "org/nasmusic/app/pairing/SecureStore.kt",
