@@ -6,8 +6,8 @@
 
   let { jobs, onchange }: { jobs: JobStatus[]; onchange?: () => void } = $props();
   const A = $derived(adminApi(session.api));
-  const LABELS: Record<string, string> = { scan: 'Library scan', analyse: 'Audio analysis', nightly: 'Nightly mixes', discovery: 'Weekly discovery', pretranscode: 'Pre-transcode', backup: 'Backup' };
-  const RUNNABLE = new Set(['scan', 'nightly', 'discovery', 'analyse', 'pretranscode', 'backup']);
+  const LABELS: Record<string, string> = { scan: 'Library scan', analyse: 'Audio analysis', loudness: 'Volume levelling', nightly: 'Nightly mixes', discovery: 'Weekly discovery', pretranscode: 'Pre-transcode', backup: 'Backup' };
+  const RUNNABLE = new Set(['scan', 'nightly', 'discovery', 'analyse', 'loudness', 'pretranscode', 'backup']);
   let busy = $state<string | null>(null);
 
   async function run(name: string) {

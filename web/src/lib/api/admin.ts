@@ -10,7 +10,7 @@ export interface DiskUsage {
   totalBytes: number;
 }
 
-export type JobName = 'scan' | 'analyse' | 'nightly' | 'discovery' | 'pretranscode' | 'backup';
+export type JobName = 'scan' | 'analyse' | 'loudness' | 'nightly' | 'discovery' | 'pretranscode' | 'backup';
 
 export interface JobStatus {
   name: JobName | string;
