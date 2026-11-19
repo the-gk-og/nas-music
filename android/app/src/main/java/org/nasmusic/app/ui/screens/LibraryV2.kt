@@ -273,10 +273,25 @@ fun PlaylistScreen(c: AppContainer, id: String) {
     var p by remember { mutableStateOf<Playlist?>(null) }
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    var membersOpen by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     suspend fun reload() { p = runCatching { c.api.playlist(id) }.getOrNull() }
-    LaunchedEffect(id) { reload() }
+    LaunchedEffect(id, ui.tagsRev) { reload() }
+    // v5: live changes by other members (Connect `playlist`)
+    LaunchedEffect(id) {
+        c.connect.playlistChanges.collect { m ->
+            if (m.playlistId != id) return@collect
+            if (m.deleted) { ui.toast = "This playlist was deleted or is no longer shared with you"; ui.nav.popBackStack() }
+            else if (m.rev == null || m.rev != p?.rev) reload()
+        }
+    }
     val pl = p ?: return Loading()
+    val isOwner = pl.role == "owner"
+    val canEdit = pl.role != "viewer"
+    /** Entry ops keep their meaning when others edited meanwhile; a 409 just means "reload". */
+    fun edit(block: suspend () -> Playlist?) = scope.launch {
+        runCatching { block() }.onSuccess { r -> if (r != null) p = r else reload() }.onFailure { reload() }
+    }
     Column(Modifier.fillMaxSize()) {
         ScreenTitle(pl.name) {
             IconButton(onClick = { c.player.play(pl.tracks, 0, PlaySource.LIBRARY, "Playlist: ${pl.name}") }) { Icon(Icons.Default.PlayArrow, "Play") }
@@ -286,24 +301,47 @@ fun PlaylistScreen(c: AppContainer, id: String) {
             Column {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
                 DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem({ Text("Rename") }, { menu = false; newName = pl.name; renaming = true })
+                    DropdownMenuItem({ Text(if (isOwner) "Share / members" else "Members & activity") }, { menu = false; membersOpen = true })
+                    if (isOwner) DropdownMenuItem({ Text("Rename") }, { menu = false; newName = pl.name; renaming = true })
                     DropdownMenuItem({ Text("Pin to Home") }, { menu = false; scope.launch { runCatching { c.api.pin(org.nasmusic.app.data.api.NewPin("playlist", id)) }; ui.toast = "Pinned to Home" } })
-                    DropdownMenuItem({ Text("Delete playlist") }, {
+                    if (isOwner) DropdownMenuItem({ Text("Delete playlist") }, {
                         menu = false
                         scope.launch { runCatching { c.api.deletePlaylist(id) }; ui.nav.popBackStack() }
                     })
                 }
             }
         }
+        if (!isOwner) {
+            Text("By ${pl.owner ?: "?"} · you're ${if (canEdit) "an editor" else "a viewer"}",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
+        } else if (pl.collaborative) {
+            Text("Collaborative · ${pl.memberCount} member${if (pl.memberCount == 1) "" else "s"}",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
+        }
         if (pl.tracks.isEmpty()) Message("Empty. Add songs from any song's … menu.")
         LazyColumn(Modifier.fillMaxSize()) {
-            items(pl.tracks.withIndex().toList(), key = { "${it.index}:${it.value.id}" }) { (i, t) ->
-                SongRow(c, t, onClick = { c.player.play(pl.tracks, i, PlaySource.LIBRARY, "Playlist: ${pl.name}") }, leading = {
-                    IconButton(onClick = { scope.launch { runCatching { c.api.removeFromPlaylist(id, i) }; reload() } }) {
-                        Icon(Icons.Default.Close, "Remove from playlist", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            items(pl.tracks.withIndex().toList(), key = { pl.entries.getOrNull(it.index)?.id ?: "${it.index}:${it.value.id}" }) { (i, t) ->
+                val entry = pl.entries.getOrNull(i)
+                Column {
+                    SongRow(c, t, onClick = { c.player.play(pl.tracks, i, PlaySource.LIBRARY, "Playlist: ${pl.name}") }, leading = if (canEdit) ({
+                        IconButton(onClick = {
+                            edit { if (entry != null) c.api.removePlaylistEntry(id, entry.id) else { c.api.removeFromPlaylist(id, i); null } }
+                        }) {
+                            Icon(Icons.Default.Close, "Remove from playlist", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }) else null)
+                    if (pl.collaborative && entry?.addedBy != null) {
+                        Text("added by ${entry.addedBy}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 72.dp, bottom = 4.dp))
                     }
-                })
+                }
             }
+        }
+    }
+    if (membersOpen) {
+        org.nasmusic.app.ui.PlaylistMembersDialog(c, id, isOwner, onLeft = { membersOpen = false; ui.nav.popBackStack() }) {
+            membersOpen = false
+            scope.launch { reload() }
         }
     }
     if (renaming) {

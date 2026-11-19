@@ -164,6 +164,46 @@ interface NasMusicApi {
     @POST("playlists/{id}/move")
     suspend fun movePlaylistTrack(@Path("id") id: String, @Body body: MoveBody): Response<Unit>
 
+    // ---- v5: collaborative playlists ----
+
+    @POST("playlists/{id}/tracks")
+    suspend fun addToPlaylistAfter(@Path("id") id: String, @Body body: AddEntriesBody): Playlist
+
+    @DELETE("playlists/{id}/entries/{entryId}")
+    suspend fun removePlaylistEntry(@Path("id") id: String, @Path("entryId") entryId: String): Playlist
+
+    @POST("playlists/{id}/entries/{entryId}/move")
+    suspend fun movePlaylistEntry(@Path("id") id: String, @Path("entryId") entryId: String, @Body body: MoveEntryBody): Playlist
+
+    @GET("playlists/{id}/members")
+    suspend fun playlistMembers(@Path("id") id: String): List<PlaylistMember>
+
+    @POST("playlists/{id}/members")
+    suspend fun addPlaylistMember(@Path("id") id: String, @Body body: NewMemberBody): List<PlaylistMember>
+
+    @PATCH("playlists/{id}/members/{userId}")
+    suspend fun setPlaylistMemberRole(@Path("id") id: String, @Path("userId") userId: String, @Body body: RoleBody): List<PlaylistMember>
+
+    @DELETE("playlists/{id}/members/{userId}")
+    suspend fun removePlaylistMember(@Path("id") id: String, @Path("userId") userId: String): Response<Unit>
+
+    @GET("playlists/{id}/activity")
+    suspend fun playlistActivity(@Path("id") id: String, @Query("limit") limit: Int = 50): List<PlaylistActivity>
+
+    @GET("users")
+    suspend fun userDirectory(): List<UserRef>
+
+    // ---- v5: admin tag editing ----
+
+    @GET("admin/tags/tracks/{id}")
+    suspend fun trackTags(@Path("id") id: String): TrackTagDetail
+
+    @POST("admin/tags/edit")
+    suspend fun editTags(@Body body: TagEditBody): TagEditResult
+
+    @GET("admin/tags/musicbrainz")
+    suspend fun tagSuggestions(@Query("trackId") trackId: String): TagSuggestions
+
     @GET("queues")
     suspend fun queues(): List<Queue>
 

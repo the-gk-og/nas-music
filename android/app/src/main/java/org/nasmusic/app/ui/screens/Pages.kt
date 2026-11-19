@@ -165,7 +165,7 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
     var more by remember { mutableStateOf<List<ShelfItem>>(emptyList()) }
     var style by rememberPageStyle(c)
     val list = rememberLazyListState()
-    LaunchedEffect(albumId) {
+    LaunchedEffect(albumId, ui.tagsRev) {
         album = runCatching { c.api.album(albumId) }.getOrNull()
         album?.let { a ->
             more = runCatching { c.api.artist(a.artistId).albums }.getOrDefault(emptyList())
@@ -182,6 +182,9 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
         PageMenu(style, { style = it }) { close ->
             DropdownMenuItem({ Text("Add all to queue") }, { close(); c.player.addToQueue(a.tracks) })
             DropdownMenuItem({ Text("Add all to playlist") }, { close(); ui.addToPlaylist = a.tracks })
+            if (c.secureStore.config.value?.isAdmin == true) {
+                DropdownMenuItem({ Text("Edit album tags") }, { close(); ui.tagEdit = org.nasmusic.app.ui.TagEditTarget(a.tracks.map { it.id }, a.title, album = true) })
+            }
             DropdownMenuItem({ Text("Pin to Home") }, { close(); scope.launch { runCatching { c.api.pin(org.nasmusic.app.data.api.NewPin("album", a.id)) }; ui.toast = "Pinned to Home" } })
         }
     }

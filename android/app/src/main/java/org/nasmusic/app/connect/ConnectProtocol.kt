@@ -57,6 +57,8 @@ sealed interface ConnectMessage {
     data class Takeover(val state: PlaybackState) : ConnectMessage
     data object Release : ConnectMessage
     data class QueuesChanged(val queueId: String?) : ConnectMessage
+    /** v5: a playlist you own or are a member of changed; deleted = gone or your access was removed. */
+    data class PlaylistChanged(val playlistId: String, val rev: Int?, val deleted: Boolean) : ConnectMessage
     data object Pong : ConnectMessage
     data class Unknown(val type: String?) : ConnectMessage
 }
@@ -84,6 +86,13 @@ object ConnectProtocol {
             "takeover" -> ConnectMessage.Takeover(state() ?: PlaybackState())
             "release" -> ConnectMessage.Release
             "queues" -> ConnectMessage.QueuesChanged(o["queueId"]?.jsonPrimitive?.contentOrNull)
+            "playlist" -> o["playlistId"]?.jsonPrimitive?.contentOrNull?.let { pid ->
+                ConnectMessage.PlaylistChanged(
+                    pid,
+                    o["rev"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
+                    o["deleted"]?.jsonPrimitive?.contentOrNull == "true",
+                )
+            } ?: ConnectMessage.Unknown(type)
             "pong" -> ConnectMessage.Pong
             else -> ConnectMessage.Unknown(type)
         }
