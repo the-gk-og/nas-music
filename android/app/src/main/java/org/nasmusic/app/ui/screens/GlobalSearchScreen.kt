@@ -1,5 +1,9 @@
 package org.nasmusic.app.ui.screens
 
+import org.nasmusic.app.data.api.home
+import org.nasmusic.app.data.api.forYou
+import org.nasmusic.app.data.api.pins
+import org.nasmusic.app.data.api.globalSearch
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

@@ -16,6 +16,7 @@ import org.junit.Before
 import org.junit.Test
 import org.nasmusic.app.data.FeedRepository
 import org.nasmusic.app.data.api.ApiFactory
+import org.nasmusic.app.data.api.globalSearch
 import org.nasmusic.app.data.api.NasMusicApi
 import org.nasmusic.app.data.api.NewToGet
 import org.nasmusic.app.data.api.Queue
@@ -122,7 +123,7 @@ class V3Test {
         api.toGet(status = "all")
         assertEquals("/api/v1/toget?status=all", server.takeRequest().path)
         server.enqueue(MockResponse().setBody("""[{"type":"album","id":"al1","title":"LP"}]"""))
-        assertEquals("al1", api.pin(org.nasmusic.app.data.api.NewPin("album", "al1")).single().id)
+        assertEquals(1, (api.pin(org.nasmusic.app.data.api.NewPin("album", "al1")) as kotlinx.serialization.json.JsonArray).size)
         assertEquals("""{"type":"album","id":"al1"}""", server.takeRequest().body.readUtf8())
     }
 

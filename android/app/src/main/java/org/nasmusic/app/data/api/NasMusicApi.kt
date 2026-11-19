@@ -216,14 +216,15 @@ interface NasMusicApi {
     @POST("admin/users/{id}/reset-password")
     suspend fun resetPassword(@Path("id") id: String, @Body body: NewPassword): Response<Unit>
     // ---- v3 (docs/v3-ux.md) ----
+    // Feeds come back as raw JSON and go through LenientJson so one bad shelf/item can't break the screen.
     @GET("home")
-    suspend fun home(): ShelfFeed
+    suspend fun homeRaw(): kotlinx.serialization.json.JsonElement
 
     @GET("foryou")
-    suspend fun forYou(): ShelfFeed
+    suspend fun forYouRaw(): kotlinx.serialization.json.JsonElement
 
     @GET("search")
-    suspend fun globalSearch(@Query("q") q: String, @Query("scope") scope: String = "all", @Query("limit") limit: Int = 20): SearchResults
+    suspend fun globalSearchRaw(@Query("q") q: String, @Query("scope") scope: String = "all", @Query("limit") limit: Int = 20): kotlinx.serialization.json.JsonElement
 
     /** status: want (default) | got | dismissed | all */
     @GET("toget")
@@ -239,11 +240,11 @@ interface NasMusicApi {
     suspend fun deleteToGet(@Path("id") id: String): Response<Unit>
 
     @GET("pins")
-    suspend fun pins(): List<ShelfItem>
+    suspend fun pinsRaw(): kotlinx.serialization.json.JsonElement
 
     /** Returns all pins after the change. */
     @POST("pins")
-    suspend fun pin(@Body body: NewPin): List<ShelfItem>
+    suspend fun pin(@Body body: NewPin): kotlinx.serialization.json.JsonElement
 
     @DELETE("pins/{type}/{id}")
     suspend fun unpin(@Path("type") type: String, @Path("id") id: String): Response<Unit>
@@ -255,3 +256,8 @@ interface NasMusicApi {
     @POST("radio/{queueId}/more")
     suspend fun radioMore(@Path("queueId") queueId: String): kotlinx.serialization.json.JsonObject
 }
+
+suspend fun NasMusicApi.home(): ShelfFeed = LenientJson.feed(homeRaw())
+suspend fun NasMusicApi.forYou(): ShelfFeed = LenientJson.feed(forYouRaw())
+suspend fun NasMusicApi.globalSearch(q: String, scope: String = "all", limit: Int = 20): SearchResults = LenientJson.search(globalSearchRaw(q, scope, limit))
+suspend fun NasMusicApi.pins(): List<ShelfItem> = (pinsRaw() as? kotlinx.serialization.json.JsonArray)?.mapNotNull { LenientJson.item(it) }.orEmpty()

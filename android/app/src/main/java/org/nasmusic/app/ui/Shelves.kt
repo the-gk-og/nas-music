@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -176,7 +177,8 @@ fun ShelfHeader(title: String, action: (@Composable () -> Unit)? = null) {
 @Composable
 fun ShelfRow(c: AppContainer, items: List<ShelfItem>, cardWidth: Dp = 140.dp, onUnpin: ((ShelfItem) -> Unit)? = null) {
     LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(items, key = { it.type + ":" + it.id }) { ShelfCard(c, it, cardWidth, items, onUnpin?.let { f -> { f(it) } }) }
+        // Index in the key: servers may repeat an item in a shelf, and duplicate keys crash LazyRow.
+        itemsIndexed(items, key = { i, it -> "$i:${it.type}:${it.id}" }) { _, it -> ShelfCard(c, it, cardWidth, items, onUnpin?.let { f -> { f(it) } }) }
     }
 }
 

@@ -64,19 +64,22 @@ data class AlbumDetail(
 @Serializable
 data class Track(
     val id: String,
-    val title: String,
-    val artistId: String,
-    val artist: String,
-    val albumId: String,
-    val album: String,
+    // Defaults so a partial track (e.g. a missing file in a queue) still parses.
+    val title: String = "",
+    val artistId: String = "",
+    val artist: String = "",
+    val albumId: String = "",
+    val album: String = "",
     val trackNo: Int? = null,
     val discNo: Int? = null,
     val year: Int? = null,
     val genre: String? = null,
-    val durationS: Double,
+    val durationS: Double = 0.0,
     val flacBytes: Long? = null,
-    val starred: Boolean,
+    val starred: Boolean = false,
     val rating: Int? = null,
+    /** v2: in playlists/queues when the file is gone. */
+    val missing: Boolean = false,
 )
 
 @Serializable
