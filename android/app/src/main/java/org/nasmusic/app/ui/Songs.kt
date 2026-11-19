@@ -47,6 +47,8 @@ fun SongRow(
     highlighted: Boolean = false,
     leading: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
+    /** What the "…" menu opens for (e.g. with a queue position, which adds "Remove from queue"). */
+    menuTarget: SongMenuTarget? = null,
 ) {
     val ui = LocalUi.current
     var quick by remember { mutableStateOf(false) }
@@ -68,7 +70,7 @@ fun SongRow(
                     Text(formatDuration(track.durationS), color = color.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall)
                 }
             }
-            IconButton(onClick = { ui.songMenu = SongMenuTarget(track) }) {
+            IconButton(onClick = { ui.songMenu = menuTarget ?: SongMenuTarget(track) }) {
                 Icon(Icons.Default.MoreHoriz, "Song menu", tint = color)
             }
         }

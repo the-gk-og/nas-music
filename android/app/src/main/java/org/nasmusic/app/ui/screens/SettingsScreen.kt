@@ -62,6 +62,7 @@ fun SettingsScreen(c: AppContainer) {
     val cfg = config ?: return
     var lan by remember(cfg) { mutableStateOf(cfg.lanUrl) }
     var tunnel by remember(cfg) { mutableStateOf(cfg.tunnelUrl.orEmpty()) }
+    var addrError by remember { mutableStateOf<String?>(null) }
     var cfId by remember(cfg) { mutableStateOf(cfg.cfAccessClientId.orEmpty()) }
     var cfSecret by remember(cfg) { mutableStateOf(cfg.cfAccessClientSecret.orEmpty()) }
     var limit by remember(settings.storageLimitMb) { mutableFloatStateOf(settings.storageLimitMb / 1024f) }
@@ -83,15 +84,27 @@ fun SettingsScreen(c: AppContainer) {
                 ProbeResult.WRONG_SERVER -> "a different server answered"
             },
         )
-        OutlinedTextField(lan, { lan = it }, label = { Text("LAN address") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(tunnel, { tunnel = it }, label = { Text("Tunnel address") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Text(
+            "Using: " + (cfg.baseFor(if (route == Route.OFFLINE) Route.TUNNEL else route)?.toString()?.trimEnd('/') ?: "—"),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        OutlinedTextField(lan, { lan = it }, label = { Text("Home (LAN) address") }, placeholder = { Text("192.168.68.2:8443") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            tunnel, { tunnel = it }, label = { Text("Remote address") }, placeholder = { Text("https://music.example.com:8443") },
+            supportingText = { Text("Any port works; uses normal certificate checks (no pin).") },
+            singleLine = true, modifier = Modifier.fillMaxWidth(),
+        )
+        addrError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         OutlinedTextField(cfId, { cfId = it }, label = { Text("CF Access client id") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(
             cfSecret, { cfSecret = it }, label = { Text("CF Access client secret") }, singleLine = true,
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { c.pairing.updateAddresses(lan, tunnel, cfId, cfSecret) }) { Text("Save addresses") }
+            OutlinedButton(onClick = {
+                addrError = c.pairing.saveAddresses(lan, tunnel, cfId, cfSecret)
+                if (addrError == null) { ui.toast = "Addresses saved"; scope.launch { c.router.refresh() } }
+            }) { Text("Save addresses") }
             OutlinedButton(onClick = { scope.launch { c.router.refresh() } }) { Text("Re-check route") }
         }
         Text("LAN certificate: ${cfg.certSha256.take(23)}…", style = MaterialTheme.typography.bodySmall)
@@ -146,6 +159,11 @@ fun SettingsScreen(c: AppContainer) {
         HorizontalDivider()
         Section("Data & recommendations")
         OutlinedButton(onClick = { ui.go("data") }) { Text("Choose what to collect") }
+
+        HorizontalDivider()
+        Section("Help")
+        OutlinedButton(onClick = { ui.bugReport = false }) { Text("Send bug report") }
+        Text("App ${org.nasmusic.app.BuildConfig.VERSION_NAME} (${org.nasmusic.app.BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall)
 
         HorizontalDivider()
         Section("Account")

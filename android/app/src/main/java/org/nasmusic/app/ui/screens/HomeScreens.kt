@@ -76,7 +76,7 @@ fun TopBar(c: AppContainer, title: String) {
     val ui = LocalUi.current
     val cfg by c.secureStore.config.collectAsStateWithLifecycle()
     var menu by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         IconButton(onClick = { ui.go("search") }) { Icon(Icons.Default.Search, "Search") }
         Box {
@@ -160,12 +160,12 @@ fun HomeScreen(c: AppContainer) {
                         }
                     }
                 }
-                else -> byKind[id]?.takeIf { it.items.isNotEmpty() }?.let { shelf -> item(key = id) { HomeShelf(c, shelf) { reload++ } } }
+                else -> byKind[id]?.takeIf { it.items.isNotEmpty() }?.let { shelf -> item(key = "k:$id") { HomeShelf(c, shelf) { reload++ } } }
             }
         }
         // Shelves the server adds that the app doesn't know yet still show, after the known ones.
         feed?.shelves.orEmpty().filter { s -> settings.homeShelves.none { it.removePrefix("-") == s.kind } && s.items.isNotEmpty() && s.kind in KNOWN_KINDS }
-            .forEach { s -> item(key = "x:" + s.id) { HomeShelf(c, s) { reload++ } } }
+            .forEachIndexed { i, s -> item(key = "x:$i:${s.id}") { HomeShelf(c, s) { reload++ } } }
         if (feed == null && !failed) item { Box(Modifier.height(200.dp)) { Loading() } }
         if (failed) item { Message("Couldn't reach the server. Your queues and downloaded favourites still work.") }
         item { Spacer(Modifier.height(24.dp)) }
@@ -195,8 +195,8 @@ fun ForYouScreen(c: AppContainer) {
     LaunchedEffect(Unit) { feed = runCatching { c.feeds.forYou() }.onFailure { failed = true }.getOrNull() }
     LazyColumn(Modifier.fillMaxSize()) {
         item { TopBar(c, "For You") }
-        feed?.shelves.orEmpty().filter { it.items.isNotEmpty() && it.kind in KNOWN_KINDS }.forEach { shelf ->
-            item(key = shelf.id) {
+        feed?.shelves.orEmpty().filter { it.items.isNotEmpty() && it.kind in KNOWN_KINDS }.forEachIndexed { i, shelf ->
+            item(key = "$i:${shelf.id}") {
                 ShelfHeader(shelf.title) {
                     when (shelf.kind) {
                         "to_get" -> TextButton(onClick = { ui.go("toget") }) { Text("See all") }

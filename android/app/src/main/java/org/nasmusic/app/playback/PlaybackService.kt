@@ -69,7 +69,7 @@ import org.nasmusic.app.eq.EqAudioProcessor
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private var tracker: FeedbackTracker? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + org.nasmusic.app.diag.CrashLog.handler)
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var c: AppContainer
     private lateinit var player: ExoPlayer
@@ -116,6 +116,10 @@ class PlaybackService : MediaSessionService() {
                 // Pressing play on this phone makes it the Connect active device (§5 rule 1).
                 if (isPlaying && !applyingRemote) c.connect.claimPlayback()
             }
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) errorRetries = 0
+            }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) = recover(error)
         })
 
         val openApp = PendingIntent.getActivity(
@@ -155,6 +159,26 @@ class PlaybackService : MediaSessionService() {
                 c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)
             }
             handler.postDelayed(this, 250)
+        }
+    }
+
+    private var errorRetries = 0
+
+    private fun recover(error: androidx.media3.common.PlaybackException) {
+        android.util.Log.w(org.nasmusic.app.diag.CrashLog.TAG, "Playback error ${error.errorCodeName} (retry $errorRetries)", error)
+        when (val a = PlaybackRecovery.decide(error.errorCode, errorRetries, player.hasNextMediaItem())) {
+            is PlaybackRecovery.Action.Retry -> {
+                errorRetries++
+                handler.postDelayed({
+                    // Re-check LAN vs tunnel first; the stream URL is re-resolved on prepare.
+                    scope.launch { c.router.refresh(); player.prepare() }
+                }, a.delayMs)
+            }
+            PlaybackRecovery.Action.Skip -> {
+                c.ui.toast("Skipped a song that couldn't be played")
+                player.seekToNextMediaItem(); player.prepare()
+            }
+            PlaybackRecovery.Action.Stop -> c.ui.toast("Playback stopped: ${error.errorCodeName}")
         }
     }
 

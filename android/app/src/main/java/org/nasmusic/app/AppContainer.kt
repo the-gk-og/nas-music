@@ -32,7 +32,8 @@ import org.nasmusic.app.sync.EventUploadWorker
 
 /** Hand-rolled dependency container (no DI framework needed for an app this size). */
 class AppContainer(val context: Context) {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // The handler logs failures in background work instead of letting one kill the app.
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + org.nasmusic.app.diag.CrashLog.handler)
     val baseClient = HttpClients.baseClient()
 
     val secureStore = SecureStore(context)
@@ -78,8 +79,13 @@ class AppContainer(val context: Context) {
         deviceName = { AuthRepository.deviceName() },
         appVersion = BuildConfig.VERSION_NAME,
     )
-    val player = PlayerConnection(context, connect, queueSync, { api }, scope)
+    val player = PlayerConnection(context, connect, queueSync, { api }, scope).also { p ->
+        // Binding a MediaController starts the playback service, which then applies the takeover.
+        connect.onTakeover = { android.os.Handler(android.os.Looper.getMainLooper()).post { p.connect() } }
+    }
     val abRepeat = AbRepeat()
+    /** Messages from background parts (playback service, workers) to show as a snackbar. */
+    val ui = UiMessages()
     val eq = EqRepository(context)
     val contextCollector = ContextCollector(context, scope)
     val feeds = org.nasmusic.app.data.FeedRepository(api)
@@ -110,4 +116,10 @@ class AppContainer(val context: Context) {
             }
         }
     }
+}
+
+class UiMessages {
+    private val _messages = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val messages: kotlinx.coroutines.flow.SharedFlow<String> = _messages
+    fun toast(text: String) { _messages.tryEmit(text) }
 }

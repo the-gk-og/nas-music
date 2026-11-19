@@ -107,7 +107,7 @@ private fun BigHeader(
     val tint = tintUrl?.let { rememberDominantColor(it) } ?: MaterialTheme.colorScheme.surfaceContainerHigh
     val motion = LocalMotion.current
     Column(
-        Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(tint.copy(alpha = 0.8f), Color.Black))).statusBarsPadding(),
+        Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(tint.copy(alpha = 0.8f), Color.Black))),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { menu() }
@@ -137,7 +137,7 @@ private fun BigHeader(
 
 @Composable
 private fun SimpleHeader(c: AppContainer, albumId: String?, title: String, subtitle: String?, meta: String?, onPlay: () -> Unit, onShuffle: () -> Unit, onRadio: (() -> Unit)?, menu: @Composable () -> Unit) {
-    Row(Modifier.statusBarsPadding().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         albumId?.let { org.nasmusic.app.ui.AlbumArt(it, 96.dp) }
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)

@@ -1,0 +1,40 @@
+{"shelves":[
+ {"id":"mixes","kind":"mixes","title":"Your mixes","subtitle":null,"layout":"row","items":[
+   {"type":"mix","id":"m1","title":"Daily Mix 1","subtitle":"30 songs","artUrl":"art/al1","mix":{"kind":"daily","trackCount":30,"durationS":6800.5}},
+   {"type":"mix","id":"m2","title":"Late night","subtitle":null,"artUrl":null,"mix":null},
+   {"type":"mix","id":"m1","title":"Daily Mix 1 (duplicate)","artUrl":"art/al1"}
+ ]},
+ {"id":"radio","kind":"radio","title":"Radio","layout":"row","items":[
+   {"type":"radio","id":"random","title":"Random radio","seed":{"type":"random","id":null,"title":null}},
+   {"type":"radio","id":"artist:ar1","title":"Band radio","artUrl":"art/al2","seed":{"type":"artist","id":"ar1","title":"Band"}},
+   {"type":"radio","id":"track:t1","title":"Song radio","seed":null}
+ ]},
+ {"id":"byp:album:al1","kind":"because_you_played","title":"Because you played LP","subtitle":"Similar from your library","items":[
+   {"type":"track","id":"t2","title":"Song 2","subtitle":"Band","artUrl":"art/al3","track":{"id":"t2","title":"Song 2","artistId":"ar1","artist":"Band","albumId":"al3","album":"LP3","durationS":201.5,"starred":false}},
+   {"type":"track","id":"t3","title":"Partial track","track":{"id":"t3","title":"Partial"}},
+   {"type":"album","id":"al4","title":"LP4","subtitle":"Other Band","artUrl":"art/al4","album":{"id":"al4","title":"LP4","artistId":"ar2","artist":"Other Band","trackCount":10,"year":null}}
+ ]},
+ {"id":"suggestions","kind":"suggestions","title":"Suggestions","items":[
+   {"type":"suggestion","id":"s1","title":"New Album","subtitle":"Some Artist","artUrl":"suggestions/s1/cover",
+    "suggestion":{"id":"s1","artist":"Some Artist","album":"New Album","year":null,"hasCover":true,"hasPreview":true,"coverUrl":null,"previewUrl":null,"buyLinks":[],"reason":"Because you like X","status":"new"}},
+   {"type":"suggestion","id":"s2","title":"No details","suggestion":null}
+ ]},
+ {"id":"to_get","kind":"to_get","title":"To get","items":[
+   {"type":"toget","id":"tg1","title":"Wanted LP","subtitle":"Band","artUrl":"catalog/dz:album:1/cover",
+    "toget":{"id":"tg1","type":"album","title":"Wanted LP","artist":"Band","year":2024,"mbid":null,"catalogId":"dz:album:1","artUrl":"catalog/dz:album:1/cover","hasPreview":true,"note":null,"status":"want","source":"search","suggestionId":null,"ownedId":null,"createdAt":"2026-11-19T00:00:00Z","updatedAt":"2026-11-19T00:00:00Z","gotAt":null,"links":[{"name":"Bandcamp","url":"https://bandcamp.com/search?q=x"}]}},
+   {"type":"catalog","id":"dz:album:9","title":"Catalogue thing","catalog":{"id":"dz:album:9","type":"album","title":"Catalogue thing","owned":false,"hasPreview":false,"links":[]}}
+ ]},
+ {"id":"release_radar","kind":"release_radar","title":"Release Radar","items":[]},
+ {"id":"wrapped","kind":"wrapped","title":"Wrapped","items":null},
+ {"id":"future","kind":"podcasts_for_you","title":"A kind this app doesn't know","items":[{"type":"episode","id":"e1","title":"x"}]},
+ {"id":"weird-items","kind":"radio","title":"Bad items mixed in","items":[
+   {"type":"hologram","id":"h1","title":"Unknown type"},
+   {"type":"album","title":"No id"},
+   {"type":"album","id":"","title":"Blank id"},
+   "not an object",
+   null,
+   {"type":"album","id":"al5","title":null}
+ ]},
+ "not a shelf",
+ {"title":"no id or kind"}
+]}

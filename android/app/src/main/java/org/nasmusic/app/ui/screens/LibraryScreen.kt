@@ -17,6 +17,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -86,12 +88,12 @@ fun LibraryScreen(c: AppContainer) {
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CHIPS.forEach { (k, label) -> FilterChip(chip == k, { chip = k }, label = { Text(label) }) }
             }
-            if (SORTS[chip] != null) Box {
+            SORTS[chip]?.let { sorts -> Box {
                 IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort") }
                 DropdownMenu(sortMenu, { sortMenu = false }) {
-                    SORTS[chip]!!.forEach { (k, label) -> DropdownMenuItem({ Text(if (k == sort) "✓ $label" else label) }, { sort = k; sortMenu = false }) }
+                    sorts.forEach { (k, label) -> DropdownMenuItem({ Text(if (k == sort) "✓ $label" else label) }, { sort = k; sortMenu = false }) }
                 }
-            }
+            } }
             if (chip != "folders" && chip != "songs") IconButton(onClick = {
                 scope.launch { c.settings.setLibraryView(chip, if (view == "grid") "list" else "grid") }
             }) { Icon(if (view == "grid") Icons.AutoMirrored.Filled.List else Icons.Default.GridView, if (view == "grid") "List view" else "Grid view") }
@@ -115,8 +117,8 @@ private fun <T> GridOrList(items: List<T>, grid: Boolean, key: (T) -> String, ce
         GridCells.Adaptive(140.dp), Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) { items(items, key = key) { cell(it) } }
-    else LazyColumn(Modifier.fillMaxSize()) { items(items, key = key) { row(it) } }
+    ) { itemsIndexed(items, key = { i, it -> "$i:${key(it)}" }) { _, it -> cell(it) } }
+    else LazyColumn(Modifier.fillMaxSize()) { itemsIndexed(items, key = { i, it -> "$i:${key(it)}" }) { _, it -> row(it) } }
 }
 
 @Composable

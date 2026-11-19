@@ -16,9 +16,13 @@ class UiController(val nav: NavHostController) {
     var devicesOpen by mutableStateOf(false)
     var speedOpen by mutableStateOf(false)
     var abOpen by mutableStateOf(false)
+    /** Queue popup on Now Playing. */
+    var queueSheet by mutableStateOf(false)
     /** Now Playing should show the lyrics side (set by "Show lyrics"). */
     var lyricsRequested by mutableStateOf(false)
     var toast by mutableStateOf<String?>(null)
+    /** null = closed; false = from Settings; true = offered after a crash. */
+    var bugReport by mutableStateOf<Boolean?>(null)
 
     fun go(route: String) = nav.navigate(route) { launchSingleTop = true }
 }

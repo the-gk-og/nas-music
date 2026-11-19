@@ -1,0 +1,25 @@
+{"shelves":[
+ {"id":"start_radio","kind":"start_radio","title":"Start radio","layout":"button","items":[{"type":"radio","id":"random","title":"Start a random radio","seed":{"type":"random"}}]},
+ {"id":"devices","kind":"devices","title":"Your devices","items":[
+   {"type":"device","id":"d2","title":"Desktop","subtitle":"Playing Song 2","device":{"kind":"desktop","canPlay":true,"isActive":true,"playing":true,"nowPlaying":{"id":"t2","title":"Song 2","artistId":"ar1","artist":"Band","albumId":"al3","album":"LP3","durationS":201.5,"starred":false}}},
+   {"type":"device","id":"d3","title":"Old tablet","device":{"kind":"tablet-of-the-future","canPlay":false,"isActive":false,"playing":false,"nowPlaying":null}}
+ ]},
+ {"id":"recently_played","kind":"recently_played","title":"Recently played","layout":"grid2","items":[
+   {"type":"album","id":"al1","title":"LP1","subtitle":"Band","artUrl":"art/al1","playedAt":"2026-11-19T01:00:00Z"},
+   {"type":"playlist","id":"p1","title":"car","artUrl":null,"playlist":{"id":"p1","name":"car","trackCount":12,"durationS":3000}},
+   {"type":"mix","id":"m1","title":"Daily Mix 1","artUrl":"art/al1"},
+   {"type":"radio","id":"q7","title":"Band radio","seed":{"type":"artist","id":"ar1"}},
+   {"type":"smart_list","id":"favourites","title":"Favourites"},
+   {"type":"genre","id":"Rock & Roll","title":"Rock & Roll"},
+   {"type":"folder","id":"B-dic/Live","title":"Live"}
+ ]},
+ {"id":"continue_listening","kind":"continue_listening","title":"Continue listening","items":[
+   {"type":"queue","id":"q1","title":"Album: X","subtitle":"3 of 10","artUrl":"art/al1","progress":{"index":2,"count":10,"positionMs":61000,"queueId":"q1"},
+    "queue":{"id":"q1","name":"Album: X","slot":1,"currentIndex":2,"positionMs":61000,"trackCount":10,"durationS":2400,"radio":null,"source":{"type":"album","id":"al1"}}},
+   {"type":"queue","id":"q2","title":"Empty progress","progress":{"index":0,"count":0}}
+ ]},
+ {"id":"pinned","kind":"pinned","title":"Pinned","items":[
+   {"type":"artist","id":"ar1","title":"Band","artist":{"id":"ar1","name":"Band","albumCount":3}},
+   {"type":"album","id":"al1","title":"LP1","artUrl":"art/al1"}
+ ]}
+]}

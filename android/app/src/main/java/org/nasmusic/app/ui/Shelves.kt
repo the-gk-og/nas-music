@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -66,7 +67,9 @@ import org.nasmusic.app.playback.PlaySource
 fun ShelfArt(item: ShelfItem, size: Dp, round: Boolean = false) {
     val shape = if (round) CircleShape else RoundedCornerShape(8.dp)
     val px = if (size > 100.dp) 512 else 256
-    val model = artModel(item.artUrl, px) ?: item.track?.albumId?.let { MediaItems.artUrl(it, px) }
+    // artUrl when the server sends one, else the art of the album/track it carries.
+    val model = artModel(item.artUrl, px)
+        ?: (item.album?.id ?: item.track?.albumId ?: item.device?.nowPlaying?.albumId)?.takeIf { it.isNotBlank() }?.let { MediaItems.artUrl(it, px) }
     Box(Modifier.size(size).clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
         Icon(iconFor(item.type), null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(size / 3))
         if (model != null) AsyncImage(model, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -176,7 +179,8 @@ fun ShelfHeader(title: String, action: (@Composable () -> Unit)? = null) {
 @Composable
 fun ShelfRow(c: AppContainer, items: List<ShelfItem>, cardWidth: Dp = 140.dp, onUnpin: ((ShelfItem) -> Unit)? = null) {
     LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(items, key = { it.type + ":" + it.id }) { ShelfCard(c, it, cardWidth, items, onUnpin?.let { f -> { f(it) } }) }
+        // Index in the key: servers may repeat an item in a shelf, and duplicate keys crash LazyRow.
+        itemsIndexed(items, key = { i, it -> "$i:${it.type}:${it.id}" }) { _, it -> ShelfCard(c, it, cardWidth, items, onUnpin?.let { f -> { f(it) } }) }
     }
 }
 

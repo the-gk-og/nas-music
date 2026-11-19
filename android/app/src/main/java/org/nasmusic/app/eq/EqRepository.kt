@@ -25,7 +25,7 @@ class EqRepository(context: Context) {
     private val mapSer = MapSerializer(String.serializer(), EqSettings.serializer())
 
     private val profiles: MutableMap<String, EqSettings> =
-        runCatching { json.decodeFromString(mapSer, prefs.getString("profiles", "{}")!!) }.getOrDefault(emptyMap()).toMutableMap()
+        runCatching { json.decodeFromString(mapSer, prefs.getString("profiles", null) ?: "{}") }.getOrDefault(emptyMap()).toMutableMap()
 
     private val _output = MutableStateFlow(OutputDetector.current(audio))
     val output: StateFlow<AudioOutput> = _output.asStateFlow()

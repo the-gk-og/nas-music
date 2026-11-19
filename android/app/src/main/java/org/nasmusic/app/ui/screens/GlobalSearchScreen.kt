@@ -1,5 +1,9 @@
 package org.nasmusic.app.ui.screens
 
+import org.nasmusic.app.data.api.home
+import org.nasmusic.app.data.api.forYou
+import org.nasmusic.app.data.api.pins
+import org.nasmusic.app.data.api.globalSearch
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddShoppingCart
@@ -92,7 +97,7 @@ fun GlobalSearchScreen(c: AppContainer) {
         ui.toast = if (ok) "Added to To get" else "Couldn't add"
     }
 
-    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+    Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
             query, { query = it }, leadingIcon = { Icon(Icons.Default.Search, null) },
             placeholder = { Text("Songs, albums, artists — even ones you don't own") }, singleLine = true,
@@ -119,7 +124,7 @@ fun GlobalSearchScreen(c: AppContainer) {
             }
             val notOwned = r.catalog.filterNot { it.owned }
             if (notOwned.isNotEmpty()) item(key = "h-cat") { ShelfHeader("Not in your library") }
-            items(notOwned, key = { "cat:" + it.id }) { item ->
+            itemsIndexed(notOwned, key = { i, it -> "cat:$i:${it.id}" }) { _, item ->
                 CatalogRow(item, previewing == item.id, onSample = { toggleSample(item) }, onAdd = { addToGet(item) }, onSimilar = { item.artist?.let { query = it } })
             }
             r.catalogError?.let { err -> item(key = "caterr") { Text("Online catalogue unavailable: $err", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp)) } }
