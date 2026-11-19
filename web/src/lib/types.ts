@@ -35,6 +35,35 @@ export interface Track {
   flacBytes?: number;
   starred: boolean;
   rating?: number | null;
+  /** Volume levelling (ReplayGain 2.0 scale); absent until the server has measured the track. */
+  replayGain?: ReplayGain | null;
+}
+
+export interface ReplayGain {
+  trackGain: number;
+  trackPeak?: number | null;
+  albumGain?: number | null;
+  albumPeak?: number | null;
+}
+
+export interface AutoEqEntry {
+  id: string;
+  name: string;
+  source: string;
+  rig?: string | null;
+  form: string;
+}
+
+export interface AutoEqFilter {
+  type: 'PK' | 'LSC' | 'HSC';
+  fc: number;
+  gainDb: number;
+  q: number;
+}
+
+export interface AutoEqProfile extends AutoEqEntry {
+  preampDb: number;
+  filters: AutoEqFilter[];
 }
 
 export interface TrackInfo extends Track {

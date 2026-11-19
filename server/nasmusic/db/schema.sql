@@ -100,7 +100,16 @@ CREATE TABLE IF NOT EXISTS tracks (
     -- v5: the tags as read from the file (JSON). The columns above hold the EFFECTIVE tags: file tags with
     -- tag_overrides applied, so every reader (search, API, AI) sees admin edits without knowing about them.
     -- NULL = not read since v5; the server re-reads the file (read-only) when it needs them.
-    file_tags       TEXT
+    file_tags       TEXT,
+    -- v5 volume levelling (ReplayGain 2.0 scale: reference -18 LUFS). Gains in dB, peaks linear (1.0 = full scale).
+    -- From REPLAYGAIN_* / R128_* tags when the file has them (rg_source 'tags'), else measured with ffmpeg's
+    -- ebur128 filter by the `loudness` job (rg_source 'ebur128'). rg_source NULL = not measured yet.
+    rg_track_gain   REAL,
+    rg_track_peak   REAL,
+    rg_album_gain   REAL,
+    rg_album_peak   REAL,
+    rg_source       TEXT,
+    loudness_lufs   REAL               -- integrated loudness of the track (measured, or derived from the gain)
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist_id);

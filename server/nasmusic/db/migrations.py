@@ -281,10 +281,13 @@ def migrate_v3_to_v4(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
     return True
 
 
-# ---------- v4 -> v5 (admin tag overrides, collaborative playlists, Release Radar, Blend) ----------
+# ---------- v4 -> v5 (admin tag overrides, collaborative playlists, Release Radar, Blend, ReplayGain) ----------
 
 V5_TABLES = ("tag_overrides", "tag_edits", "playlist_members", "playlist_activity",
              "release_radar", "blends", "blend_members", "blend_tracks")
+# Volume levelling: nullable; the next scan reads gain tags and the loudness job measures the rest.
+V5_TRACK_COLUMNS = (("rg_track_gain", "REAL"), ("rg_track_peak", "REAL"), ("rg_album_gain", "REAL"),
+                    ("rg_album_peak", "REAL"), ("rg_source", "TEXT"), ("loudness_lufs", "REAL"))
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -330,6 +333,10 @@ def migrate_v4_to_v5(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
                     conn.execute(_create_table(stmts, t))
             if "file_tags" not in _columns(conn, "tracks"):
                 conn.execute("ALTER TABLE tracks ADD COLUMN file_tags TEXT")
+            have = _columns(conn, "tracks")
+            for col, typ in V5_TRACK_COLUMNS:
+                if col not in have:
+                    conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} {typ}")
             if "rev" not in _columns(conn, "playlists"):
                 conn.execute("ALTER TABLE playlists ADD COLUMN rev INTEGER NOT NULL DEFAULT 0")
             _rebuild_playlist_tracks(conn, stmts)

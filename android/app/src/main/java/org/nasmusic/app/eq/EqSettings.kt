@@ -18,6 +18,8 @@ data class EqSettings(
     val mono: Boolean = false,
     /** −1 = left only … 0 centre … +1 = right only. */
     val balance: Float = 0f,
+    /** AutoEq headphone correction for this output, applied before the bands while the EQ is on. */
+    val headphone: HeadphoneProfile? = null,
 ) {
     fun withBand(i: Int, db: Float) = copy(bandsDb = bandsDb.toMutableList().also { it[i] = db.coerceIn(-12f, 12f) }, preset = "Custom")
 
@@ -36,3 +38,17 @@ data class EqSettings(
         )
     }
 }
+
+/** An AutoEq parametric profile (from the server's /eq/autoeq/profile). */
+@Serializable
+data class HeadphoneProfile(
+    val id: String,
+    val name: String,
+    val source: String = "",
+    val preampDb: Double = 0.0,
+    val filters: List<ParametricFilter> = emptyList(),
+)
+
+/** type: PK (peaking), LSC (low shelf), HSC (high shelf); RBJ cookbook with Q as given. */
+@Serializable
+data class ParametricFilter(val type: String, val fc: Double, val gainDb: Double, val q: Double)

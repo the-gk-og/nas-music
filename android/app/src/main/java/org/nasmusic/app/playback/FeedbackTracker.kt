@@ -80,7 +80,13 @@ class FeedbackTracker(
         }
     }
 
-    override fun onVolumeChanged(volume: Float) { volumes += player.currentPosition to volume }
+    /** The user's volume (player.volume also carries levelling and fades, so it isn't listened to). */
+    fun userVolumeChanged(volume: Float) { volumes += player.currentPosition to volume }
+
+    private var autoTransition = false
+
+    /** The next item change is automatic even though it is a seek (crossfade hands over with seekToNext). */
+    fun markAutoTransition() { autoTransition = true }
     override fun onDeviceVolumeChanged(volume: Int, muted: Boolean) {
         val max = player.deviceInfo.maxVolume.takeIf { it > 0 } ?: 15
         volumes += player.currentPosition to if (muted) 0f else volume.toFloat() / max
@@ -92,10 +98,15 @@ class FeedbackTracker(
             if (reason == Player.DISCONTINUITY_REASON_SEEK) seeks += old.positionMs to new.positionMs
             return
         }
-        val why = when (reason) {
+        val auto = autoTransition
+        autoTransition = false
+        val why = when {
+            auto -> LeaveReason.ENDED
+            else -> when (reason) {
             Player.DISCONTINUITY_REASON_AUTO_TRANSITION -> LeaveReason.ENDED
             Player.DISCONTINUITY_REASON_SEEK, Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT -> LeaveReason.USER_SKIP
             else -> LeaveReason.OTHER
+            }
         }
         leave(leaving, old.positionMs, why)
         startTracking(new.mediaItem)

@@ -296,6 +296,13 @@ interface NasMusicApi {
     @POST("me/bug-report")
     suspend fun bugReport(@Body body: org.nasmusic.app.diag.BugReportBody): org.nasmusic.app.diag.BugReportResponse
 
+    /** AutoEq headphone profiles, proxied and cached by the server (api 0.5). */
+    @GET("eq/autoeq")
+    suspend fun autoEqSearch(@Query("q") q: String, @Query("limit") limit: Int = 40): AutoEqSearch
+
+    @GET("eq/autoeq/profile")
+    suspend fun autoEqProfile(@Query("id") id: String): org.nasmusic.app.eq.HeadphoneProfile
+
     @POST("radio")
     suspend fun startRadio(@Body body: RadioRequest): Queue
 

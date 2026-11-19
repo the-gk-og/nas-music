@@ -37,9 +37,17 @@ class TrackTags:
     sample_rate: int | None = None
     bits_per_sample: int | None = None
     channels: int | None = None
+    # ReplayGain 2.0 scale (reference -18 LUFS); None when the file has no such tag.
+    rg_track_gain: float | None = None   # dB
+    rg_track_peak: float | None = None   # linear
+    rg_album_gain: float | None = None
+    rg_album_peak: float | None = None
 
 
 _NUM = re.compile(r"\d+")
+_FLOAT = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
+# Opus R128_*_GAIN tags are Q7.8 fixed point relative to -23 LUFS; ReplayGain 2.0 uses -18 LUFS.
+R128_TO_RG_DB = 5.0
 _YEAR = re.compile(r"(\d{4})")
 
 
@@ -147,7 +155,55 @@ def read(path: Path) -> tuple[TrackTags, mutagen.FileType | None]:
         t.disc_no = _int(tags.get("discnumber"))
         t.year = _year(tags.get("date") or tags.get("originaldate") or tags.get("year"))
         t.comment = _first(tags.get("comment") or tags.get("description"))
+    _replaygain(t, f, tags)
     return t, f
+
+
+def _float(v) -> float | None:
+    s = _first(v)
+    if not s:
+        return None
+    m = _FLOAT.search(s)
+    if not m:
+        return None
+    try:
+        x = float(m.group().replace(",", "."))
+    except ValueError:
+        return None
+    return x if -60.0 <= x <= 60.0 else None
+
+
+def _rg_values(get) -> dict[str, float | None]:
+    """`get(name)` returns the raw tag value for a lower-case ReplayGain tag name."""
+    out = {k: _float(get(f"replaygain_{k}")) for k in ("track_gain", "track_peak", "album_gain", "album_peak")}
+    for k in ("track_peak", "album_peak"):
+        if out[k] is not None and not 0.0 < out[k] <= 20.0:
+            out[k] = None
+    return out
+
+
+def _replaygain(t: TrackTags, f, tags) -> None:
+    try:
+        if isinstance(f, MP4):
+            low = {k.lower(): v for k, v in tags.items()}
+            vals = _rg_values(lambda n: _decode(low.get(f"----:com.apple.itunes:{n}")))
+        elif isinstance(tags, ID3):
+            txxx = {fr.desc.lower(): fr.text for fr in tags.getall("TXXX")}
+            vals = _rg_values(lambda n: txxx.get(n))
+        else:
+            vals = _rg_values(lambda n: tags.get(n))
+            # Ogg Opus: R128 gains (Q7.8 integers) when no REPLAYGAIN_* tags.
+            for kind in ("track", "album"):
+                if vals[f"{kind}_gain"] is None:
+                    raw = _first(tags.get(f"r128_{kind}_gain"))
+                    if raw and re.fullmatch(r"[-+]?\d+", raw):
+                        vals[f"{kind}_gain"] = int(raw) / 256.0 + R128_TO_RG_DB
+    except Exception:
+        return
+    t.rg_track_gain = vals["track_gain"]
+    t.rg_track_peak = vals["track_peak"]
+    t.rg_album_gain = vals["album_gain"]
+    t.rg_album_peak = vals["album_peak"]
 
 
 _CODECS = {"FLAC": "FLAC", "MP3": "MP3", "OggVorbis": "Vorbis", "OggOpus": "Opus", "OggFLAC": "FLAC",

@@ -1,4 +1,6 @@
 import type {
+  AutoEqEntry,
+  AutoEqProfile,
   Feed,
   Blend,
   ReleaseRadar,
@@ -292,6 +294,10 @@ export class ApiClient {
   genres = () => this.get<(Genre | string)[]>('/library/genres');
   genreTracks = (g: string) => this.get<Track[]>(`/library/genres/${encodeURIComponent(g)}/tracks`);
   smartList = (kind: SmartListKind, offset = 0, limit = 500) => this.get<Track[]>(`/lists/${kind}`, { offset, limit });
+
+  // ---- AutoEq headphone profiles (server-side proxy, fetched on demand) ----
+  autoEqSearch = (q: string, limit = 50) => this.get<{ total: number; results: AutoEqEntry[] }>('/eq/autoeq', { q, limit });
+  autoEqProfile = (id: string) => this.get<AutoEqProfile>('/eq/autoeq/profile', { id });
 
   // ---- favourites / lyrics / ai ----
   star = (id: string) => this.put<void>(`/favourites/${encodeURIComponent(id)}`);

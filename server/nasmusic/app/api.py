@@ -339,3 +339,38 @@ def suggestion_cover(suggestion_id: str, size: int = Query(512, ge=16, le=4096),
                      conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
     out = suggestions.cover(c, conn, me.user_id, suggestion_id, size)
     return FileResponse(out, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=604800"})
+
+
+# ---------- AutoEq headphone profiles (fetched on demand, cached; see nasmusic.app.autoeq) ----------
+
+
+def _autoeq(c: AppContext):
+    from nasmusic.app.autoeq import AutoEq
+
+    if c.autoeq is None:
+        c.autoeq = AutoEq(c.data_dir / "autoeq", c.http_transport)
+    return c.autoeq
+
+
+@router.get("/eq/autoeq")
+def autoeq_search(q: str = Query("", max_length=200), limit: int = Query(50, ge=1, le=200),
+                  c: AppContext = Depends(ctx)):
+    from nasmusic.app.autoeq import AutoEqError, search
+
+    try:
+        entries = _autoeq(c).entries()
+    except AutoEqError as e:
+        raise HTTPException(502, f"AutoEq index unavailable: {e}") from e
+    return {"total": len(entries), "results": [e.as_dict() for e in search(entries, q, limit)]}
+
+
+@router.get("/eq/autoeq/profile")
+def autoeq_profile(id: str = Query(..., min_length=1, max_length=500), c: AppContext = Depends(ctx)):
+    from nasmusic.app.autoeq import AutoEqError
+
+    try:
+        return _autoeq(c).profile(id)
+    except KeyError as e:
+        raise HTTPException(404, "no such AutoEq profile") from e
+    except AutoEqError as e:
+        raise HTTPException(502, str(e)) from e

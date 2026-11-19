@@ -4,6 +4,7 @@
   import { ACCENTS, HOME_SHELVES, HOME_SHELF_TITLES, moveInList, type Motion } from '../lib/v3';
   import { WEB_SIGNALS, type SignalKey } from '../lib/events';
   import { player } from '../lib/player.svelte';
+  import type { LevellingMode } from '../lib/listening';
   import { session } from '../lib/session.svelte';
   import { ui } from '../lib/ui.svelte';
 
@@ -132,6 +133,34 @@
       <div><div>Only on this device</div><div class="muted small">Keep these appearance settings here instead of syncing them to your other devices.</div></div>
       <input type="checkbox" class="switch" checked={appearance.localOnly} onchange={(e) => appearance.setLocalOnly(e.currentTarget.checked)} />
     </label>
+  </div>
+
+  <div class="section-title">Playback</div>
+  <div class="pad form">
+    <div>
+      <div>Crossfade: {player.listening.crossfadeS ? `${player.listening.crossfadeS} s` : 'off (gapless)'}</div>
+      <div class="muted small">Blend the end of a song into the next. Songs that follow each other on the same album always play gapless.</div>
+      <input type="range" min="0" max="12" step="1" value={player.listening.crossfadeS} style:--p="{(player.listening.crossfadeS / 12) * 100}%" aria-label="Crossfade seconds" oninput={(e) => player.setListening({ crossfadeS: +e.currentTarget.value })} />
+    </div>
+    <div class="opt">
+      <div><div>Volume levelling</div><div class="muted small">ReplayGain from your server. Auto uses album gain while an album plays in order, so quiet songs stay quiet.</div></div>
+      <div class="seg" role="radiogroup" aria-label="Volume levelling">
+        {#each [['off', 'Off'], ['track', 'Track'], ['album', 'Album'], ['auto', 'Auto']] as [k, label]}
+          <button role="radio" aria-checked={player.listening.levelling === k} class:on={player.listening.levelling === k} onclick={() => player.setListening({ levelling: k as LevellingMode })}>{label}</button>
+        {/each}
+      </div>
+    </div>
+    {#if player.listening.levelling !== 'off'}
+      <div>
+        <div>Pre-amp: {player.listening.preampDb > 0 ? '+' : ''}{player.listening.preampDb} dB</div>
+        <input type="range" min="-15" max="15" step="0.5" value={player.listening.preampDb} style:--p="{((player.listening.preampDb + 15) / 30) * 100}%" aria-label="Levelling pre-amp" oninput={(e) => player.setListening({ preampDb: +e.currentTarget.value })} />
+      </div>
+      <label class="sig inline">
+        <div><div>Prevent clipping</div><div class="muted small">Never raise a song so far that its loudest peak would distort.</div></div>
+        <input type="checkbox" class="switch" checked={player.listening.preventClipping} onchange={(e) => player.setListening({ preventClipping: e.currentTarget.checked })} />
+      </label>
+    {/if}
+    <div class="muted small">These settings are kept on this device.</div>
   </div>
 
   <div class="section-title">Data &amp; recommendations</div>

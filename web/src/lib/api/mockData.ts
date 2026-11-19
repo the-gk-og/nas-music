@@ -68,6 +68,7 @@ export function buildLibrary(): MockLibrary {
           flacBytes: d * 115000,
           starred: h % 7 === 0,
           rating: null,
+          replayGain: h % 5 === 0 ? null : { trackGain: -((h % 90) / 10) - 2, trackPeak: 0.9 + (h % 10) / 100, albumGain: -6.5, albumPeak: 0.99 },
           fileName,
           folder,
           albumArtist: name,

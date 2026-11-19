@@ -26,7 +26,7 @@ def make_v3(path: Path):
     return conn
 
 
-def test_v3_to_v4(tmp_path):
+def test_v3_to_v4(tmp_path):  # chains on to v5
     path = tmp_path / "nasmusic.db"
     make_v3(path).close()
     conn = db.connect(path)
