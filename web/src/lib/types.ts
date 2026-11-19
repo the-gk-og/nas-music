@@ -342,6 +342,12 @@ export interface ShelfItem {
   suggestion?: Suggestion;
   toget?: ToGetItem;
   playedAt?: string | null;
+  /** release_radar shelves */
+  release?: ReleaseInfo;
+  addedAt?: string | null;
+  /** blends shelf; status "new" = the "Start a blend" card */
+  blend?: { status?: 'joined' | 'invited' | 'new'; matchPct?: number | null; trackCount?: number; members?: string[] };
+  wrapped?: { year: number; final: boolean };
   // Client-side art hints (mock / pages): album id or up to four for a collage.
   albumId?: string | null;
   artIds?: string[];
@@ -429,3 +435,94 @@ export interface ToGetItem {
 }
 
 export type PinType = 'album' | 'artist' | 'playlist' | 'mix' | 'queue' | 'smart_list' | 'genre' | 'folder';
+
+// ---- v5 discovery phase 2: Release Radar, Wrapped, Blend ----
+
+export interface ReleaseInfo {
+  date?: string | null;
+  /** Album, EP, Single */
+  type?: string | null;
+  upcoming?: boolean;
+  artist?: string | null;
+}
+
+export interface ReleaseRadar {
+  updatedAt?: string | null;
+  windowDays?: number;
+  inLibrary: ShelfItem[];
+  notOwned: ShelfItem[];
+}
+
+export interface WrappedCount {
+  plays: number;
+  minutes: number;
+}
+
+export interface WrappedArtist extends WrappedCount {
+  artist: Artist;
+  artUrl?: string | null;
+}
+
+export interface AudioAura {
+  label: string;
+  description: string;
+  energy: number;
+  danceability?: number | null;
+  valence?: number | null;
+  bpm?: number | null;
+  moods: { name: string; score: number }[];
+  colors: string[];
+}
+
+export interface WrappedBase {
+  year: number;
+  final: boolean;
+  from?: string;
+  to?: string;
+  timezone?: string;
+  totals: { minutes: number; plays: number; skips?: number; tracks: number; artists: number; albums: number; days?: number };
+  topTracks: (WrappedCount & { track: Track })[];
+  topArtists: WrappedArtist[];
+  topAlbums: (WrappedCount & { album: Album })[];
+  topGenres: { name: string; minutes: number; share: number }[];
+  byHour: number[];
+  byWeekday: number[];
+  byMonth: number[];
+  peakHour?: number | null;
+  peakWeekday?: number | null;
+  topDay?: { date: string; minutes: number } | null;
+  aura?: AudioAura | null;
+}
+
+export interface Wrapped extends WrappedBase {
+  streaks?: { longest: number; longestFrom?: string | null; longestTo?: string | null; current: number };
+  discoveries?: { artists: number; tracks: number; share: number; topArtists: WrappedArtist[] };
+  firstPlay?: { track: Track; at: string } | null;
+}
+
+export interface ServerWrapped extends WrappedBase {
+  listeners: number;
+  users: number;
+}
+
+export interface BlendMember {
+  userId: string;
+  username: string;
+  status: 'joined' | 'invited';
+  joinedAt?: string | null;
+}
+
+export interface Blend {
+  id: string;
+  name: string;
+  createdBy?: { userId: string; username: string };
+  myStatus: 'joined' | 'invited';
+  invitedBy?: string | null;
+  members: BlendMember[];
+  matchPct?: number | null;
+  pairs?: { a: string; b: string; aName?: string; bName?: string; pct?: number | null }[];
+  trackCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  tracks?: { track: Track; forUsers: string[]; reason: 'shared' | 'top' | 'match' | string }[];
+}
