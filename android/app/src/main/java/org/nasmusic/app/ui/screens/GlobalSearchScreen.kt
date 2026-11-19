@@ -96,7 +96,7 @@ fun GlobalSearchScreen(c: AppContainer) {
         ui.toast = if (ok) "Added to To get" else "Couldn't add"
     }
 
-    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+    Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
             query, { query = it }, leadingIcon = { Icon(Icons.Default.Search, null) },
             placeholder = { Text("Songs, albums, artists — even ones you don't own") }, singleLine = true,

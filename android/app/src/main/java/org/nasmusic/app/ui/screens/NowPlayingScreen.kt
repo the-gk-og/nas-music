@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -138,7 +140,8 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
         } else {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(tint.copy(alpha = 0.55f), tint.copy(alpha = 0.25f), MaterialTheme.colorScheme.background))))
         }
-        Column(Modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        // Pieces shared by the portrait and landscape layouts.
+        val header: @Composable () -> Unit = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 if (!compact) IconButton(onClick = { ui.nav.popBackStack() }) { Icon(Icons.Default.KeyboardArrowDown, "Minimise") }
                 s.remote?.let {
@@ -148,14 +151,18 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                     Icon(Icons.Default.SpeakerGroup, "Devices", tint = if (s.remote != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
             }
+        }
+        val coverCard: @Composable (Modifier) -> Unit = { modifier ->
             // Cover ⇄ lyrics flip card
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+                // Square, as large as fits: never taller than the space, so it can't overlap the title.
+                val side = minOf(maxWidth, maxHeight)
                 if (flip <= 90f) {
                     AsyncImage(
                         model = item.mediaMetadata.artworkUri?.toString(),
                         contentDescription = "Album art. Tap for lyrics, swipe to skip, long-press for the song menu",
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                        modifier = Modifier.size(side)
                             .graphicsLayer {
                                 rotationY = flip; cameraDistance = 12f * density
                                 if (motion.enabled) { translationX = dragX; translationY = dragY.coerceAtLeast(0f) / 2 }
@@ -186,6 +193,8 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                     }
                 }
             }
+        }
+        val details: @Composable () -> Unit = {
             Spacer(Modifier.height(12.dp))
             Text(track.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(track.artist, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, maxLines = 1,
@@ -246,6 +255,25 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                 ) {
                     Text("Up next: ", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("${next.mediaMetadata.title} · ${next.mediaMetadata.artist}", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        BoxWithConstraints(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+            val landscape = maxWidth > maxHeight * 1.15f
+            if (landscape) {
+                // Landscape (phone on its side, or a wide pane): cover left, everything else right.
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    coverCard(Modifier.fillMaxHeight().weight(0.9f).padding(vertical = 8.dp))
+                    Column(Modifier.weight(1.1f).fillMaxHeight().verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.CenterHorizontally) {
+                        header()
+                        details()
+                    }
+                }
+            } else {
+                Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    header()
+                    coverCard(Modifier.weight(1f).fillMaxWidth())
+                    details()
                 }
             }
         }

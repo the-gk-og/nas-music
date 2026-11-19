@@ -18,7 +18,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -93,6 +96,22 @@ import org.nasmusic.app.ui.screens.ToGetScreen
 import org.nasmusic.app.ui.screens.TodayScreen
 import org.nasmusic.app.ui.theme.NasMusicTheme
 
+/**
+ * Which shell to draw (docs/v3-ux.md §6). A phone on its side is wide but short: it gets the rail
+ * and full-screen Now Playing, not the tablet side pane (which needs height too).
+ */
+enum class ShellLayout {
+    PHONE, RAIL, TABLET_SIDE_PANE;
+
+    companion object {
+        fun of(widthDp: Int, heightDp: Int): ShellLayout = when {
+            widthDp >= 840 && heightDp >= 600 -> TABLET_SIDE_PANE
+            widthDp >= 600 -> RAIL
+            else -> PHONE
+        }
+    }
+}
+
 private data class Dest(val route: String, val label: String, val icon: ImageVector)
 
 /** docs/v3-ux.md §2: five destinations. */
@@ -132,20 +151,24 @@ private fun MainScaffold(c: AppContainer) {
     // Offer a bug report once after a crash.
     LaunchedEffect(Unit) { if (org.nasmusic.app.diag.CrashLog.hasUnsentCrash()) ui.bugReport = true }
     val conf = LocalConfiguration.current
-    val wide = conf.screenWidthDp >= 600
-    // Tablet / foldable landscape: Now Playing lives in a side pane (docs/v3-ux.md §6).
-    val sidePane = conf.screenWidthDp >= 840 && conf.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val layout = ShellLayout.of(conf.screenWidthDp, conf.screenHeightDp)
+    val wide = layout != ShellLayout.PHONE
+    val sidePane = layout == ShellLayout.TABLET_SIDE_PANE
     val fullScreenNow = current == "now" && !sidePane
+    // With the side pane, Now Playing is already on screen: don't show it twice.
+    LaunchedEffect(sidePane, current) { if (sidePane && current == "now") nav.popBackStack() }
     val motion = LocalMotion.current
 
     CompositionLocalProvider(LocalUi provides ui) {
         Scaffold(
+            // safeDrawing = system bars + display cutout + keyboard: nothing under the camera notch in landscape.
+            contentWindowInsets = WindowInsets.safeDrawing,
             snackbarHost = { SnackbarHost(snack) },
             bottomBar = {
                 if (!wide && !fullScreenNow) {
                     Column(Modifier.background(MaterialTheme.colorScheme.background)) {
                         MiniPlayer(c)
-                        NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
+                        NavigationBar(containerColor = MaterialTheme.colorScheme.background, windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)) {
                             dests.forEach { d ->
                                 NavigationBarItem(
                                     selected = current == d.route,
@@ -161,13 +184,16 @@ private fun MainScaffold(c: AppContainer) {
         ) { padding ->
             Row(Modifier.fillMaxSize().padding(padding)) {
                 if (wide) {
-                    NavigationRail(containerColor = MaterialTheme.colorScheme.background, modifier = Modifier.statusBarsPadding()) {
+                    // The Scaffold already applied the insets to this Row.
+                    NavigationRail(containerColor = MaterialTheme.colorScheme.background, windowInsets = WindowInsets(0)) {
                         dests.forEach { d ->
                             NavigationRailItem(
                                 selected = current == d.route,
                                 onClick = { nav.goTab(d.route) },
-                                icon = { Icon(d.icon, null) },
-                                label = { Text(d.label) },
+                                icon = { Icon(d.icon, d.label) },
+                                // A phone on its side is ~360 dp tall: labelled items wouldn't all fit.
+                                label = if (conf.screenHeightDp >= 480) ({ Text(d.label) }) else null,
+                                alwaysShowLabel = conf.screenHeightDp >= 480,
                             )
                         }
                     }

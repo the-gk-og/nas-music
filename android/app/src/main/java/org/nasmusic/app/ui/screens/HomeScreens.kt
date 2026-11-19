@@ -76,7 +76,7 @@ fun TopBar(c: AppContainer, title: String) {
     val ui = LocalUi.current
     val cfg by c.secureStore.config.collectAsStateWithLifecycle()
     var menu by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         IconButton(onClick = { ui.go("search") }) { Icon(Icons.Default.Search, "Search") }
         Box {
