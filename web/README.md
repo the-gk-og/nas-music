@@ -30,6 +30,14 @@ with a simulated phone ("Pixel 8 (mock)") so transfer in/out and remote mode can
 - Built against server core's v3 contract (claude/server-core-b7e7a3): typed shelves, `artUrl`, pins as
   ShelfItems, `/search` with catalogue, `/toget`, `/radio` + `/radio/{id}/more` (topped up when ≤ 5 remain).
 
+## Admin console (`#/admin/<section>`)
+Dashboard (health, now playing, analysis ETA, nightly, jobs), Users & invites (devices, last activity, admin
+roles with last-admin protection), Library (scan / nightly / discovery now, failed files + retry), Health &
+pruning (counts first, confirm before any removal), Logs (live tail, level/text filter) & job history, Bug
+reports, Backups, Server settings (validated URLs incl. custom ports, time zone, cache size, LRCLIB; restart
+notice). All calls go through `src/lib/api/admin.ts` — **its shapes are a proposal until api/openapi.yaml
+defines the admin API**; the mock (`mockAdmin.ts`) implements them.
+
 ## Layout
 - `src/lib/api/client.ts` – typed client for every v1/v2 endpoint; cookie (same-origin) or bearer auth.
 - `src/lib/api/mock.ts`, `mockData.ts` – mock HTTP API + Connect hub.
