@@ -91,7 +91,16 @@ CREATE TABLE IF NOT EXISTS tracks (
     sample_rate     INTEGER,           -- Hz
     bits_per_sample INTEGER,
     channels        INTEGER,
-    folder          TEXT NOT NULL DEFAULT ''   -- relative directory ('' = library root)
+    folder          TEXT NOT NULL DEFAULT '',  -- relative directory ('' = library root)
+    -- v5 volume levelling (ReplayGain 2.0 scale: reference -18 LUFS). Gains in dB, peaks linear (1.0 = full scale).
+    -- From REPLAYGAIN_* / R128_* tags when the file has them (rg_source 'tags'), else measured with ffmpeg's
+    -- ebur128 filter by the `loudness` job (rg_source 'ebur128'). rg_source NULL = not measured yet.
+    rg_track_gain   REAL,
+    rg_track_peak   REAL,
+    rg_album_gain   REAL,
+    rg_album_peak   REAL,
+    rg_source       TEXT,
+    loudness_lufs   REAL               -- integrated loudness of the track (measured, or derived from the gain)
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist_id);

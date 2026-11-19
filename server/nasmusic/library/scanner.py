@@ -208,8 +208,9 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool) -> ScanResult:
             conn.execute(
                 "INSERT INTO tracks (id, path, album_id, artist_id, title, track_no, disc_no, year, genre, "
                 "duration_s, flac_bytes, mtime, mbid, added_at, missing, composer, lyricist, comment, album_artist, "
-                "codec, bitrate, sample_rate, bits_per_sample, channels, folder) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "codec, bitrate, sample_rate, bits_per_sample, channels, folder, "
+                "rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, rg_source, loudness_lufs) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET album_id = excluded.album_id, artist_id = excluded.artist_id, "
                 "title = excluded.title, track_no = excluded.track_no, disc_no = excluded.disc_no, "
                 "year = excluded.year, genre = excluded.genre, duration_s = excluded.duration_s, "
@@ -217,11 +218,15 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool) -> ScanResult:
                 "composer = excluded.composer, lyricist = excluded.lyricist, comment = excluded.comment, "
                 "album_artist = excluded.album_artist, codec = excluded.codec, bitrate = excluded.bitrate, "
                 "sample_rate = excluded.sample_rate, bits_per_sample = excluded.bits_per_sample, "
-                "channels = excluded.channels, folder = excluded.folder",
+                "channels = excluded.channels, folder = excluded.folder, "
+                # A changed file is re-levelled: gain tags if it has them, else measured again by the loudness job.
+                "rg_track_gain = excluded.rg_track_gain, rg_track_peak = excluded.rg_track_peak, "
+                "rg_album_gain = excluded.rg_album_gain, rg_album_peak = excluded.rg_album_peak, "
+                "rg_source = excluded.rg_source, loudness_lufs = excluded.loudness_lufs",
                 (tid, f.rel, al_id, ta_id, t.title or Path(f.rel).stem, t.track_no, t.disc_no, t.year,
                  t.genre, t.duration_s, f.size, f.mtime, t.mb_track, now, t.composer, t.lyricist, t.comment,
                  t.albumartist, t.codec, t.bitrate, t.sample_rate, t.bits_per_sample, t.channels,
-                 "" if rel_dir in ("", ".") else rel_dir),
+                 "" if rel_dir in ("", ".") else rel_dir, *_gain_values(t)),
             )
             if prev is None:
                 res.added += 1
@@ -249,6 +254,16 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool) -> ScanResult:
         raise
     res.duration_s = round(time.monotonic() - t0, 3)
     return res
+
+
+def _gain_values(t: tags.TrackTags) -> tuple:
+    """(track gain, track peak, album gain, album peak, source, loudness) from tags, or all None to measure."""
+    if t.rg_track_gain is None:
+        return (None, None, None, None, None, None)
+    from nasmusic.library.loudness import REFERENCE_LUFS
+
+    return (t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, "tags",
+            round(REFERENCE_LUFS - t.rg_track_gain, 2))
 
 
 def _sync_albums(cfg: Config, conn: sqlite3.Connection, images: dict[str, list[str]],

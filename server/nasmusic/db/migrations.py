@@ -279,3 +279,37 @@ def migrate_v3_to_v4(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
         raise
     log.warning("schema v3 -> v4 done")
     return True
+
+
+# ---------- v4 -> v5 (ReplayGain / loudness columns on tracks): additive only ----------
+
+V5_TRACK_COLUMNS = (("rg_track_gain", "REAL"), ("rg_track_peak", "REAL"), ("rg_album_gain", "REAL"),
+                    ("rg_album_peak", "REAL"), ("rg_source", "TEXT"), ("loudness_lufs", "REAL"))
+
+
+def migrate_v4_to_v5(conn: sqlite3.Connection, make_backup: bool = True) -> bool:
+    """Nullable columns on tracks; the next scan reads gain tags and the loudness job measures the rest.
+    Returns True if it migrated."""
+    if current_version(conn) != 4:
+        return False
+    if make_backup:
+        dest = backup(conn, "v4-backup")
+        if dest:
+            log.warning("schema v4 -> v5: backed up the database to %s", dest)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 4:
+            conn.execute("ROLLBACK")
+            return False
+        have = {r[1] for r in conn.execute("PRAGMA table_info(tracks)")}
+        for col, typ in V5_TRACK_COLUMNS:
+            if col not in have:
+                conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} {typ}")
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (5)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v4 -> v5 done")
+    return True

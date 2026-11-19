@@ -37,7 +37,7 @@ def test_v2_to_v3_is_additive(tmp_path):
     make_v2(path).close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 4
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     for t in ("pins", "toget", "catalog_items", "radio_sessions"):
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
     q = conn.execute("SELECT * FROM queues").fetchone()
@@ -68,7 +68,7 @@ def test_v2_to_v3_idempotent(tmp_path):
         db.init(c)
         c.close()
     conn = db.connect(path)
-    assert migrations.current_version(conn) == 4
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     assert conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 1
     assert len(list(tmp_path.glob("*.v2-backup-*"))) == 1
     cols = [r[1] for r in conn.execute("PRAGMA table_info(queues)")]
@@ -93,7 +93,7 @@ def test_v2_to_v3_failure_rolls_back(tmp_path, monkeypatch):
     assert not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'toget'").fetchone()
     monkeypatch.setattr(migrations, "_create_indexes", real)
     db.init(conn)
-    assert migrations.current_version(conn) == 4
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
 
 
 def test_v1_chains_to_v3_with_one_backup(tmp_path):
@@ -103,7 +103,7 @@ def test_v1_chains_to_v3_with_one_backup(tmp_path):
     make_v1(path).close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 4
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     assert {"source_type", "radio_seed"} <= {r[1] for r in conn.execute("PRAGMA table_info(queues)")}
     assert len(list(tmp_path.glob("*.v1-backup-*"))) == 1 and list(tmp_path.glob("*.v2-backup-*")) == []
 
@@ -119,6 +119,6 @@ def test_v2_db_where_the_ai_already_created_radio_sessions(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 4
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     assert conn.execute("SELECT title FROM radio_sessions").fetchone()[0] == "Your radio"
     assert "radio_sessions_user" in {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}

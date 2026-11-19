@@ -9,10 +9,11 @@ import posixpath
 import sqlite3
 from pathlib import Path
 
-from nasmusic.library import art
+from nasmusic.library import art, loudness
 
 TRACK_COLS = """t.id, t.title, t.artist_id, ar.name AS artist, t.album_id, al.title AS album, t.track_no, t.disc_no,
-       t.year, t.genre, t.duration_s, t.flac_bytes, t.missing, ut.starred_at, ut.rating"""
+       t.year, t.genre, t.duration_s, t.flac_bytes, t.missing, ut.starred_at, ut.rating,
+       t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak"""
 TRACK_FROM = """FROM tracks t JOIN artists ar ON ar.id = t.artist_id JOIN albums al ON al.id = t.album_id
 LEFT JOIN user_tracks ut ON ut.track_id = t.id AND ut.user_id = ?"""
 TRACK_SELECT = f"SELECT {TRACK_COLS}\n{TRACK_FROM}\n"
@@ -44,6 +45,9 @@ def track_dict(r: sqlite3.Row) -> dict:
     }
     if r["missing"]:
         d["missing"] = True
+    rg = loudness.replay_gain(r)
+    if rg is not None:
+        d["replayGain"] = rg
     return d
 
 

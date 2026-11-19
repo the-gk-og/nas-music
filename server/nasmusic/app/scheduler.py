@@ -20,7 +20,11 @@ from nasmusic.stream.transcode import OpusCache
 
 log = logging.getLogger(__name__)
 
-JOB_NAMES = ("scan", "full_scan", "analyse", "nightly", "pretranscode", "lyrics", "discovery", "cleanup", "backup")
+JOB_NAMES = ("scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "lyrics", "discovery", "cleanup",
+             "backup")
+# The loudness job runs after every scan; a first pass over a big library takes hours, so each run stops
+# after this long and the next scan (or the nightly chain) carries on.
+LOUDNESS_BUDGET_S = 50 * 60
 HISTORY = 20
 LYRICS_PER_RUN = 200
 
@@ -48,6 +52,11 @@ class Jobs:
 
     def _analyse(self, conn):
         return {"analysed": ai_adapter.analyse_pending(conn, ai_config(self.cfg))}
+
+    def _loudness(self, conn):
+        from nasmusic.library import loudness
+
+        return loudness.run(conn, self.cfg.library_root, time_budget_s=LOUDNESS_BUDGET_S)
 
     def _nightly(self, conn):
         return {"mixIds": ai_adapter.run_nightly(conn, ai_config(self.cfg))}
@@ -125,6 +134,7 @@ class Jobs:
             "scan": self._scan,
             "full_scan": lambda conn: self._scan(conn, full=True),
             "analyse": self._analyse,
+            "loudness": self._loudness,
             "nightly": self._nightly,
             "pretranscode": self._pretranscode,
             "discovery": self._discovery,
@@ -169,9 +179,11 @@ class Jobs:
                 lock.release()
         if name in ("scan", "full_scan") and rec["ok"]:
             self.trigger("analyse", "chained")
+            self.trigger("loudness", "chained")
         if name == "nightly" and rec["ok"]:
             self.trigger("pretranscode", "chained")
             self.trigger("lyrics", "chained")
+            self.trigger("loudness", "chained")
         return rec
 
     def trigger(self, name: str, how: str = "manual") -> bool:

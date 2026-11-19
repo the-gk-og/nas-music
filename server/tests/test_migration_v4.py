@@ -26,12 +26,12 @@ def make_v3(path: Path):
     return conn
 
 
-def test_v3_to_v4(tmp_path):
+def test_v3_to_v4(tmp_path):  # chains on to v5
     path = tmp_path / "nasmusic.db"
     make_v3(path).close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 4
+    assert migrations.current_version(conn) == 5
     for t in ("lyrics_cache", "bug_reports"):
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
     assert conn.execute("SELECT radio_id FROM queues").fetchone()[0] == "r1"
@@ -69,5 +69,5 @@ def test_v2_chains_to_v4_with_one_backup(tmp_path):
     make_v2(path).close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 4
+    assert migrations.current_version(conn) == 5
     assert [p.name.split(".")[2].split("-")[0] for p in tmp_path.glob("*-backup-*")] == ["v2"]

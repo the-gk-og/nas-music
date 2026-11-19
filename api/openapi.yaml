@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.4.1
+  version: 0.5.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -1092,7 +1092,7 @@ paths:
     post:
       summary: Admin only. Start a job now (background). `backup` makes a manual database backup.
       parameters:
-        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, nightly, pretranscode, discovery, lyrics, cleanup, backup] } }
+        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, discovery, lyrics, cleanup, backup] } }
       responses:
         '200':
           description: the job's status (state running, or idle if it already finished)
@@ -1907,6 +1907,20 @@ components:
         starred: { type: boolean }
         rating: { type: [integer, 'null'], minimum: 1, maximum: 5, description: the caller's }
         missing: { type: boolean, description: 'only present (true) in playlists/queues when the file is gone' }
+        replayGain:
+          $ref: '#/components/schemas/ReplayGain'
+    ReplayGain:
+      type: object
+      description: |
+        Volume levelling values on the ReplayGain 2.0 scale (reference -18 LUFS). Absent from a Track until the file's
+        gain tags were read or its loudness was measured (EBU R128, ffmpeg ebur128). Clients multiply the signal by
+        10^((gain + preamp)/20), limited so that peak * factor <= 1 when clipping prevention is on.
+      required: [trackGain]
+      properties:
+        trackGain: { type: number, description: dB }
+        trackPeak: { type: [number, 'null'], description: 'linear sample peak, 1.0 = full scale' }
+        albumGain: { type: [number, 'null'], description: 'dB; null until every track of the album is levelled' }
+        albumPeak: { type: [number, 'null'] }
     Lyrics:
       type: object
       required: [trackId, synced, source, lines, text]
