@@ -52,6 +52,17 @@
             </intent-filter>
         </service>
 
+        <!-- Sharing Wrapped card images (cache/shared only). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Let the scanner rotate with the phone. -->
         <activity
             android:name="com.journeyapps.barcodescanner.CaptureActivity"

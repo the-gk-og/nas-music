@@ -25,6 +25,8 @@ class UiController(val nav: NavHostController) {
     var bugReport by mutableStateOf<Boolean?>(null)
 
     fun go(route: String) = nav.navigate(route) { launchSingleTop = true }
+
+    fun back() { nav.popBackStack() }
 }
 
 /** A song "…" menu opened for [track]; [isCurrent] adds now-playing-only items. */

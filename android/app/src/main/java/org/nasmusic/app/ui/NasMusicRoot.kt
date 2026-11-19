@@ -92,6 +92,9 @@ import org.nasmusic.app.ui.screens.QueuesScreen
 import org.nasmusic.app.ui.screens.GlobalSearchScreen
 import org.nasmusic.app.ui.screens.SettingsScreen
 import org.nasmusic.app.ui.screens.SmartListScreen
+import org.nasmusic.app.ui.screens.BlendScreen
+import org.nasmusic.app.ui.screens.ReleaseRadarScreen
+import org.nasmusic.app.ui.screens.WrappedScreen
 import org.nasmusic.app.ui.screens.ToGetScreen
 import org.nasmusic.app.ui.screens.TodayScreen
 import org.nasmusic.app.ui.theme.NasMusicTheme
@@ -237,6 +240,9 @@ private fun NavGraphBuilder.routes(c: AppContainer, motion: MotionLevel) {
     composable("playlist/{id}") { e -> PlaylistScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("list/{kind}") { e -> SmartListScreen(c, e.arguments?.getString("kind").orEmpty()) }
     composable("toget") { ToGetScreen(c) }
+    composable("release-radar") { ReleaseRadarScreen(c) }
+    composable("wrapped/{year}") { e -> WrappedScreen(c, e.arguments?.getString("year").orEmpty()) }
+    composable("blend/{id}") { e -> BlendScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("settings") { SettingsScreen(c) }
     composable("equalizer") { EqualizerScreen(c) }
     composable("mixes") { TodayScreen(c) }

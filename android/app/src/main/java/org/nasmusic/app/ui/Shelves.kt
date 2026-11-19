@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Celebration
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Person
@@ -91,6 +93,8 @@ fun iconFor(type: String): ImageVector = when (type) {
     "device" -> Icons.Default.Devices
     "genre" -> Icons.Default.Sell
     "folder" -> Icons.Default.Folder
+    "blend" -> Icons.Default.Group
+    "wrapped" -> Icons.Default.Celebration
     "playlist", "smart_list" -> Icons.AutoMirrored.Filled.List
     else -> Icons.Default.MusicNote
 }
@@ -105,6 +109,8 @@ fun openShelfItem(c: AppContainer, ui: UiController, scope: CoroutineScope, item
         "genre" -> ui.go("genre/${android.net.Uri.encode(item.id)}")
         "folder" -> ui.go("folder/${android.net.Uri.encode(item.id)}")
         "toget" -> ui.go("toget")
+        "blend" -> ui.go("blend/${item.id}")
+        "wrapped" -> ui.go("wrapped/${item.wrapped?.year ?: item.id}")
         "suggestion" -> ui.go("discover")
         "catalog" -> item.catalog?.ownedId?.takeIf { item.catalog.owned }?.let { ui.go("${if (item.catalog.type == "artist") "artist" else "album"}/$it") } ?: ui.go("search")
         "device" -> c.player.transferHere()

@@ -261,6 +261,58 @@ interface NasMusicApi {
     suspend fun radioMore(@Path("queueId") queueId: String): kotlinx.serialization.json.JsonObject
 }
 
+interface DiscoveryApi {
+    @GET("release-radar")
+    suspend fun releaseRadarRaw(): kotlinx.serialization.json.JsonObject
+
+    @GET("wrapped")
+    suspend fun wrapped(@Query("year") year: Int? = null): WrappedStats
+
+    @GET("wrapped/years")
+    suspend fun wrappedYears(): List<Int>
+
+    @GET("admin/wrapped")
+    suspend fun adminWrapped(@Query("year") year: Int? = null): WrappedStats
+
+    @GET("blends")
+    suspend fun blends(): List<Blend>
+
+    @GET("blends/candidates")
+    suspend fun blendCandidates(): List<BlendCandidate>
+
+    @POST("blends")
+    suspend fun createBlend(@Body body: NewBlend): Blend
+
+    @GET("blends/{id}")
+    suspend fun blend(@Path("id") id: String): Blend
+
+    @PATCH("blends/{id}")
+    suspend fun renameBlend(@Path("id") id: String, @Body body: BlendName): Blend
+
+    @POST("blends/{id}/invite")
+    suspend fun inviteToBlend(@Path("id") id: String, @Body body: BlendInvite): Blend
+
+    @POST("blends/{id}/accept")
+    suspend fun acceptBlend(@Path("id") id: String): Blend
+
+    @POST("blends/{id}/decline")
+    suspend fun declineBlend(@Path("id") id: String): Response<Unit>
+
+    @POST("blends/{id}/leave")
+    suspend fun leaveBlend(@Path("id") id: String): Response<Unit>
+
+    @POST("blends/{id}/refresh")
+    suspend fun refreshBlend(@Path("id") id: String): Blend
+}
+
+/** Release Radar; items parsed leniently like any feed. */
+suspend fun DiscoveryApi.releaseRadar(): ReleaseRadar {
+    val o = releaseRadarRaw()
+    fun items(k: String) = (o[k] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { LenientJson.item(it) }.orEmpty()
+    val updated = (o["updatedAt"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it !is kotlinx.serialization.json.JsonNull }?.content
+    return ReleaseRadar(updated, items("inLibrary"), items("notOwned"))
+}
+
 suspend fun NasMusicApi.home(): ShelfFeed = LenientJson.feed(homeRaw())
 suspend fun NasMusicApi.forYou(): ShelfFeed = LenientJson.feed(forYouRaw())
 suspend fun NasMusicApi.globalSearch(q: String, scope: String = "all", limit: Int = 20): SearchResults = LenientJson.search(globalSearchRaw(q, scope, limit))
