@@ -85,6 +85,7 @@ fun GlobalSheets(c: AppContainer) {
     if (ui.devicesOpen) DevicesSheet(c) { ui.devicesOpen = false }
     if (ui.speedOpen) SpeedPitchDialog(c) { ui.speedOpen = false }
     if (ui.abOpen) AbRepeatDialog(c) { ui.abOpen = false }
+    ui.bugReport?.let { afterCrash -> BugReportDialog(c, afterCrash) { ui.bugReport = null } }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

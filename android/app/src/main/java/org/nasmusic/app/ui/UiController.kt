@@ -19,6 +19,8 @@ class UiController(val nav: NavHostController) {
     /** Now Playing should show the lyrics side (set by "Show lyrics"). */
     var lyricsRequested by mutableStateOf(false)
     var toast by mutableStateOf<String?>(null)
+    /** null = closed; false = from Settings; true = offered after a crash. */
+    var bugReport by mutableStateOf<Boolean?>(null)
 
     fun go(route: String) = nav.navigate(route) { launchSingleTop = true }
 }

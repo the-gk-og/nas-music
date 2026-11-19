@@ -249,6 +249,10 @@ interface NasMusicApi {
     @DELETE("pins/{type}/{id}")
     suspend fun unpin(@Path("type") type: String, @Path("id") id: String): Response<Unit>
 
+    /** In-app bug report (docs: Settings → Send bug report). */
+    @POST("me/bug-report")
+    suspend fun bugReport(@Body body: org.nasmusic.app.diag.BugReportBody): org.nasmusic.app.diag.BugReportResponse
+
     @POST("radio")
     suspend fun startRadio(@Body body: RadioRequest): Queue
 

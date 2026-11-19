@@ -148,6 +148,11 @@ fun SettingsScreen(c: AppContainer) {
         OutlinedButton(onClick = { ui.go("data") }) { Text("Choose what to collect") }
 
         HorizontalDivider()
+        Section("Help")
+        OutlinedButton(onClick = { ui.bugReport = false }) { Text("Send bug report") }
+        Text("App ${org.nasmusic.app.BuildConfig.VERSION_NAME} (${org.nasmusic.app.BuildConfig.VERSION_CODE})", style = MaterialTheme.typography.bodySmall)
+
+        HorizontalDivider()
         Section("Account")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { ui.go("account") }) { Text("Account") }
