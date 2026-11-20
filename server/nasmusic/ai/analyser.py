@@ -120,7 +120,7 @@ def analyse_pending(conn: sqlite3.Connection, cfg, limit: int | None = None, wor
             _set_job(conn, row["id"], version, "pending")
 
     done = 0
-    root = Path(cfg.library_root)
+    root = cfg.library_root if isinstance(cfg.library_root, Path) else Path(cfg.library_root)  # keeps upload routing
     ctx = mp.get_context("spawn")
     pool = ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_init_worker,
                                initargs=(version, str(cfg.data_dir), max_seconds, *_excerpt_args(settings)))
@@ -175,7 +175,7 @@ def benchmark(conn: sqlite3.Connection, cfg, n: int = 20, workers: int | None = 
                               "library_tracks": total, "pending_tracks": pending, "max_seconds": max_seconds}
     if not sample:
         return result | {"error": "no tracks in library"}
-    root = Path(cfg.library_root)
+    root = cfg.library_root if isinstance(cfg.library_root, Path) else Path(cfg.library_root)  # keeps upload routing
     ctx = mp.get_context("spawn")
     t0 = time.monotonic()
     ok = failed = 0

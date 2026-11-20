@@ -9,6 +9,9 @@ decides what a family-mode user can see:
 - the AI engine (allowed to import `nasmusic.db`): the recommender's `Signals.hidden` mask, which mixes,
   radio, "more like this" and blends exclude.
 
+Private uploads (schema v7 `uploads.visibility = 'private'`) ride on the same filter: a user never sees
+another user's "only me" uploads, whether or not family mode is on.
+
 Statuses: explicit | probable | clean | unknown (no track_explicit row = unknown). Family mode always hides
 `explicit`; `hide_probable` and `hide_unknown` are the user's choice. Status values are constants, so the
 SQL fragments below inline them (no parameters to thread through callers' queries).
@@ -29,6 +32,13 @@ class Policy:
     hide_unknown: bool = False
     locked: bool = False
     has_pin: bool = False
+    viewer: str | None = None          # the user this policy is for (private uploads of others are hidden)
+    private_others: bool = False       # someone else has private uploads, so the filter must check them
+
+    @property
+    def filters(self) -> bool:
+        """True when this user must not see some tracks (family mode or other people's private uploads)."""
+        return bool(self.hidden) or self.private_others
 
     @property
     def hidden(self) -> tuple[str, ...]:
@@ -62,19 +72,37 @@ def _has_table(conn: sqlite3.Connection) -> bool:
         is not None
 
 
+def _private_others(conn: sqlite3.Connection, user_id: str) -> bool:
+    try:
+        return conn.execute("SELECT 1 FROM uploads WHERE visibility = 'private' AND (user_id IS NULL OR user_id != ?) "
+                            "LIMIT 1", (user_id,)).fetchone() is not None
+    except sqlite3.OperationalError:  # pre-v7 database
+        return False
+
+
 def policy(conn: sqlite3.Connection, user_id: str | None) -> Policy:
     """The user's family-mode policy (OFF for unknown users, None, or a pre-v6 database)."""
     if not user_id:
         return OFF
+    priv = _private_others(conn, user_id)
     try:
         r = conn.execute("SELECT enabled, hide_probable, hide_unknown, locked, pin_hash FROM family_mode "
                          "WHERE user_id = ?", (user_id,)).fetchone()
     except sqlite3.OperationalError:  # pre-v6 database (the AI's tests build partial schemas)
-        return OFF
+        r = None
     if r is None:
-        return OFF
+        return Policy(viewer=user_id, private_others=priv) if priv else OFF
     return Policy(enabled=bool(r[0]), hide_probable=bool(r[1]), hide_unknown=bool(r[2]), locked=bool(r[3]),
-                  has_pin=r[4] is not None)
+                  has_pin=r[4] is not None, viewer=user_id, private_others=priv)
+
+
+def private_condition(p: Policy, alias: str = "t") -> str:
+    """SQL boolean that is false for other users' private uploads ("1" when there are none)."""
+    if not p.private_others:
+        return "1"
+    viewer = (p.viewer or "").replace("'", "''")
+    return (f"NOT EXISTS (SELECT 1 FROM uploads fm_u WHERE fm_u.track_id = {alias}.id AND fm_u.visibility = 'private' "
+            f"AND (fm_u.user_id IS NULL OR fm_u.user_id != '{viewer}'))")
 
 
 def _as_policy(conn: sqlite3.Connection, who: Policy | str | None) -> Policy:
@@ -84,6 +112,14 @@ def _as_policy(conn: sqlite3.Connection, who: Policy | str | None) -> Policy:
 def condition(p: Policy, alias: str = "t") -> str:
     """SQL boolean (no parameters) that is true for tracks `p` allows; `alias` is the tracks alias.
     Returns "1" when nothing is hidden."""
+    status = _status_condition(p, alias)
+    priv = private_condition(p, alias)
+    if priv == "1":
+        return status
+    return priv if status == "1" else f"({status}) AND {priv}"
+
+
+def _status_condition(p: Policy, alias: str) -> str:
     hidden = p.hidden
     if not hidden:
         return "1"
@@ -99,14 +135,14 @@ def condition(p: Policy, alias: str = "t") -> str:
 def where(conn: sqlite3.Connection, who: Policy | str | None, alias: str = "t") -> str:
     """" AND <condition>" for appending to a WHERE clause, or "" when the user sees everything."""
     p = _as_policy(conn, who)
-    return f" AND {condition(p, alias)}" if p.hidden else ""
+    return f" AND {condition(p, alias)}" if p.filters else ""
 
 
 def hidden_among(conn: sqlite3.Connection, who: Policy | str | None, track_ids: Iterable[str]) -> set[str]:
     """The ids in `track_ids` that the user must not see."""
     p = _as_policy(conn, who)
     ids = list(dict.fromkeys(track_ids))
-    if not p.hidden or not ids:
+    if not p.filters or not ids:
         return set()
     out: set[str] = set()
     cond = condition(p, "t")
@@ -133,7 +169,7 @@ def allowed(conn: sqlite3.Connection, who: Policy | str | None, track_id: str) -
 def all_hidden(conn: sqlite3.Connection, who: Policy | str | None) -> set[str]:
     """Every library track id the user must not see (for the AI's per-library masks)."""
     p = _as_policy(conn, who)
-    if not p.hidden:
+    if not p.filters:
         return set()
     try:
         return {r[0] for r in conn.execute(f"SELECT t.id FROM tracks t WHERE NOT ({condition(p, 't')})")}

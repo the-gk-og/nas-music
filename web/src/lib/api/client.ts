@@ -159,6 +159,13 @@ export class ApiClient {
     return (text ? JSON.parse(text) : undefined) as T;
   }
 
+  /** fetch() with this client's transport (uploads send raw chunks with their own headers). */
+  async fetchRaw(url: string, init: RequestInit): Promise<Response> {
+    const res = await this.fetchImpl(url, init);
+    if (res.status === 401) this.onUnauthorized?.();
+    return res;
+  }
+
   /** PUT a raw body (e.g. an image) and parse the JSON reply. */
   async putRaw<T>(path: string, body: Blob, contentType: string): Promise<T> {
     const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': contentType };

@@ -8,6 +8,47 @@ from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path("/data/config.toml")
 
+# tracks.path prefix of files under upload_root (a second, writable library root). The scanner never lets a
+# top-level folder of library_root with this name in, so ids from the two roots cannot collide.
+UPLOADS_PREFIX = "@uploads/"
+
+
+class LibraryRoot(Path):
+    """library_root that also knows upload_root: `root / "@uploads/a/b.flac"` is upload_root/a/b.flac,
+    every other relative path is under library_root. Callers keep writing `cfg.library_root / row["path"]`.
+    Derived paths (parent, `/` results) are plain Paths."""
+
+    def __init__(self, *args, upload_root: Path | None = None):
+        super().__init__(*args)
+        self.upload_root = Path(upload_root) if upload_root else None
+
+    def with_segments(self, *segments):
+        return Path(*segments)
+
+    def _route(self, key) -> Path:
+        s = os.fspath(key)
+        if s.startswith(UPLOADS_PREFIX):
+            # No upload root configured: point somewhere that never exists rather than into the library.
+            base = self.upload_root or Path("/nonexistent-upload-root")
+            return base / s[len(UPLOADS_PREFIX):]
+        return Path(os.fspath(self)) / key
+
+    def __truediv__(self, key):
+        return self._route(key)
+
+    def joinpath(self, *parts):
+        if not parts:
+            return Path(os.fspath(self))
+        out = self._route(parts[0])
+        return out.joinpath(*parts[1:])
+
+    def __reduce__(self):
+        return (_library_root, (str(self), str(self.upload_root) if self.upload_root else None))
+
+
+def _library_root(path: str, upload_root: str | None) -> LibraryRoot:
+    return LibraryRoot(path, upload_root=Path(upload_root) if upload_root else None)
+
 
 class ConfigError(Exception):
     pass
@@ -38,6 +79,10 @@ class Config:
     lrclib_enabled: bool = True                 # lyrics fallback from lrclib.net when a file has none
     explicit_deezer: bool = True                # explicit-content job asks Deezer (free API) about untagged tracks
     lan_public_url: str | None = None           # public LAN address incl. port, if not https://lan_host:https_port
+    # ---- uploads (nasmusic/library/uploads.py): a separate WRITABLE folder, never inside library_root ----
+    upload_root: Path | None = None             # e.g. /uploads; unset = uploading is off
+    upload_max_file_mb: int = 2048              # largest single file
+    upload_quota_gb: float = 50.0               # default per-user quota (admins can change it per user)
     # ---- casting to speakers (nasmusic/cast, deploy/README.md "Casting") ----
     cast_enabled: bool = True
     cast_port: int = 8090                       # plain-HTTP port serving ONLY signed /cast/ media URLs to speakers
@@ -54,6 +99,11 @@ class Config:
     snapcast_stream_port: int = 4953            # snapserver `tcp://...?mode=server` source the server feeds PCM to
     snapcast_stream_id: str = "nasmusic"        # that source's name= in snapserver.conf
     source_path: Path | None = field(default=None, compare=False)
+
+    def __post_init__(self):
+        if self.upload_root is not None:
+            self.upload_root = Path(self.upload_root)
+        self.library_root = LibraryRoot(self.library_root, upload_root=self.upload_root)
 
     @property
     def db_path(self) -> Path:
@@ -116,6 +166,11 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
         vals["web_root"] = wr if wr.is_absolute() else (base / wr).resolve()
     else:
         vals["web_root"] = None
+    if vals.get("upload_root"):
+        up = Path(vals["upload_root"]).expanduser()
+        vals["upload_root"] = up if up.is_absolute() else (base / up).resolve()
+    else:
+        vals["upload_root"] = None
     for key in ("library_root", "data_dir"):
         pth = Path(vals[key]).expanduser()
         vals[key] = pth if pth.is_absolute() else (base / pth).resolve()
@@ -129,4 +184,10 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
     cfg = Config(**vals, source_path=source)
     if cfg.opus_cache_gb <= 0:
         raise ConfigError("opus_cache_gb must be positive")
+    if cfg.upload_root is not None:
+        lib, up = Path(os.path.abspath(cfg.library_root)), Path(os.path.abspath(cfg.upload_root))
+        if lib == up or lib in up.parents or up in lib.parents:
+            raise ConfigError("upload_root must be a separate folder, not inside (or containing) library_root")
+    if cfg.upload_max_file_mb <= 0 or cfg.upload_quota_gb < 0:
+        raise ConfigError("upload_max_file_mb must be positive and upload_quota_gb not negative")
     return cfg

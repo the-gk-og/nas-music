@@ -1,6 +1,7 @@
 """Incremental library scanner.
 
-Walks library_root, re-reads tags only for files whose (mtime, size) changed, groups tracks into
+Walks library_root (and upload_root, the writable second root: its files get paths '@uploads/...'),
+re-reads tags only for files whose (mtime, size) changed, groups tracks into
 albums by album artist, marks vanished files `missing`, and keeps album art in sync.
 IDs (see schema.sql): track = sha1(relative path); artist = 'mb:'+MBID or sha1(normalised name);
 album = sha1(album artist id + normalised title).
@@ -17,7 +18,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from nasmusic.config import Config
+from nasmusic.config import UPLOADS_PREFIX, Config
 from nasmusic.core import now_iso
 from nasmusic.library import art, overrides, tags
 
@@ -27,6 +28,7 @@ _scan_lock = threading.Lock()
 
 UNKNOWN_ARTIST = "Unknown Artist"
 UNKNOWN_ALBUM = "Unknown Album"
+UPLOADS_DIR = UPLOADS_PREFIX.rstrip("/")
 
 
 @dataclass
@@ -83,10 +85,13 @@ class _File:
     size: int
 
 
-def _walk(root: Path) -> tuple[list[_File], dict[str, list[str]]]:
-    """Return audio files and, per directory (relative posix path), the image file names in it."""
+def _walk(root: Path, prefix_dir: str = "") -> tuple[list[_File], dict[str, list[str]]]:
+    """Return audio files and, per directory (relative posix path), the image file names in it.
+    `prefix_dir` ("@uploads" for upload_root) is put in front of every relative path. In the main library a
+    top-level folder named like that prefix is skipped, so its ids can never collide with uploads."""
     files: list[_File] = []
     images: dict[str, list[str]] = {}
+    root = Path(os.fspath(root))
     stack = [root]
     while stack:
         d = stack.pop()
@@ -96,10 +101,15 @@ def _walk(root: Path) -> tuple[list[_File], dict[str, list[str]]]:
             log.warning("cannot list %s: %s", d, e)
             continue
         rel_dir = PurePosixPath(Path(d).relative_to(root)).as_posix() if d != root else ""
+        if prefix_dir:
+            rel_dir = f"{prefix_dir}/{rel_dir}" if rel_dir else prefix_dir
         with it:
             for entry in it:
                 name = entry.name
                 if name.startswith("."):
+                    continue
+                if not prefix_dir and d == root and name == UPLOADS_DIR:
+                    log.warning("skipping %s: that folder name is reserved for uploads", entry.path)
                     continue
                 try:
                     if entry.is_dir(follow_symlinks=True):
@@ -164,20 +174,38 @@ def upsert_names(conn: sqlite3.Connection, rel: str, t: tags.TrackTags, now: str
     return ta_id, al_id
 
 
-def scan(cfg: Config, conn: sqlite3.Connection, full: bool = False) -> ScanResult:
-    """Scan the library. `full` re-reads tags of every file. Serialised by a process-wide lock."""
+def scan(cfg: Config, conn: sqlite3.Connection, full: bool = False, uploads_only: bool = False) -> ScanResult:
+    """Scan the library. `full` re-reads tags of every file. `uploads_only` walks just upload_root (fast; run
+    after an upload finishes). Serialised by a process-wide lock."""
     with _scan_lock:
-        return _scan(cfg, conn, full)
+        return _scan(cfg, conn, full, uploads_only)
 
 
-def _scan(cfg: Config, conn: sqlite3.Connection, full: bool) -> ScanResult:
+def _scan(cfg: Config, conn: sqlite3.Connection, full: bool, uploads_only: bool = False) -> ScanResult:
     t0 = time.monotonic()
     res = ScanResult()
-    root = cfg.library_root
-    if not root.is_dir():
-        raise FileNotFoundError(f"library_root is not a directory: {root}")
+    files: list[_File] = []
+    images: dict[str, list[str]] = {}
+    if not uploads_only:
+        root = cfg.library_root
+        if not root.is_dir():
+            raise FileNotFoundError(f"library_root is not a directory: {root}")
+        files, images = _walk(root)
+    up = cfg.upload_root
+    uploads_mounted = up is not None and up.is_dir()
+    if up is not None and not uploads_mounted:
+        log.warning("upload_root %s is not a directory; uploaded tracks left as they are", up)
+    if uploads_mounted:
+        f2, im2 = _walk(up, UPLOADS_DIR)
+        files += f2
+        images.update(im2)
 
-    files, images = _walk(root)
+    def in_scope(path: str) -> bool:
+        """Rows this scan may mark missing: uploads only when their root was walked (or none is configured)."""
+        if path.startswith(UPLOADS_PREFIX):
+            return uploads_mounted or up is None
+        return not uploads_only
+
     existing = {
         r["path"]: r for r in conn.execute("SELECT id, path, mtime, flac_bytes, missing, album_id FROM tracks")
     }
@@ -254,12 +282,12 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool) -> ScanResult:
             conn.execute("UPDATE tracks SET missing = 0 WHERE id = ?", (tid,))
         res.restored = len(restore_ids)
 
-        gone = [r["id"] for p, r in existing.items() if p not in seen and not r["missing"]]
+        gone = [r["id"] for p, r in existing.items() if p not in seen and not r["missing"] and in_scope(p)]
         for tid in gone:
             conn.execute("UPDATE tracks SET missing = 1 WHERE id = ?", (tid,))
         res.missing = len(gone)
 
-        _sync_albums(cfg, conn, images, touched_albums, embedded_candidates)
+        _sync_albums(cfg, conn, images, touched_albums, embedded_candidates, uploads_only)
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
@@ -279,7 +307,7 @@ def _gain_values(t: tags.TrackTags) -> tuple:
 
 
 def _sync_albums(cfg: Config, conn: sqlite3.Connection, images: dict[str, list[str]],
-                 touched: set[str], embedded: dict[str, bytes | None]) -> None:
+                 touched: set[str], embedded: dict[str, bytes | None], uploads_only: bool = False) -> None:
     # Drop albums/artists nothing references any more (never-seen-again tag typos etc.).
     conn.execute("DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)")
     conn.execute(
@@ -299,6 +327,8 @@ def _sync_albums(cfg: Config, conn: sqlite3.Connection, images: dict[str, list[s
     current = {r["id"]: r["art_path"] for r in conn.execute("SELECT id, art_path FROM albums")}
     covers = overrides.album_covers(conn)
     for al_id, d in first_dir.items():
+        if uploads_only and not (d == UPLOADS_DIR or d.startswith(UPLOADS_PREFIX)):
+            continue  # `images` only knows the upload folders in this scan: leave library albums alone
         want = covers.get(al_id) or _folder_art("" if d == "." else d, images)
         if want != current.get(al_id):
             conn.execute("UPDATE albums SET art_path = ? WHERE id = ?", (want, al_id))

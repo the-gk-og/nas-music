@@ -15,7 +15,7 @@ def test_v5_to_v6(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 6
+    assert migrations.current_version(conn) == 7
     assert {"station_key", "params"} <= migrations._columns(conn, "radio_sessions")
     row = conn.execute("SELECT title, served, station_key FROM radio_sessions WHERE id = 'r'").fetchone()
     assert tuple(row) == ("Random radio", '["t1"]', None)
@@ -25,4 +25,4 @@ def test_v5_to_v6(tmp_path):
     # idempotent
     assert not migrations.migrate_v5_to_v6(conn, db.schema_sql())
     db.init(conn)
-    assert migrations.current_version(conn) == 6
+    assert migrations.current_version(conn) == 7

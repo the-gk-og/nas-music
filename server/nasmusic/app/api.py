@@ -117,6 +117,8 @@ def family_guard(conn: Conn, uid: str, track_ids: list[str]) -> None:
     """A user whose family mode an admin has LOCKED cannot stream (or cast) tracks it hides: 403. Unlocked
     family mode only hides them (the user could turn it off anyway)."""
     p = family.policy(conn, uid)
+    if p.private_others and family.hidden_among(conn, family.Policy(viewer=uid, private_others=True), track_ids):
+        _404()  # someone else's "only me" upload
     if p.locked and family.hidden_among(conn, p, track_ids):
         raise HTTPException(403, "blocked by family mode")
 
