@@ -76,5 +76,8 @@ class Renderer(abc.ABC):
     async def close(self) -> None:  # noqa: B027 - optional
         pass
 
+    async def reset(self) -> None:  # noqa: B027 - optional
+        """Drop any half-open connection after a failure, so the next attempt starts clean."""
+
     def info(self) -> dict:
         return {"id": self.device_id, "name": self.name, "castType": self.kind}

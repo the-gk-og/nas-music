@@ -30,4 +30,18 @@ class SpeakerDevicesTest {
         val plain = ConnectProtocol.parse("""{"type":"error","detail":"only the active device reports state"}""") as ConnectMessage.Error
         assertNull(plain.source)
     }
+
+    @Test fun `connecting state parses and labels the remote`() {
+        val m = ConnectProtocol.parse(
+            """{"type":"state","state":{"activeDeviceId":"spk:chromecast:abc","playing":false,"connecting":true,"rev":3}}""",
+        ) as ConnectMessage.State
+        assertTrue(m.state.connecting)
+        assertFalse(m.state.playing)
+        val r = org.nasmusic.app.playback.RemoteInfo("spk:chromecast:abc", "Kitchen", isSpeaker = true, connecting = true)
+        assertEquals("Connecting to Kitchen…", r.label)
+        assertEquals("Playing on Kitchen", r.copy(connecting = false).label)
+        // Old servers don't send it.
+        val old = ConnectProtocol.parse("""{"type":"state","state":{"activeDeviceId":"x","rev":1}}""") as ConnectMessage.State
+        assertFalse(old.state.connecting)
+    }
 }

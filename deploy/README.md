@@ -130,6 +130,14 @@ are multicast, so neither gets through Docker's default bridge network. Choose o
 
 Home Assistant and Snapcast need no multicast; they work on any networking.
 
+**When a speaker doesn't answer.** Picking a speaker shows "Connecting…" (with Cancel) until it has loaded
+the track. If it can't be reached within about 10 s, refuses the track, or drops off later, the app shows
+"Couldn't connect to <speaker>" / "Lost connection to <speaker>". Playback then goes back, paused at the
+same spot, to the device that picked it. "Stop casting" does the same on purpose. Being discovered is not the
+same as being reachable: the container must reach each Chromecast's TCP port 8009 (a Cast group uses its own
+port, e.g. 32202, on the group's current leader). To test from the NAS:
+`docker exec nasmusic python -c "import socket; socket.create_connection(('<ip>', 8009), 3)"`.
+
 **Home Assistant.** Set `homeassistant_url` and `homeassistant_token` (HA → your profile → Security →
 Long-lived access tokens) in `/data/config.toml`. Never put the token in the repo. Optionally limit the list
 with `homeassistant_entities`. If HA also exposes a Chromecast the server finds directly, it appears twice.

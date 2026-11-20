@@ -26,7 +26,10 @@ log = logging.getLogger(__name__)
 REPEAT = ("off", "all", "one")
 PREV_RESTART_S = 3.0
 LOAD_GRACE_S = 8.0  # speakers report idle for a moment after a load; don't read that as "stopped"
-UNAVAILABLE_LIMIT = 5
+UNAVAILABLE_LIMIT = 5  # consecutive failed polls (~5 s) before the speaker counts as dropped
+CONNECT_TIMEOUT_S = 10.0  # connect + launch the receiver + load the first track, in total
+OP_TIMEOUT_S = 10.0  # any one later operation (command, poll)
+STATUS_TIMEOUT_S = 4.0
 
 
 @dataclass
@@ -40,6 +43,9 @@ class CastHooks:
     report: Callable[[str, str, dict], Awaitable[bool]]  # (uid, device_id, partial state) -> still active?
     lost: Callable[[str, str], Awaitable[None]]  # (uid, device_id): another user took the speaker
     error: Callable[[str, str], Awaitable[None]]  # (uid, message)
+    # (uid, device_id, message, positionMs): couldn't connect / dropped. The session has already let go;
+    # the Hub hands playback back to the device that picked the speaker.
+    failed: Callable[[str, str, str, int], Awaitable[None]] | None = None
 
 
 def _now_iso() -> str:
@@ -71,6 +77,8 @@ class SpeakerSession:
         self._last_report = 0.0
         self._bad = 0
         self._loaded_at = 0.0
+        self.connecting = False
+        self._connect_task: asyncio.Task | None = None
 
     @property
     def device_id(self) -> str:
@@ -78,11 +86,21 @@ class SpeakerSession:
 
     # ---------- entry points (called by the Hub; return immediately) ----------
 
-    def spawn(self, coro) -> asyncio.Task:
+    def spawn(self, coro, timeout_s: float | None = OP_TIMEOUT_S) -> asyncio.Task:
+        is_takeover = getattr(coro, "__name__", "") == "takeover"
+        if is_takeover:
+            timeout_s = None  # bounded inside (CONNECT_TIMEOUT_S), with its own failure handling
+
         async def run():
             async with self._lock:
                 try:
-                    await coro
+                    if timeout_s is None:
+                        await coro
+                    else:
+                        try:
+                            await asyncio.wait_for(coro, timeout_s)
+                        except TimeoutError:
+                            raise RuntimeError("not responding") from None
                 except Exception as e:  # noqa: BLE001 - a speaker failing must not kill the Hub
                     log.warning("%s: %s", self.r.name, e, exc_info=log.isEnabledFor(logging.DEBUG))
                     if self.owner:
@@ -91,6 +109,8 @@ class SpeakerSession:
                         await self._report(force=True)
 
         t = asyncio.create_task(run())
+        if is_takeover:
+            self._connect_task = t
         self._tasks.add(t)
         t.add_done_callback(self._tasks.discard)
         return t
@@ -101,6 +121,8 @@ class SpeakerSession:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
     async def takeover(self, uid: str, state: dict) -> None:
+        """Connect, load the current track, start reporting. Bounded by CONNECT_TIMEOUT_S: on failure the
+        session lets go and `hooks.failed` hands playback back (the speaker never stays "active" silently)."""
         if self.owner and self.owner != uid:
             await self.hooks.lost(self.owner, self.device_id)
         self.owner = uid
@@ -110,26 +132,73 @@ class SpeakerSession:
         self.shuffle = bool(state.get("shuffle"))
         self.repeat = state.get("repeat") if state.get("repeat") in REPEAT else "off"
         self.position_s = float(state.get("positionMs") or 0) / 1000
-        if not self.track_id and self.queue_id:
-            self.track_id = await asyncio.to_thread(self.hooks.queue_track, uid, self.queue_id, self.index)
-        if self.track_id:
-            await self._load(self.position_s, bool(state.get("playing")))
-        else:
-            self.playing = False
-        st = await self._status()
+        self.media = None
+        self._bad = 0
+        self.connecting = True
+        try:
+            async with asyncio.timeout(CONNECT_TIMEOUT_S):
+                if not self.track_id and self.queue_id:
+                    self.track_id = await asyncio.to_thread(self.hooks.queue_track, uid, self.queue_id, self.index)
+                if self.track_id:
+                    await self._load(self.position_s, bool(state.get("playing")))
+                else:
+                    self.playing = False
+                st = await self._status()
+        except TimeoutError:
+            await self._fail(f"Couldn't connect to {self.r.name} (no answer)", reset=True)
+            return
+        except Exception as e:  # noqa: BLE001
+            log.warning("%s: connect/load failed: %s", self.r.name, e)
+            await self._fail(f"Couldn't connect to {self.r.name}", reset=True)
+            return
+        finally:
+            self.connecting = False
         if st.volume is not None:
             self.volume = st.volume
         await self._report(force=True)
         self._ensure_poll()
 
-    async def release(self, uid: str) -> None:
+    def cancel_connect(self) -> bool:
+        """Abort a takeover that is still connecting (the user cancelled / picked another device)."""
+        t = self._connect_task
+        if t is not None and not t.done() and self.connecting:
+            t.cancel()
+            return True
+        return False
+
+    async def release(self, uid: str, cancelled: bool = False) -> None:
         if self.owner != uid:
             return
         self.owner = None
         self.playing = False
+        self.connecting = False
         self._stop_poll()
         with contextlib.suppress(Exception):
-            await self.r.stop()
+            await asyncio.wait_for(self.r.stop(), STATUS_TIMEOUT_S)
+        if cancelled:  # a load may still be in flight in a worker thread: drop the connection under it
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self.r.reset(), STATUS_TIMEOUT_S)
+
+    async def _fail(self, message: str, reset: bool = False) -> None:
+        """Give the speaker up after it failed to connect or dropped, and tell the Hub."""
+        uid = self.owner
+        self.owner = None
+        self.playing = False
+        self.connecting = False
+        self.media = None
+        self._stop_poll()
+        log.warning("%s: %s", self.r.name, message)
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(self.r.stop(), 2.0)
+        if reset:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self.r.reset(), 2.0)
+        if uid is None:
+            return
+        if self.hooks.failed is not None:
+            await self.hooks.failed(uid, self.device_id, message, int(self.position_s * 1000))
+        else:
+            await self.hooks.error(uid, message)
 
     async def command(self, uid: str, action: str, args: dict) -> None:
         if self.owner != uid:
@@ -178,7 +247,9 @@ class SpeakerSession:
 
     async def _status(self) -> Status:
         try:
-            return await self.r.status()
+            return await asyncio.wait_for(self.r.status(), STATUS_TIMEOUT_S)
+        except TimeoutError:
+            return Status("unavailable", self.position_s, error="no answer")
         except Exception as e:  # noqa: BLE001
             return Status("unavailable", self.position_s, error=str(e))
 
@@ -279,10 +350,8 @@ class SpeakerSession:
             self.volume, changed = st.volume, True
         if st.state == "unavailable":
             self._bad += 1
-            if self._bad >= UNAVAILABLE_LIMIT and self.playing:
-                self.playing = False
-                await self.hooks.error(self.owner or "", f"{self.r.name} is not responding")
-                await self._report(force=True)
+            if self._bad >= UNAVAILABLE_LIMIT:
+                await self._fail(f"Lost connection to {self.r.name}", reset=True)
             return
         self._bad = 0
         if st.error and self.owner:

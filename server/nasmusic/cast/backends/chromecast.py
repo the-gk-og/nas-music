@@ -10,7 +10,9 @@ networking). `chromecast_hosts` in config.toml lists IPs to probe directly inste
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import threading
 from typing import Any
 
 from nasmusic.cast.base import Media, Renderer, Status
@@ -20,7 +22,13 @@ log = logging.getLogger(__name__)
 # Default Media Receiver: FLAC, MP3, AAC/MP4, Ogg (Vorbis/Opus), WAV. Anything else (ALAC, WMA, ...) -> Opus.
 NATIVE_MIMES = {"audio/flac", "audio/mpeg", "audio/mp4", "audio/aac", "audio/ogg", "audio/wav"}
 NATIVE_CODECS = {None, "FLAC", "MP3", "AAC", "OPUS", "VORBIS", "PCM"}
-CONNECT_TIMEOUT_S = 10.0
+CONNECT_TIMEOUT_S = 5.0  # TCP + TLS + first status from the device
+LOAD_TIMEOUT_S = 8.0  # launch the Default Media Receiver + LOAD answered
+# The session bounds connect + load together (cast.session.CONNECT_TIMEOUT_S); these keep worker threads short.
+
+
+class CastError(RuntimeError):
+    pass
 
 
 def pick_format(media: Media) -> tuple[str, str]:
@@ -34,16 +42,42 @@ def pick_format(media: Media) -> tuple[str, str]:
 class ChromecastRenderer(Renderer):
     kind = "chromecast"
 
-    def __init__(self, uid: str, name: str, cast: Any):
+    def __init__(self, uid: str, name: str, cast: Any = None, factory: Any = None):
         super().__init__(uid, name)
-        self.cast = cast  # pychromecast.Chromecast (or a test double with the same surface)
+        # pychromecast.Chromecast (or a test double with the same surface). `factory()` makes a fresh one:
+        # after a failure the old one is dropped (its socket thread would retry forever) and rebuilt.
+        self.cast = cast
+        self.factory = factory
         self._ready = False
         self._loaded = False
 
+    def _connected(self) -> bool:
+        sc = getattr(self.cast, "socket_client", None)
+        return True if sc is None else bool(getattr(sc, "is_connected", True))
+
     async def _ensure(self) -> None:
+        if self._ready and not self._connected():
+            raise CastError("not connected")
         if not self._ready:
-            await asyncio.to_thread(self.cast.wait, CONNECT_TIMEOUT_S)
+            if self.cast is None:
+                if self.factory is None:
+                    raise CastError("no connection")
+                self.cast = await asyncio.to_thread(self.factory)
+            try:
+                await asyncio.to_thread(self.cast.wait, CONNECT_TIMEOUT_S)
+            except Exception as e:  # pychromecast.RequestTimeout etc.
+                raise CastError(f"no answer from {self.name}") from e
             self._ready = True
+
+    async def reset(self) -> None:
+        """Stop the socket thread and forget the connection; the next call reconnects from scratch."""
+        cast, ready = self.cast, self._ready
+        self._ready = self._loaded = False
+        if self.factory is not None:
+            self.cast = None
+        if cast is not None and (ready or self.factory is not None):
+            with contextlib.suppress(Exception):  # join(0) raises while the thread winds down
+                await asyncio.to_thread(cast.disconnect, 0)
 
     @property
     def _mc(self):
@@ -57,6 +91,15 @@ class ChromecastRenderer(Renderer):
             meta["images"] = [{"url": media.art_url}]
 
         def go():
+            # play_media() only queues the request (launch receiver, then LOAD); its callback says whether
+            # the device accepted it. Without waiting on that a dead/unresponsive speaker looks "loaded".
+            done = threading.Event()
+            result: dict = {}
+
+            def cb(ok: bool, response=None):
+                result["ok"], result["response"] = ok, response
+                done.set()
+
             self._mc.play_media(
                 media.url(fmt),
                 ctype,
@@ -66,8 +109,14 @@ class ChromecastRenderer(Renderer):
                 autoplay=play,
                 stream_type="BUFFERED",
                 metadata=meta,
+                callback_function=cb,
             )
-            self._mc.block_until_active(timeout=CONNECT_TIMEOUT_S)
+            if not done.wait(LOAD_TIMEOUT_S):
+                raise CastError(f"{self.name} didn't answer the load request")
+            if not result.get("ok"):
+                resp = result.get("response") or {}
+                reason = resp.get("reason") or resp.get("type") if isinstance(resp, dict) else None
+                raise CastError(f"{self.name} refused the track" + (f" ({reason})" if reason else ""))
 
         await asyncio.to_thread(go)
         self._loaded = True
@@ -97,6 +146,8 @@ class ChromecastRenderer(Renderer):
     async def status(self) -> Status:
         if not self._ready:
             return Status("idle")
+        if not self._connected():
+            return Status("unavailable", error="disconnected")
         st = self._mc.status
         vol = getattr(getattr(self.cast, "status", None), "volume_level", None)
         ps = getattr(st, "player_state", "UNKNOWN")
@@ -115,7 +166,7 @@ class ChromecastRenderer(Renderer):
         return Status("idle", pos, vol)
 
     async def close(self) -> None:
-        if self._ready:
+        if self._ready and self.cast is not None:
             await asyncio.to_thread(self.cast.disconnect, 2)
 
 
@@ -131,7 +182,7 @@ class _Browser:
         self.zconf = zeroconf.Zeroconf() if cfg.cast_discovery else None
         self.browser = d.CastBrowser(d.SimpleCastListener(), self.zconf, list(cfg.chromecast_hosts) or None)
         self.browser.start_discovery()
-        self.casts: dict[str, Any] = {}
+        self.renderers_by_id: dict[str, ChromecastRenderer] = {}
 
     def renderers(self) -> list[Renderer]:
         import pychromecast
@@ -139,16 +190,20 @@ class _Browser:
         out = []
         for uuid, info in list(self.browser.devices.items()):
             key = str(uuid)
-            c = self.casts.get(key)
-            if c is None:
-                try:
-                    c = self.casts[key] = pychromecast.get_chromecast_from_cast_info(
-                        info, self.zconf, tries=3
+            name = info.friendly_name or info.host
+            r = self.renderers_by_id.get(key)
+            if r is None:
+                # Connect lazily, on first use: building a Chromecast starts a socket thread that retries
+                # forever, so unreachable speakers must not get one just for being listed. Cast groups
+                # (cast_type "group", port != 8009) work the same way through their elected leader.
+                def factory(info=info):
+                    return pychromecast.get_chromecast_from_cast_info(
+                        info, self.zconf, tries=2, timeout=CONNECT_TIMEOUT_S, retry_wait=2
                     )
-                except Exception as e:  # noqa: BLE001
-                    log.warning("Chromecast %s: %s", info.friendly_name or info.host, e)
-                    continue
-            out.append(ChromecastRenderer(key, info.friendly_name or info.host, c))
+
+                r = self.renderers_by_id[key] = ChromecastRenderer(key, name, factory=factory)
+            r.name = name
+            out.append(r)
         return out
 
 

@@ -1,5 +1,6 @@
 """Casting: signed URLs, the speaker registry as Connect devices, and a fake speaker driven end to end."""
 
+import asyncio
 import time
 
 import pytest
@@ -7,8 +8,9 @@ from fastapi.testclient import TestClient
 
 from nasmusic.app.cast_api import cast_app, cast_key
 from nasmusic.cast import Renderer, Status, signing
+from nasmusic.cast import session as session_mod
 from tests.conftest import track_ids
-from tests.test_connect import URL, hello, token, until, until_devices
+from tests.test_connect import URL, drain, hello, token, until, until_devices
 
 
 # ---------- signing ----------
@@ -284,7 +286,9 @@ def test_play_tracks_straight_onto_a_speaker(tc, conn, speaker):
             }
         )
         st = _state_until(w, lambda s: s["activeDeviceId"] == sid)
-        assert st["trackId"] == ids[1] and st["playing"] is True
+        assert st["trackId"] == ids[1] and st["playing"] is False and st["connecting"] is True
+        st = _state_until(w, lambda s: s["playing"])
+        assert st["connecting"] is False and st["activeDeviceId"] == sid
         wait_for(lambda: speaker.calls and speaker.calls[0][:2] == ("load", ids[1]))
 
 
@@ -383,3 +387,134 @@ def test_public_signed_link_is_served_by_the_main_app(client, conn, anon, app):
     url = client.post("/api/v1/cast/sign", json={"trackIds": ids[:1]}).json()["items"][0]["url"]
     path = url.split("://", 1)[1].split("/", 1)[1]
     assert anon.get("/" + path).status_code == 200
+
+
+# ---------- speakers that fail: hand playback back, never stay "active" silently ----------
+
+
+class HangingSpeaker(FakeSpeaker):
+    """Never answers the load (the unreachable Nest Hub)."""
+
+    async def load(self, media, position_s, play):
+        self.calls.append(("load", media.track_id, round(position_s, 1), play))
+        await asyncio.sleep(3600)
+
+    async def reset(self):
+        self.calls.append(("reset",))
+
+
+class RefusingSpeaker(FakeSpeaker):
+    async def load(self, media, position_s, play):
+        self.calls.append(("load", media.track_id, round(position_s, 1), play))
+        raise RuntimeError("LOAD_FAILED")
+
+
+def _use(app, spk):
+    reg = app.state.ctx.hub.speakers
+    reg.poll_s = 0.05
+
+    async def disc(cfg):
+        return [spk]
+
+    reg.discoverers = [disc]
+    return spk
+
+
+def _phone_playing(p, conn, client, phone):
+    ids = [r[0] for r in conn.execute("SELECT id FROM tracks ORDER BY path")][:3]
+    q = client.post("/api/v1/queues", json={"name": "Q", "trackIds": ids, "startIndex": 0}).json()
+    p.send_json({"type": "transfer", "toDeviceId": phone, "play": True})
+    until(p, "takeover")
+    p.send_json({"type": "state", "state": {"queueId": q["id"], "index": 1, "trackId": ids[1],
+                                            "positionMs": 30000, "playing": True}})
+    until(p, "state")
+    return ids
+
+
+@pytest.mark.parametrize("cls", [HangingSpeaker, RefusingSpeaker])
+def test_speaker_that_cant_connect_hands_back_to_the_phone(tc, conn, client, app, monkeypatch, cls):
+    monkeypatch.setattr(session_mod, "CONNECT_TIMEOUT_S", 0.3)
+    spk = _use(app, cls())
+    phone, ptok = token(conn, kind="android")
+    with tc.websocket_connect(URL, headers={"Authorization": f"Bearer {ptok}"}) as p:
+        hello(p, "Pixel")
+        until_devices(p, lambda ds: any(d["id"] == spk.device_id for d in ds))
+        ids = _phone_playing(p, conn, client, phone)
+        p.send_json({"type": "transfer", "toDeviceId": spk.device_id})
+        until(p, "release")
+        st = _state_until(p, lambda s: s["activeDeviceId"] == spk.device_id)
+        assert st["connecting"] is True and st["playing"] is False  # "Connecting…", the clock doesn't run
+        err = until(p, "error")
+        assert err["source"] == "speaker" and err["detail"].startswith("Couldn't connect to Kitchen")
+        t = until(p, "takeover")["state"]  # back on the phone, paused where it was
+        assert t["activeDeviceId"] == phone and t["playing"] is False and t["connecting"] is False
+        assert t["trackId"] == ids[1] and 30000 <= t["positionMs"] < 31000
+        devs = until(p, "devices")["devices"]
+        assert next(d for d in devs if d["id"] == spk.device_id)["isActive"] is False
+        if cls is HangingSpeaker:
+            wait_for(lambda: ("reset",) in spk.calls)
+        reg = app.state.ctx.hub.speakers
+        assert reg.get(spk.device_id).owner is None
+
+
+def test_speaker_dropping_mid_playback_hands_back_at_its_position(tc, conn, client, speaker):
+    phone, ptok = token(conn, kind="android")
+    sid = speaker.device_id
+    with tc.websocket_connect(URL, headers={"Authorization": f"Bearer {ptok}"}) as p:
+        hello(p, "Pixel")
+        until_devices(p, lambda ds: any(d["id"] == sid for d in ds))
+        ids = _phone_playing(p, conn, client, phone)
+        p.send_json({"type": "transfer", "toDeviceId": sid})
+        _state_until(p, lambda s: s["activeDeviceId"] == sid and s["playing"] and not s["connecting"])
+        speaker.pos = 75.0
+        time.sleep(0.2)
+        speaker.state = "unavailable"  # e.g. powered off / Wi-Fi gone
+        err = until(p, "error")
+        assert err["source"] == "speaker" and "Lost connection to Kitchen" in err["detail"]
+        t = until(p, "takeover")["state"]
+        assert t["activeDeviceId"] == phone and t["playing"] is False
+        assert t["trackId"] == ids[1] and 75000 <= t["positionMs"] < 76000
+
+
+def test_cancel_while_connecting_and_stop_casting(tc, conn, client, app, monkeypatch):
+    monkeypatch.setattr(session_mod, "CONNECT_TIMEOUT_S", 30)
+    spk = _use(app, HangingSpeaker())
+    phone, ptok = token(conn, kind="android")
+    with tc.websocket_connect(URL, headers={"Authorization": f"Bearer {ptok}"}) as p:
+        hello(p, "Pixel")
+        until_devices(p, lambda ds: any(d["id"] == spk.device_id for d in ds))
+        ids = _phone_playing(p, conn, client, phone)
+        p.send_json({"type": "transfer", "toDeviceId": spk.device_id})
+        _state_until(p, lambda s: s["connecting"])
+        wait_for(lambda: spk.calls and spk.calls[0][0] == "load")
+        # Cancel = take it back to this device, paused (the same message as "Stop casting").
+        p.send_json({"type": "transfer", "toDeviceId": phone, "play": False})
+        t = until(p, "takeover")["state"]
+        assert t["activeDeviceId"] == phone and t["playing"] is False and t["connecting"] is False
+        assert t["trackId"] == ids[1] and 30000 <= t["positionMs"] < 31000
+        wait_for(lambda: ("stop",) in spk.calls and ("reset",) in spk.calls)  # in-flight load abandoned
+        assert app.state.ctx.hub.speakers.get(spk.device_id).owner is None
+        msgs = drain(p)
+        assert not any(m["type"] == "error" for m in msgs)  # cancelling isn't an error
+
+
+def test_failure_with_the_picker_gone_leaves_nothing_active(tc, conn, client, app, monkeypatch):
+    monkeypatch.setattr(session_mod, "CONNECT_TIMEOUT_S", 0.5)
+    spk = _use(app, HangingSpeaker())
+    _, wtok = token(conn, "alice", kind="web")
+    _, ptok = token(conn, "alice", kind="android")
+    ids = list(track_ids(conn).values())
+    with tc.websocket_connect(URL, headers={"Authorization": f"Bearer {ptok}"}) as p:
+        hello(p, "Pixel")
+        until_devices(p, lambda ds: any(d["id"] == spk.device_id for d in ds))
+        with tc.websocket_connect(URL, headers={"Authorization": f"Bearer {wtok}"}) as w:
+            hello(w, "Browser", "web")
+            w.send_json({"type": "command", "action": "playTracks", "targetDeviceId": spk.device_id,
+                         "args": {"trackIds": ids[:2]}})
+            _state_until(p, lambda s: s["connecting"])
+            wait_for(lambda: spk.calls)  # (closing a TestClient socket cancels its handler mid-message)
+        # The browser that picked it closed; the failure leaves nothing active rather than the phone.
+        err = until(p, "error")
+        assert err["source"] == "speaker"
+        st = _state_until(p, lambda s: not s["connecting"])
+        assert st["activeDeviceId"] is None and st["playing"] is False

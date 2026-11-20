@@ -171,6 +171,22 @@ class ConnectClient(
 
     fun transfer(toDeviceId: String, play: Boolean = true) = send(ConnectProtocol.transfer(toDeviceId, play))
 
+    /** The active device is a speaker the server plays on (picked from the Devices list). */
+    val speakerActive: Boolean
+        get() {
+            val a = _state.value?.activeDeviceId ?: return false
+            return a.startsWith("spk:") || _devices.value.any { it.id == a && it.isSpeaker }
+        }
+
+    /**
+     * "Stop casting" on a server speaker, or Cancel while it connects: the speaker stops and playback comes
+     * back to this phone, paused where it was (the server sends us a takeover).
+     */
+    fun stopCasting() {
+        val me = _myId.value ?: return
+        transfer(me, false)
+    }
+
     /** The user pressed play on this phone: become the active device (the old one gets "release"). */
     fun claimPlayback() {
         val me = _myId.value ?: return

@@ -42,7 +42,7 @@
       <div class="meta">
         <button class="title ellipsis" onclick={() => ui.go('album', t.albumId)}>{t.title}</button>
         <button class="artist ellipsis" onclick={() => ui.go('artist', t.artistId)}>{t.artist}</button>
-        {#if player.remoteDevice}<div class="remote ellipsis"><Speaker size={12} /> {player.remoteLabel}</div>{/if}
+        {#if player.remoteDevice}<div class="remote ellipsis"><Speaker size={12} /> {player.remoteLabel}{#if player.castSpeaker} · <button class="stopcast" onclick={() => player.stopCasting()}>{player.castConnecting ? 'Cancel' : 'Stop casting'}</button>{/if}</div>{/if}
       </div>
       <button class="icon-btn sm" class:on={t.starred} aria-label="Favourite" onclick={() => player.toggleStar(t)}><Heart size={18} fill={t.starred ? 'currentColor' : 'none'} /></button>
     {/if}
@@ -138,6 +138,12 @@
     display: flex;
     gap: 4px;
     align-items: center;
+  }
+  .stopcast {
+    color: inherit;
+    font-size: inherit;
+    text-decoration: underline;
+    flex: none;
   }
   .center {
     display: grid;

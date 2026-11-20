@@ -18,6 +18,8 @@
 {#each list as dev (dev.id)}
   {@const Icon = kindIcon(dev)}
   {@const active = player.remoteState?.activeDeviceId === dev.id}
+  {@const connecting = active && isSpeaker(dev) && !!player.remoteState?.connecting}
+  <div class="row">
   <button
     class="dev"
     class:active
@@ -31,17 +33,50 @@
     <div class="grow">
       <div class="ellipsis">{dev.name}{dev.id === player.myDeviceId ? ' (this device)' : ''}</div>
       <div class="sub">
-        {active ? (player.remoteState?.playing ? 'Playing' : 'Active') : dev.canPlay ? (isSpeaker(dev) ? 'Tap to play on this speaker' : 'Tap to play here') : 'Remote only'}{#if isSpeaker(dev)}
+        {connecting ? 'Connecting…' : active ? (player.remoteState?.playing ? 'Playing' : 'Active') : dev.canPlay ? (isSpeaker(dev) ? 'Tap to play on this speaker' : 'Tap to play here') : 'Remote only'}{#if isSpeaker(dev)}
           · {CAST_LABEL[dev.castType ?? ''] ?? 'Speaker'}{/if}
       </div>
     </div>
-    {#if active && player.remoteState?.playing}<span class="eq"><i></i><i></i><i></i></span>{/if}
+    {#if connecting}<span class="spin" aria-hidden="true"></span>{:else if active && player.remoteState?.playing}<span class="eq"><i></i><i></i><i></i></span>{/if}
   </button>
+  {#if active && isSpeaker(dev)}
+    <button class="stop" onclick={() => player.stopCasting()}>{connecting ? 'Cancel' : 'Stop casting'}</button>
+  {/if}
+  </div>
 {:else}
   {#if player.connectStatus === 'open'}<p class="muted small">No other devices online.</p>{/if}
 {/each}
 
 <style>
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .stop {
+    flex: none;
+    padding: 6px 12px;
+    margin-right: 8px;
+    border-radius: 999px;
+    border: 1px solid var(--fg-3);
+    font-size: 0.82rem;
+  }
+  .stop:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .spin {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    border-right-color: transparent;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
   .dev {
     display: flex;
     align-items: center;

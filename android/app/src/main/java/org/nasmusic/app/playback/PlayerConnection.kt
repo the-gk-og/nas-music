@@ -24,9 +24,20 @@ import org.nasmusic.app.data.api.Queue
 import org.nasmusic.app.data.api.Track
 
 /** Another device is playing; this phone is a remote control. */
-data class RemoteInfo(val deviceId: String, val deviceName: String, val castTo: String? = null) {
+data class RemoteInfo(
+    val deviceId: String,
+    val deviceName: String,
+    val castTo: String? = null,
+    /** A speaker the server plays on: offer "Stop casting" (or Cancel while [connecting]). */
+    val isSpeaker: Boolean = false,
+    val connecting: Boolean = false,
+) {
     /** "Playing on Pixel", or "Casting from Pixel to Bedroom display" when that phone casts with Google Cast. */
-    val label: String get() = castTo?.let { "Casting from $deviceName to $it" } ?: "Playing on $deviceName"
+    val label: String get() = when {
+        connecting -> "Connecting to $deviceName…"
+        castTo != null -> "Casting from $deviceName to $castTo"
+        else -> "Playing on $deviceName"
+    }
 }
 
 data class NowPlaying(
@@ -144,7 +155,7 @@ class PlayerConnection(
             repeat = when (s.repeat) { "one" -> Player.REPEAT_MODE_ONE; "all" -> Player.REPEAT_MODE_ALL; else -> Player.REPEAT_MODE_OFF },
             volume = s.volume,
             speed = s.speed,
-            remote = RemoteInfo(dev.id, dev.name, s.castTo),
+            remote = RemoteInfo(dev.id, dev.name, s.castTo, dev.isSpeaker, dev.isSpeaker && s.connecting),
         )
     }
 

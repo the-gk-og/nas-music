@@ -31,6 +31,8 @@ data class PlaybackState(
     val speed: Float = 1f,
     /** Google Cast speaker this (active) phone is casting to, else null. */
     val castTo: String? = null,
+    /** Set by the server: the active device is a server speaker still connecting/loading (not playing yet). */
+    val connecting: Boolean = false,
     val rev: Long = 0,
 ) {
     /** Position now: while playing it advances from positionAt at [speed]. */

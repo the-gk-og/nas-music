@@ -152,6 +152,7 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                 if (!compact) IconButton(onClick = { ui.nav.popBackStack() }) { Icon(Icons.Default.KeyboardArrowDown, "Minimise") }
                 s.remote?.let {
                     Text(it.label, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f).padding(start = 8.dp))
+                    if (it.isSpeaker) TextButton(onClick = { c.connect.stopCasting() }) { Text(if (it.connecting) "Cancel" else "Stop casting") }
                 } ?: Spacer(Modifier.weight(1f))
                 if (s.remote == null) IconButton(onClick = { sleepOpen = true }) {
                     Icon(Icons.Default.Bedtime, if (sleepTimer != null) "Sleep timer on" else "Sleep timer",

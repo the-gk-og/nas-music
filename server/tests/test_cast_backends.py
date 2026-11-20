@@ -39,9 +39,16 @@ class FakeMC:
             player_state="UNKNOWN", idle_reason=None, adjusted_current_time=0.0
         )
 
+    answer: tuple | None = (True, {})  # what the device says to LOAD; None = never answers
+
     def play_media(self, url, ctype, **kw):
         self.calls.append(("play_media", url, ctype, kw))
-        self.status.player_state = "PLAYING" if kw.get("autoplay") else "PAUSED"
+        if self.answer is None:
+            return
+        if self.answer[0]:
+            self.status.player_state = "PLAYING" if kw.get("autoplay") else "PAUSED"
+        if kw.get("callback_function"):
+            kw["callback_function"](*self.answer)
 
     def block_until_active(self, timeout=None):
         pass
@@ -104,6 +111,61 @@ def test_chromecast_load_status_and_finish():
         assert (await r.status()).state == "idle"  # reported once
         cast.media_controller.status.idle_reason = "ERROR"
         assert (await r.status()).error
+
+    asyncio.run(run())
+
+
+class DeadCast(FakeCast):
+    """The Nest Hub case: discovered, but its cast port doesn't answer."""
+
+    def __init__(self):
+        super().__init__()
+        self.disconnected = False
+
+    def wait(self, timeout=None):
+        raise TimeoutError("wait")
+
+    def disconnect(self, timeout=None):
+        self.disconnected = True
+
+
+def test_chromecast_unreachable_or_refusing_fails_fast(monkeypatch):
+    monkeypatch.setattr(chromecast, "LOAD_TIMEOUT_S", 0.1)
+
+    async def run():
+        made = []
+
+        def factory():
+            made.append(DeadCast() if len(made) == 0 else FakeCast())
+            return made[-1]
+
+        r = chromecast.ChromecastRenderer("u", "Bedroom display", factory=factory)
+        assert (await r.status()).state == "idle"  # listing it doesn't connect
+        assert made == []
+        with pytest.raises(chromecast.CastError, match="no answer"):
+            await r.load(media(), 0, True)
+        await r.reset()  # the session resets after a failure: the dead connection is dropped...
+        assert made[0].disconnected and r.cast is None
+        await r.load(media(), 0, True)  # ...and the next attempt builds a new one
+        assert len(made) == 2 and (await r.status()).state == "playing"
+
+        # Connected, but the receiver never answers LOAD / refuses it.
+        cast = FakeCast()
+        cast.media_controller.answer = None
+        r2 = chromecast.ChromecastRenderer("u2", "Kitchen", cast)
+        with pytest.raises(chromecast.CastError, match="didn't answer"):
+            await r2.load(media(), 0, True)
+        cast.media_controller.answer = (False, {"type": "LOAD_FAILED"})
+        with pytest.raises(chromecast.CastError, match="refused"):
+            await r2.load(media(), 0, True)
+
+        # The socket drops mid-playback: status says unavailable (the session counts those and gives up).
+        cast.media_controller.answer = (True, {})
+        await r2.load(media(), 0, True)
+        cast.socket_client = types.SimpleNamespace(is_connected=False)
+        assert (await r2.status()).state == "unavailable"
+        with pytest.raises(chromecast.CastError):
+            await r2.play()
 
     asyncio.run(run())
 

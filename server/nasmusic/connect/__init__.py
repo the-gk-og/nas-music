@@ -45,7 +45,7 @@ def _now_iso() -> str:
 def default_state() -> dict:
     return {"activeDeviceId": None, "queueId": None, "index": 0, "trackId": None, "positionMs": 0,
             "positionAt": _now_iso(), "playing": False, "volume": 1.0, "shuffle": False, "repeat": "off",
-            "speed": 1.0, "castTo": None, "rev": 0}
+            "speed": 1.0, "castTo": None, "connecting": False, "rev": 0}
 
 
 def position_now(state: dict) -> int:
@@ -98,7 +98,8 @@ class SpeakerConn:
         if t == "takeover":
             self.session.spawn(self.session.takeover(self.uid, msg.get("state") or {}))
         elif t == "release":
-            self.session.spawn(self.session.release(self.uid))
+            cancelled = self.session.owner == self.uid and self.session.cancel_connect()
+            self.session.spawn(self.session.release(self.uid, cancelled))
         elif t == "command":
             self.session.spawn(self.session.command(self.uid, str(msg.get("action")), msg.get("args") or {}))
         return True
@@ -109,6 +110,7 @@ class UserHub:
     state: dict = field(default_factory=default_state)
     conns: dict[str, Conn] = field(default_factory=dict)
     known: dict[str, dict] = field(default_factory=dict)   # device_id -> last hello info (for the active one)
+    handback: str | None = None   # the device that picked the active speaker: playback returns there on failure
     release_task: asyncio.Task | None = None
     flush_task: asyncio.Task | None = None
     dirty: bool = False
@@ -137,7 +139,8 @@ class Hub:
         hooks = registry.hooks
         registry.hooks = CastHooks(
             media=hooks.media, queue_track=hooks.queue_track, queue_len=hooks.queue_len,
-            report=self.speaker_report, lost=self.speaker_lost, error=self.speaker_error)
+            report=self.speaker_report, lost=self.speaker_lost, error=self.speaker_error,
+            failed=self.speaker_failed)
         registry.on_change = self._broadcast_devices_all
 
     # ---------- thread-safe API for sync code ----------
@@ -196,6 +199,7 @@ class Hub:
                 st = default_state()
                 st.update({k: v for k, v in stored.items() if k in st})
                 st["playing"] = False  # nothing is playing right after a server restart
+                st["connecting"] = False
                 u.state = st
         return u
 
@@ -243,8 +247,31 @@ class Hub:
                 continue
             if isinstance(v, types):
                 u.state[k] = v
+        u.state["connecting"] = False   # the first report means it connected and loaded
         await self._changed(uid, u, force_persist=bool(was) and not u.state.get("playing"))
         return True
+
+    async def speaker_failed(self, uid: str, device_id: str, detail: str, position_ms: int | None = None) -> None:
+        """The active speaker couldn't connect, failed to load, or dropped (the session has let go already).
+        Playback goes back to the device that picked the speaker, paused where it was; if that device is
+        gone, nothing is active (paused)."""
+        u = await self._user(uid)
+        if u.state.get("activeDeviceId") != device_id:
+            return   # already moved on (cancelled / picked another device)
+        self._pause_in_place(u.state)
+        if position_ms is not None and position_ms > 0:
+            u.state["positionMs"] = int(position_ms)
+        u.state["connecting"] = False
+        await self._broadcast(uid, {"type": "error", "source": "speaker", "detail": detail})
+        back = u.conns.get(u.handback) if u.handback else None
+        u.handback = None
+        if back is not None and back.can_play:
+            await self._make_active(uid, u, back, False)
+            return
+        u.state["activeDeviceId"] = None
+        u.state["castTo"] = None
+        await self._changed(uid, u, force_persist=True)
+        await self._broadcast_devices(uid, u)
 
     async def speaker_lost(self, uid: str, device_id: str) -> None:
         """Another user took this speaker over: `uid` has no active device any more."""
@@ -416,7 +443,7 @@ class Hub:
         await self._changed(uid, u, force_persist=bool(was_playing) and not u.state.get("playing"))
 
     async def _make_active(self, uid: str, u: UserHub, target: Conn, play: bool | None,
-                           extra: dict | None = None) -> None:
+                           extra: dict | None = None, requester: Conn | None = None) -> None:
         prev = u.state.get("activeDeviceId")
         if u.state.get("playing"):
             u.state["positionMs"] = position_now(u.state)
@@ -427,6 +454,22 @@ class Hub:
             u.state["playing"] = bool(play)
         u.state["activeDeviceId"] = target.device_id
         u.state["castTo"] = None
+        takeover = dict(u.state)
+        if isinstance(target, SpeakerConn):
+            # Until the speaker has connected and loaded (its first report), it isn't playing: clients show
+            # "Connecting…" and the position doesn't run on. The speaker gets the wanted play state.
+            if requester is not None and requester.can_play and requester.device_id in u.conns:
+                u.handback = requester.device_id
+            elif prev and prev in u.conns and u.conns[prev].can_play:
+                u.handback = prev
+            elif prev != target.device_id:
+                u.handback = None
+            u.state["connecting"] = True
+            u.state["playing"] = False
+        else:
+            u.state["connecting"] = False
+            u.handback = None
+        takeover["connecting"] = u.state["connecting"]
         if u.release_task:
             u.release_task.cancel()
             u.release_task = None
@@ -435,7 +478,8 @@ class Hub:
             if old is not None:
                 await old.send({"type": "release"})
         await self._changed(uid, u, force_persist=True)
-        await target.send({"type": "takeover", "state": dict(u.state)})
+        takeover["rev"] = u.state["rev"]
+        await target.send({"type": "takeover", "state": takeover})
         await self._broadcast_devices(uid, u)
 
     async def _on_transfer(self, uid: str, u: UserHub, conn: Conn, msg: dict) -> None:
@@ -448,7 +492,7 @@ class Hub:
             await conn.send({"type": "error", "detail": "that device can't play audio"})
             return
         play = msg.get("play")
-        await self._make_active(uid, u, target, None if play is None else bool(play))
+        await self._make_active(uid, u, target, None if play is None else bool(play), requester=conn)
 
     async def _play_extra(self, uid: str, action: str, args: dict) -> dict | None:
         if action != "playQueue":
@@ -485,7 +529,8 @@ class Hub:
         if isinstance(target, SpeakerConn) and target_id != active_id:
             # Playing straight onto a speaker that isn't active yet: make it active with that queue.
             if action in ("play", "playQueue"):
-                await self._make_active(uid, u, target, True, await self._play_extra(uid, action, args))
+                await self._make_active(uid, u, target, True, await self._play_extra(uid, action, args),
+                                        requester=conn)
             else:
                 await conn.send({"type": "error", "detail": "that speaker isn't playing for you"})
             return

@@ -322,6 +322,8 @@ export interface PlaybackState {
   speed: number;
   /** The active phone is casting with Google Cast to this speaker (name); null/absent = not casting. */
   castTo?: string | null;
+  /** Set by the server: the active device is a speaker still connecting/loading (`playing` is false). */
+  connecting?: boolean;
   rev: number;
 }
 

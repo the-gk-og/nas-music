@@ -1117,7 +1117,14 @@ export class MockHub {
       if (prev === PHONE) this.stopPhone();
       else this.socketOf(prev)?.deliver({ type: 'release' });
     }
-    this.state = { ...this.state, activeDeviceId: to, positionMs, positionAt: iso(), playing: play, rev: this.state.rev + 1 };
+    const speaker = to.startsWith('spk:');
+    this.state = { ...this.state, activeDeviceId: to, positionMs, positionAt: iso(), playing: speaker ? false : play, connecting: speaker, rev: this.state.rev + 1 };
+    if (speaker) {
+      // Like the server: "Connecting…" for a moment, then it plays (the mock speaker always connects).
+      setTimeout(() => {
+        if (this.state.activeDeviceId === to && this.state.connecting) this.setState({ connecting: false, playing: play, positionMs, positionAt: iso() });
+      }, 1500);
+    }
     if (to === PHONE) this.startPhone();
     else this.socketOf(to)?.deliver({ type: 'takeover', state: this.state });
     this.broadcast({ type: 'state', ...this.state });

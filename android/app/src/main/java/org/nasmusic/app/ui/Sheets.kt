@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -368,8 +369,15 @@ private fun DevicesSheet(c: AppContainer, onDismiss: () -> Unit) {
             // This phone first, then your other devices, then speakers the server can cast to.
             devices.filter { it.online }.sortedWith(compareBy({ it.id != me }, { it.isSpeaker })).forEach { d ->
                 val active = state?.activeDeviceId == d.id
+                val connecting = active && d.isSpeaker && state?.connecting == true
                 Row(
-                    Modifier.fillMaxWidth().clickable(enabled = d.canPlay && !active) { c.connect.transfer(d.id, true); onDismiss() }
+                    Modifier.fillMaxWidth().clickable(enabled = d.canPlay && !active) {
+                        // A phone-side Google Cast session and a server speaker must not both play: end the
+                        // native session first (full build; no-op in FOSS).
+                        org.nasmusic.app.cast.NativeCast.endSession()
+                        c.connect.transfer(d.id, true)
+                        onDismiss()
+                    }
                         .padding(horizontal = 24.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -385,6 +393,7 @@ private fun DevicesSheet(c: AppContainer, onDismiss: () -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text(d.name + if (d.id == me) " (this phone)" else "", color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                         val status = when {
+                            connecting -> "Connecting…"
                             active && state?.playing == true -> "Playing"
                             active -> "Active"
                             !d.canPlay -> "Remote only"
@@ -395,6 +404,11 @@ private fun DevicesSheet(c: AppContainer, onDismiss: () -> Unit) {
                             if (d.isSpeaker) "$status · ${castLabel(d.castType)}" else status,
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    if (connecting) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    if (active && d.isSpeaker) {
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(onClick = { c.connect.stopCasting() }) { Text(if (connecting) "Cancel" else "Stop casting") }
                     }
                 }
             }

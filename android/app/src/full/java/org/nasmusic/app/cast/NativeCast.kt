@@ -32,6 +32,9 @@ import com.google.android.gms.cast.framework.SessionManagerListener
 import com.google.android.gms.common.images.WebImage
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -60,6 +63,8 @@ object NativeCast {
     private var cast: CastContext? = null
     private val ready = mutableStateOf(false)
     private var endedAt: Pair<Int, Long>? = null
+    /** The session is being ended to hand playback to a server speaker: don't resume on the phone. */
+    @Volatile private var handingToSpeaker = false
 
     fun init(c: AppContainer) {
         if (cast != null) return
@@ -77,6 +82,17 @@ object NativeCast {
             // No (or old) Google Play Services on this device: no Cast button, everything else works.
             Log.w(TAG, "Google Cast unavailable: ${e.message}")
         }
+    }
+
+    /**
+     * End this phone's Google Cast session, if any, because a server speaker was just picked from the Devices
+     * list. Two senders on one Chromecast would fight over it, and the phone mustn't resume locally.
+     */
+    fun endSession() {
+        val sm = cast?.sessionManager ?: return
+        if (sm.currentCastSession?.isConnected != true) return
+        handingToSpeaker = true
+        runCatching { sm.endCurrentSession(true) }.onFailure { handingToSpeaker = false }
     }
 
     @Composable
@@ -152,8 +168,11 @@ object NativeCast {
             endedAt = if (idx >= 0) idx to rmc.approximateStreamPosition else null
         }
         override fun onSessionEnded(session: CastSession, error: Int) {
+            val toSpeaker = handingToSpeaker
+            handingToSpeaker = false
             val (idx, pos) = endedAt ?: return
             endedAt = null
+            if (toSpeaker) return
             c.player.resumeAt(idx, pos, play = false)
         }
         override fun onSessionStarting(session: CastSession) = Unit
@@ -164,6 +183,22 @@ object NativeCast {
     }
 
     private fun handOff(c: AppContainer, session: CastSession) {
+        if (c.connect.speakerActive) {
+            // A server speaker is playing (or connecting) for us: take playback back to this phone first, so
+            // the server stops it before we load our queue on the Chromecast (it may be the same device).
+            c.connect.stopCasting()
+            c.scope.launch {
+                val me = c.connect.myDeviceId.value
+                withTimeoutOrNull(4000) { c.connect.state.first { it?.activeDeviceId == me } }
+                delay(800)   // let the takeover load the queue into the phone's player
+                withContext(Dispatchers.Main) { if (session.isConnected) handOffNow(c, session) }
+            }
+            return
+        }
+        handOffNow(c, session)
+    }
+
+    private fun handOffNow(c: AppContainer, session: CastSession) {
         val now = c.player.localSnapshot() ?: c.player.state.value
         val ids = now.queue.map { it.mediaId }.filter { it.isNotBlank() }
         if (ids.isEmpty()) return

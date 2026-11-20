@@ -12,6 +12,9 @@ object NativeCast {
 
     fun init(c: AppContainer) = Unit
 
+    /** End a phone-side Google Cast session (before a server speaker is picked). Nothing to end here. */
+    fun endSession() = Unit
+
     /** Extra row in the Devices sheet. */
     @Composable
     fun DevicesRow(c: AppContainer) = Unit

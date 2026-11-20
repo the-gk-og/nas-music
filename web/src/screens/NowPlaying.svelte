@@ -64,6 +64,7 @@
     <button class="icon-btn" aria-label="Minimise" title="Minimise" onclick={minimise}><ChevronDown size={28} /></button>
     {#if player.remoteDevice}
       <button class="remote" onclick={() => ui.open({ kind: 'devices' })}><Speaker size={16} /> {player.remoteLabel}</button>
+      {#if player.castSpeaker}<button class="stopcast" onclick={() => player.stopCasting()}>{player.castConnecting ? 'Cancel' : 'Stop casting'}</button>{/if}
     {:else}<span></span>{/if}
     <div class="topr">
       {#if !player.remoteDevice}
@@ -285,6 +286,14 @@
   .top > span,
   .top > .remote {
     flex: 1;
+  }
+  .stopcast {
+    flex: none;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    font-size: 0.82rem;
+    opacity: 0.85;
   }
   .remote {
     display: flex;

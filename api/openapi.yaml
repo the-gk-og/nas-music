@@ -962,6 +962,12 @@ paths:
         Snapcast groups). They also appear in every user's Connect device list with `kind: speaker`; to play on
         one, `transfer` to its id (or send a `playTracks`/`playQueue` command with `targetDeviceId` = its id).
         The server then plays the queue on the speaker and reports PlaybackState like an active phone.
+        While it connects and loads (at most ~10 s) PlaybackState has `connecting: true` and `playing: false`
+        (show "Connecting…" with Cancel). If it can't connect, refuses the track, or drops later, the server
+        sends `error {source: speaker, detail: "Couldn't connect to <name>" / "Lost connection to <name>"}` and
+        hands playback back — paused, same position — to the device that picked the speaker (a `takeover`);
+        if that device is gone, nothing is active. Cancel / "Stop casting" = `transfer` to yourself with
+        `play: false` (the speaker stops; you take over paused where it was).
         404 when casting is disabled (`cast_enabled = false`).
       responses:
         '200':
@@ -2562,6 +2568,11 @@ components:
           description: >-
             the active phone is playing through a Google Cast session it started (full Android build) — the
             speaker's name. Show "Casting to <castTo>". Omitted in a state report = not casting.
+        connecting:
+          type: boolean
+          description: >-
+            set by the server (clients don't report it): the active device is a speaker that is still
+            connecting/loading. `playing` is false until it has started.
         rev: { type: integer }
     ConnectDevice:
       type: object

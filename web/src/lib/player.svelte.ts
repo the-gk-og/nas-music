@@ -183,8 +183,20 @@ export class Player {
   get remoteLabel(): string {
     const d = this.remoteDevice;
     if (!d) return '';
+    if (d.kind === 'speaker') return this.castConnecting ? `Connecting to ${d.name}…` : `Playing on ${d.name}`;
     const to = this.remoteState?.castTo;
     return to ? `Casting from ${d.name} to ${to}` : `Playing on ${d.name}`;
+  }
+
+  /** The server is playing on a speaker for us (picked from the device list). */
+  get castSpeaker(): ConnectDevice | null {
+    const d = this.remoteDevice;
+    return d?.kind === 'speaker' ? d : null;
+  }
+
+  /** That speaker is still connecting / loading. */
+  get castConnecting(): boolean {
+    return !!this.castSpeaker && !!this.remoteState?.connecting;
   }
 
   get remoteDevice(): ConnectDevice | null {
@@ -1348,6 +1360,13 @@ export class Player {
     const play = this.shown.playing || here;
     this.connect.transfer(deviceId, play);
     if (here) this.claimedAt = 0;
+  }
+
+  /** "Stop casting" / Cancel while connecting: the speaker stops, playback comes back here paused. */
+  stopCasting() {
+    if (!this.connect || !this.myDeviceId) return;
+    this.connect.transfer(this.myDeviceId, false);
+    this.claimedAt = 0;
   }
 
   // ================= Media Session + environment =================
