@@ -342,7 +342,13 @@ def sync_smart(limit: int = Query(1500, ge=1, le=5000), me: Device = Depends(dev
 @router.post("/events")
 def post_events(batch: events_mod.EventBatch, me: Device = Depends(device), conn: Conn = Depends(db),
                 c: AppContext = Depends(ctx)):
-    return events_mod.ingest(conn, batch.events, me.id, me.user_id, weather=c.weather)
+    res = events_mod.ingest(conn, batch.events, me.id, me.user_id, weather=c.weather)
+    from nasmusic.app import scrobble
+
+    if scrobble.enqueue(conn, me.user_id, [e.id for e in batch.events if e.type in ("play", "skip")]) \
+            and c.scrobbler is not None:
+        c.scrobbler.kick()
+    return res
 
 
 # ---------- suggestions ----------

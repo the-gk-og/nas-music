@@ -229,6 +229,7 @@ def settings_page(request: Request, conn: sqlite3.Connection = Depends(db), c: A
         ("CF Access client id", secret(cfg.cf_access_client_id)),
         ("CF Access client secret", secret(cfg.cf_access_client_secret)),
         ("Last.fm API key", secret(cfg.lastfm_api_key)),
+        ("Last.fm API secret", secret(cfg.lastfm_api_secret)),
         ("Timezone", cfg.timezone),
         ("Opus cache limit", f"{cfg.opus_cache_gb:g} GB"),
         ("Scan interval", f"{cfg.scan_interval_minutes} min"),

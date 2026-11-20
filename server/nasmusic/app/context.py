@@ -33,6 +33,7 @@ class AppContext:
     lrclib: object | None = None           # nasmusic.library.lrclib.Lrclib
     autoeq: object | None = None           # nasmusic.app.autoeq.AutoEq (created on first use)
     started_at: float = 0.0                # time.time() at start (uptime)
+    scrobbler: object | None = None        # nasmusic.app.scrobble.Scrobbler (v7)
     jam_hub: object | None = None          # nasmusic.jam.hub.JamHub (created on first use, see app.jam_api)
     login_limiter: users.RateLimiter = field(default_factory=lambda: users.RateLimiter(5, 60.0))
 

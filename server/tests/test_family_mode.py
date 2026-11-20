@@ -344,7 +344,7 @@ def test_v5_to_v6_keeps_overrides(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 6
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     assert conn.execute("SELECT value FROM tag_overrides WHERE track_id = 't1'").fetchone()[0] == '"X"'
     conn.execute("INSERT INTO tag_overrides VALUES ('t2', 'explicit', '\"clean\"', 'u1', 'now')")
     for t in ("track_explicit", "family_mode"):

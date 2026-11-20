@@ -80,6 +80,13 @@ def build_context(cfg: Config, jobs: Jobs | None = None) -> AppContext:
     from nasmusic.app.cast_api import make_registry
 
     c.hub.attach_speakers(make_registry(c))
+    from nasmusic.app.scrobble import Scrobbler
+
+    c.scrobbler = Scrobbler(cfg, version=VERSION)
+    c.hub.listeners.append(c.scrobbler.on_hub)
+    if jobs is not None:
+        jobs.hub = c.hub
+        jobs.scrobbler = c.scrobbler
     return c
 
 
@@ -114,7 +121,7 @@ PLAYER_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-i
 def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None = None) -> FastAPI:
     from nasmusic import web
     from nasmusic.app import (account_api, admin_api, api, autotag_api, cast_api, collections_api, connect_api,
-                              discover_api, family_api, insights_api, jam_api, logbuffer, tags_api)
+                              discover_api, family_api, insights_api, jam_api, logbuffer, scrobble_api, tags_api)
     from nasmusic.web import spa
 
     install_token_redaction()
@@ -124,7 +131,7 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
     for r in (api.public, account_api.public, api.router, account_api.router, account_api.admin,
               collections_api.router, discover_api.router, insights_api.router, insights_api.admin, admin_api.router,
               tags_api.router, autotag_api.router, connect_api.router, cast_api.media_router, cast_api.router,
-              family_api.router, family_api.admin, jam_api.public, jam_api.host):
+              family_api.router, family_api.admin, jam_api.public, jam_api.host, scrobble_api.router):
         app.include_router(r, prefix="/api/v1")
     app.include_router(web.router)
     app.include_router(spa.router_for(cfg, web.render_join))  # catch-all: must stay last

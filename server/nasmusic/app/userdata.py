@@ -137,6 +137,7 @@ def erase(conn: sqlite3.Connection, uid: str, signal: str) -> dict:
             conn.execute("DELETE FROM radio_sessions WHERE user_id = ?", (uid,))  # encode taste too
             conn.execute("DELETE FROM radio_feedback WHERE user_id = ?", (uid,))   # v6 steering log
             conn.execute("DELETE FROM radio_stations WHERE user_id = ?", (uid,))
+            conn.execute("DELETE FROM scrobble_queue WHERE user_id = ?", (uid,))   # v7 scrobble outbox
             conn.execute("UPDATE playback_state SET state = '{}' WHERE user_id = ?", (uid,))
             conn.execute("COMMIT")
             return {"eventsUpdated": 0, "eventsDeleted": deleted}
