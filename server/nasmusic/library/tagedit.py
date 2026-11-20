@@ -82,9 +82,9 @@ def _reapply(cfg: Config, conn: sqlite3.Connection, row: sqlite3.Row, file_t: Tr
     ta_id, al_id = scanner.upsert_names(conn, row["path"], t, now)
     conn.execute(
         "UPDATE tracks SET album_id = ?, artist_id = ?, title = ?, track_no = ?, disc_no = ?, year = ?, genre = ?, "
-        "album_artist = ? WHERE id = ?",
+        "album_artist = ?, mbid = ? WHERE id = ?",
         (al_id, ta_id, t.title or PurePosixPath(row["path"]).stem, t.track_no, t.disc_no, t.year, t.genre,
-         t.albumartist, row["id"]))
+         t.albumartist, t.mb_track, row["id"]))
     return row["album_id"], al_id
 
 
@@ -128,11 +128,7 @@ def _folder_art(cfg: Config, rel_dir: str) -> str | None:
     return scanner._folder_art(rel_dir, images)
 
 
-def edit(cfg: Config, conn: sqlite3.Connection, user_id: str, track_ids: list[str], set_: dict | None = None,
-         revert: list[str] | None = None) -> dict:
-    """Set fields (`set_`: {db_field: value}, value None = clear the tag) and/or revert fields to the file's
-    tags (`revert`: db field names, or ["*"] for all) on many tracks in one transaction. For `lyrics` and
-    `cover` and `explicit`, None means revert. Returns {"batchId", "changed"} (number of audit rows)."""
+def _clean_change(set_: dict | None, revert: list[str] | None) -> tuple[dict, list[str]]:
     set_ = dict(set_ or {})
     revert = list(revert or [])
     for f in list(set_):
@@ -145,20 +141,40 @@ def edit(cfg: Config, conn: sqlite3.Connection, user_id: str, track_ids: list[st
     for f in revert:
         if f not in overrides.FIELDS:
             raise EditError(422, f"unknown field {f!r}")
+    return set_, revert
+
+
+def edit(cfg: Config, conn: sqlite3.Connection, user_id: str, track_ids: list[str], set_: dict | None = None,
+         revert: list[str] | None = None) -> dict:
+    """Set fields (`set_`: {db_field: value}, value None = clear the tag) and/or revert fields to the file's
+    tags (`revert`: db field names, or ["*"] for all) on many tracks in one transaction. For `lyrics`,
+    `cover` and `explicit`, None means revert. Returns {"batchId", "changed"} (number of audit rows)."""
+    set_, revert = _clean_change(set_, revert)
     if not set_ and not revert:
         raise EditError(422, "nothing to change")
-    batch = uuid.uuid4().hex
+    return edit_each(cfg, conn, user_id, {tid: set_ for tid in track_ids}, revert)
+
+
+def edit_each(cfg: Config, conn: sqlite3.Connection, user_id: str, changes: dict[str, dict],
+              revert: list[str] | None = None, batch: str | None = None, *, in_transaction: bool = False) -> dict:
+    """Like edit(), but with different values per track ({track_id: {db_field: value}}), all in one audit
+    batch. Used by automatic tag fixing to accept a whole album at once. With `in_transaction` the caller
+    owns the (BEGIN IMMEDIATE) transaction."""
+    cleaned = {tid: _clean_change(v, revert) for tid, v in changes.items()}
+    batch = batch or uuid.uuid4().hex
     now = now_iso()
     changed = 0
     touched: set[str] = set()
     # BEGIN IMMEDIATE serialises with the scanner, which re-loads overrides inside its own write transaction.
-    conn.execute("BEGIN IMMEDIATE")
+    if not in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
     try:
-        for row in _rows(conn, track_ids):
+        for row in _rows(conn, list(cleaned)):
+            set_, rev = cleaned[row["id"]]
             file_t = _file_tags(cfg, conn, row)
             ov = overrides.load(conn, row["id"])
             new = dict(ov)
-            for f in revert:
+            for f in rev:
                 new.pop(f, None)
             new.update(set_)
             if new == ov:
@@ -184,13 +200,15 @@ def edit(cfg: Config, conn: sqlite3.Connection, user_id: str, track_ids: list[st
             touched.update((old_al, new_al))
         if touched:
             refresh_albums(cfg, conn, touched)
-        if "explicit" in set_ or "explicit" in revert:
+        if any("explicit" in s or "explicit" in r for s, r in cleaned.values()):
             from nasmusic.library import explicit
 
-            explicit.recompute(conn, list(track_ids))
-        conn.execute("COMMIT")
+            explicit.recompute(conn, list(cleaned))
+        if not in_transaction:
+            conn.execute("COMMIT")
     except BaseException:
-        conn.execute("ROLLBACK")
+        if not in_transaction:
+            conn.execute("ROLLBACK")
         raise
     return {"batchId": batch, "changed": changed}
 

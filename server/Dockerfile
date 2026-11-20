@@ -39,9 +39,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable $EXTRA
 
 # ---------- runtime ----------
+# libchromaprint-tools = fpcalc (Chromaprint, LGPL-2.1+), run as a separate process for automatic tag fixing.
 FROM ${PYTHON_IMAGE}
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg tzdata \
+ && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools tzdata \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 568 apps \
  && useradd --uid 568 --gid 568 --no-create-home --home-dir /data --shell /usr/sbin/nologin apps \

@@ -10,7 +10,7 @@ export interface DiskUsage {
   totalBytes: number;
 }
 
-export type JobName = 'scan' | 'analyse' | 'loudness' | 'nightly' | 'discovery' | 'pretranscode' | 'backup';
+export type JobName = 'scan' | 'analyse' | 'loudness' | 'nightly' | 'discovery' | 'pretranscode' | 'backup' | 'autotag';
 
 export interface JobStatus {
   name: JobName | string;
@@ -394,4 +394,186 @@ export function familyApi(c: ApiClient) {
       b: Partial<Pick<FamilyMode, 'enabled' | 'hideProbable' | 'hideUnknown' | 'locked'>> & { pin?: string; clearPin?: boolean },
     ) => c.put<AdminFamilyUser>(`/admin/users/${enc(userId)}/family`, b),
   };
+}
+
+// ---- automatic tag fixing + duplicates (schema v6, api/openapi.yaml 0.6.0) ----
+
+export interface AutotagValues extends TagValues {
+  mbRecordingId?: string | null;
+  mbReleaseGroupId?: string | null;
+  mbArtistId?: string | null;
+  mbAlbumArtistId?: string | null;
+}
+export type AutotagField = Exclude<keyof AutotagValues, 'lyrics'>;
+export type AutotagStatusName = 'pending' | 'accepted' | 'rejected';
+
+export interface AutotagStatus {
+  apiKeyConfigured: boolean;
+  fpcalcAvailable: boolean;
+  running: boolean;
+  tracks: number;
+  fingerprinted: number;
+  fingerprintFailed: number;
+  matched: number;
+  noMatch: number;
+  lookupErrors: number;
+  pending: number;
+  accepted: number;
+  rejected: number;
+}
+
+export interface AutotagSuggestion {
+  trackId: string;
+  path: string;
+  status: AutotagStatusName;
+  confidence: number;
+  current: AutotagValues;
+  suggested: AutotagValues;
+  changes: AutotagField[];
+  defaultFields: AutotagField[];
+  recordingMbid?: string | null;
+  releaseMbid?: string | null;
+  durationS?: number;
+  detail?: Record<string, unknown>;
+  decidedAt?: string | null;
+  batchId?: string | null;
+}
+
+export interface AutotagGroup {
+  groupId: string;
+  albumId: string;
+  currentAlbum: string | null;
+  currentAlbumArtist: string | null;
+  albumHasArt: boolean;
+  confidence: number;
+  albumTrackCount: number;
+  release: {
+    mbid: string;
+    title: string | null;
+    artist: string | null;
+    year: number | null;
+    country: string | null;
+    format: string | null;
+    trackCount: number | null;
+    type: string | null;
+    hasCover: boolean;
+  } | null;
+  tracks: AutotagSuggestion[];
+}
+
+export interface AutotagAcceptBody {
+  trackIds?: string[];
+  groupIds?: string[];
+  minConfidence?: number;
+  fields?: AutotagField[];
+  edits?: Record<string, AutotagValues>;
+  cover?: boolean | null;
+}
+
+export interface DuplicateTrack {
+  id: string;
+  path: string;
+  title: string;
+  artist: string;
+  album: string;
+  durationS: number;
+  codec: string | null;
+  bitrate: number | null;
+  sampleRate: number | null;
+  bitsPerSample: number | null;
+  bytes: number;
+  hidden: boolean;
+  keptId: string | null;
+  recommended: boolean;
+}
+
+export interface DuplicateGroup {
+  groupId: string;
+  similarity: number | null;
+  hiddenCount: number;
+  tracks: DuplicateTrack[];
+}
+
+export function autotagApi(c: ApiClient) {
+  const enc = encodeURIComponent;
+  return {
+    status: () => c.get<AutotagStatus>('/admin/autotag/status'),
+    groups: (
+      q: {
+        status?: AutotagStatusName;
+        minConfidence?: number;
+        q?: string;
+        limit?: number;
+        offset?: number;
+      } = {},
+    ) => c.get<{ total: number; groups: AutotagGroup[] }>('/admin/autotag/groups', q),
+    accept: (body: AutotagAcceptBody) =>
+      c.post<{
+        accepted: number;
+        batchId: string | null;
+        changed: number;
+        coverErrors: string[];
+      }>('/admin/autotag/accept', body),
+    reject: (body: { trackIds?: string[]; groupIds?: string[] }) => c.post<{ rejected: number }>('/admin/autotag/reject', body),
+    reopen: (trackIds: string[]) =>
+      c.post<{ reopened: number; reverted: number }>('/admin/autotag/reopen', {
+        trackIds,
+      }),
+    rematch: (trackIds: string[]) => c.post<{ queued: number }>('/admin/autotag/rematch', { trackIds }),
+    coverPath: (releaseMbid: string) => `/admin/autotag/cover/${enc(releaseMbid)}`,
+    duplicates: () => c.get<DuplicateGroup[]>('/admin/duplicates'),
+    resolve: (keepTrackId: string, hideTrackIds: string[]) =>
+      c.post<{ hidden: number; keptId: string }>('/admin/duplicates/resolve', {
+        keepTrackId,
+        hideTrackIds,
+      }),
+    unhide: (trackIds: string[]) => c.post<{ unhidden: number }>('/admin/duplicates/unhide', { trackIds }),
+  };
+}
+
+export const AUTOTAG_FIELDS: {
+  key: AutotagField;
+  label: string;
+  mb?: boolean;
+}[] = [
+  { key: 'title', label: 'Title' },
+  { key: 'artist', label: 'Artist' },
+  { key: 'albumArtist', label: 'Album artist' },
+  { key: 'album', label: 'Album' },
+  { key: 'trackNo', label: 'Track' },
+  { key: 'discNo', label: 'Disc' },
+  { key: 'year', label: 'Year' },
+  { key: 'genre', label: 'Genre' },
+  { key: 'mbRecordingId', label: 'MB recording', mb: true },
+  { key: 'mbReleaseGroupId', label: 'MB release group', mb: true },
+  { key: 'mbArtistId', label: 'MB artist', mb: true },
+  { key: 'mbAlbumArtistId', label: 'MB album artist', mb: true },
+];
+
+/** "87%" for a 0..1 confidence; a CSS class by band. */
+export function confidenceText(c: number): string {
+  return `${Math.round(Math.max(0, Math.min(1, c)) * 100)}%`;
+}
+export function confidenceClass(c: number): 'ok' | 'warnc' | 'bad' {
+  return c >= 0.85 ? 'ok' : c >= 0.6 ? 'warnc' : 'bad';
+}
+
+/** Pending suggestions an "accept all above X%" would take (per-track confidence, like the server). */
+export function countAbove(groups: AutotagGroup[], threshold: number): number {
+  return groups.reduce((n, g) => n + g.tracks.filter((t) => t.status === 'pending' && t.confidence >= threshold).length, 0);
+}
+
+/** Fields that differ, for a group header: the union over its tracks, in display order. */
+export function groupChanges(g: AutotagGroup): AutotagField[] {
+  const s = new Set(g.tracks.flatMap((t) => t.changes));
+  return AUTOTAG_FIELDS.map((f) => f.key).filter((k) => s.has(k));
+}
+
+/** Human size for duplicate copies. */
+export function qualityText(t: Pick<DuplicateTrack, 'codec' | 'bitrate' | 'sampleRate' | 'bitsPerSample'>): string {
+  const parts = [t.codec ?? '?'];
+  if (t.bitsPerSample && t.sampleRate) parts.push(`${t.bitsPerSample}-bit/${(t.sampleRate / 1000).toFixed(t.sampleRate % 1000 ? 1 : 0)} kHz`);
+  else if (t.sampleRate) parts.push(`${(t.sampleRate / 1000).toFixed(1)} kHz`);
+  if (t.bitrate) parts.push(`${t.bitrate} kbps`);
+  return parts.join(' · ');
 }

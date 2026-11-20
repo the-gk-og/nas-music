@@ -31,6 +31,9 @@ timezone = "Europe/London"         # nightly mixes run at 02:00, discovery Sunda
 opus_cache_gb = 20                 # LRU limit for transcoded Opus files
 # model_version = "effnet-discogs-1"  # analysis model; "basic-1" = ffmpeg-only fallback
 # lastfm_api_key = ""              # optional, used by weekly discovery
+# acoustid_api_key = ""            # optional, automatic tag fixing (Admin > Tag fixing). Free for
+#                                  # non-commercial use: sign in at https://acoustid.org/new-application,
+#                                  # register an application (any name/version) and paste its API key here.
 # scan_interval_minutes = 5
 
 # ---- Casting to speakers (deploy/README.md "Casting to speakers") ----

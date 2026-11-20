@@ -1,12 +1,14 @@
 <script lang="ts">
   // Admin console: desktop-first (section list on the left), chips on phones.
-  import { Activity, ArrowLeft, Baby, Bug, DatabaseBackup, HeartPulse, Library, ScrollText, Settings, Tags, Users } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Baby, Bug, Copy, DatabaseBackup, HeartPulse, Library, ScrollText, Settings, Tags, Users, WandSparkles } from '@lucide/svelte';
   import { appearance } from '../../lib/appearance.svelte';
   import { session } from '../../lib/session.svelte';
   import { ui } from '../../lib/ui.svelte';
+  import AutotagAdmin from './AutotagAdmin.svelte';
   import Backups from './Backups.svelte';
   import Dashboard from './Dashboard.svelte';
   import FamilyAdmin from './FamilyAdmin.svelte';
+  import DuplicatesAdmin from './DuplicatesAdmin.svelte';
   import Health from './Health.svelte';
   import LibraryAdmin from './LibraryAdmin.svelte';
   import Logs from './Logs.svelte';
@@ -21,6 +23,8 @@
     { id: 'library', label: 'Library', icon: Library },
     { id: 'tags', label: 'Tags', icon: Tags },
     { id: 'family', label: 'Family & explicit', icon: Baby },
+    { id: 'autotag', label: 'Tag fixing', icon: WandSparkles },
+    { id: 'duplicates', label: 'Duplicates', icon: Copy },
     { id: 'health', label: 'Health & pruning', icon: HeartPulse },
     { id: 'logs', label: 'Logs & jobs', icon: ScrollText },
     { id: 'reports', label: 'Bug reports', icon: Bug },
@@ -56,6 +60,8 @@
       {:else if section === 'library'}<LibraryAdmin />
       {:else if section === 'tags'}<TagsAdmin />
       {:else if section === 'family'}<FamilyAdmin />
+      {:else if section === 'autotag'}<AutotagAdmin />
+      {:else if section === 'duplicates'}<DuplicatesAdmin />
       {:else if section === 'health'}<Health />
       {:else if section === 'logs'}<Logs />
       {:else if section === 'reports'}<Reports />

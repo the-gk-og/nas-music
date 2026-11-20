@@ -356,15 +356,16 @@ def migrate_v4_to_v5(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
     return True
 
 
-# ---------- v5 -> v6 (explicit-content flags, family mode) ----------
+# ---------- v5 -> v6 (explicit flags, family mode, automatic tag fixing, duplicates) ----------
 
-V6_TABLES = ("track_explicit", "family_mode")
+V6_TABLES = ("track_explicit", "family_mode",
+             "fingerprints", "acoustid_lookups", "mb_releases", "autotag_suggestions", "duplicate_hidden")
 
 
 def _rebuild_tag_overrides(conn: sqlite3.Connection, stmts: list[str]) -> None:
-    """tag_overrides gains the field 'explicit' in its CHECK constraint: rebuild it (rows kept)."""
+    """Widen the tag_overrides.field CHECK ('explicit' and the MusicBrainz id fields). Rows are copied unchanged."""
     sql = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tag_overrides'").fetchone()
-    if sql is None or "'explicit'" in sql[0]:
+    if sql is None or ("'explicit'" in sql[0] and "mb_track" in sql[0]):
         return
     conn.execute(_create_table(stmts, "tag_overrides", "tag_overrides__v6"))
     conn.execute("INSERT INTO tag_overrides__v6 (track_id, field, value, updated_by, updated_at) "
@@ -374,8 +375,8 @@ def _rebuild_tag_overrides(conn: sqlite3.Connection, stmts: list[str]) -> None:
 
 
 def migrate_v5_to_v6(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
-    """Two new tables and a rebuild of tag_overrides (one transaction, foreign keys off). The explicit job
-    fills track_explicit afterwards. Returns True if it migrated."""
+    """New tables and a rebuild of tag_overrides (data kept, one transaction, foreign keys off). The explicit
+    job fills track_explicit afterwards. Returns True if it migrated."""
     if current_version(conn) != 5:
         return False
     if make_backup:

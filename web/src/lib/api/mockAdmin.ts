@@ -1,6 +1,11 @@
 // Mock of the admin console endpoints (see admin.ts). State lives here; mock.ts routes /admin/* to it.
 import type {
   AdminSettings,
+  AutotagField,
+  AutotagGroup,
+  AutotagStatus,
+  AutotagSuggestion,
+  DuplicateGroup,
   Backup,
   BugReportDetail,
   FailedFile,
@@ -227,5 +232,167 @@ export class MockAdmin {
     }
     this.settings = { ...this.settings, ...b };
     return { values: this.settings, restartRequired: restart };
+  }
+
+  // ---- tag fixing + duplicates (v6) ----
+  autotag: AutotagGroup[] = [
+    {
+      groupId: 'al1~rel1',
+      albumId: 'al1',
+      currentAlbum: 'spotify download',
+      currentAlbumArtist: 'Various Artists',
+      albumHasArt: false,
+      confidence: 0.93,
+      albumTrackCount: 2,
+      release: {
+        mbid: '00000000-0000-0000-0000-00000000aaaa',
+        title: 'Aurora Lane',
+        artist: 'The Lanterns',
+        year: 2019,
+        country: 'GB',
+        format: 'Digital Media',
+        trackCount: 10,
+        type: 'Album',
+        hasCover: false,
+      },
+      tracks: [1, 2].map((n) => ({
+        trackId: `t0_${n}`,
+        path: `spotify download/Song ${n} (2).flac`,
+        status: 'pending' as const,
+        confidence: n === 1 ? 0.96 : 0.88,
+        current: {
+          title: `Song ${n} (2)`,
+          artist: 'The Lanterns',
+          albumArtist: null,
+          album: 'spotify download',
+          trackNo: null,
+          discNo: null,
+          year: null,
+          genre: null,
+        },
+        suggested: {
+          title: `Song ${n}`,
+          artist: 'The Lanterns',
+          albumArtist: 'The Lanterns',
+          album: 'Aurora Lane',
+          trackNo: n,
+          discNo: 1,
+          year: 2019,
+          genre: 'Indie Pop',
+          mbRecordingId: `00000000-0000-0000-0000-00000000000${n}`,
+        },
+        changes: ['title', 'albumArtist', 'album', 'trackNo', 'discNo', 'year', 'genre', 'mbRecordingId'] as AutotagField[],
+        defaultFields: ['title', 'albumArtist', 'album', 'trackNo', 'discNo', 'year', 'genre', 'mbRecordingId'] as AutotagField[],
+        detail: { acoustidScore: 0.97, durationDiffS: 0.4, onRelease: true },
+      })),
+    },
+  ];
+  dups: DuplicateGroup[] = [
+    {
+      groupId: 't0_1',
+      similarity: 0.97,
+      hiddenCount: 0,
+      tracks: [
+        {
+          id: 't0_1',
+          path: 'The Lanterns/Aurora Lane/01 Song 1.flac',
+          title: 'Song 1',
+          artist: 'The Lanterns',
+          album: 'Aurora Lane',
+          durationS: 201,
+          codec: 'FLAC',
+          bitrate: 900,
+          sampleRate: 44100,
+          bitsPerSample: 16,
+          bytes: 23e6,
+          hidden: false,
+          keptId: null,
+          recommended: true,
+        },
+        {
+          id: 't0_2',
+          path: 'spotify download/Song 1 (2).mp3',
+          title: 'Song 1',
+          artist: 'The Lanterns',
+          album: 'spotify download',
+          durationS: 201,
+          codec: 'MP3',
+          bitrate: 320,
+          sampleRate: 44100,
+          bitsPerSample: null,
+          bytes: 8e6,
+          hidden: false,
+          keptId: null,
+          recommended: false,
+        },
+      ],
+    },
+  ];
+  autotagStatus(): AutotagStatus {
+    const all = this.autotag.flatMap((g) => g.tracks);
+    const n = (s: string) => all.filter((t) => t.status === s).length;
+    return {
+      apiKeyConfigured: true,
+      fpcalcAvailable: true,
+      running: false,
+      tracks: 1340,
+      fingerprinted: 1210,
+      fingerprintFailed: 3,
+      matched: 1100,
+      noMatch: 107,
+      lookupErrors: 0,
+      pending: n('pending'),
+      accepted: n('accepted'),
+      rejected: n('rejected'),
+    };
+  }
+  autotagGroups(status: string) {
+    const groups = this.autotag
+      .map((g) => ({
+        ...g,
+        tracks: g.tracks.filter((t) => t.status === status),
+      }))
+      .filter((g) => g.tracks.length);
+    return { total: groups.length, groups };
+  }
+  autotagDecide(
+    b: { trackIds?: string[]; groupIds?: string[]; minConfidence?: number },
+    to: AutotagSuggestion['status'],
+    from: AutotagSuggestion['status'] = 'pending',
+  ) {
+    let n = 0;
+    for (const g of this.autotag)
+      for (const t of g.tracks)
+        if (
+          t.status === from &&
+          (b.trackIds?.includes(t.trackId) || b.groupIds?.includes(g.groupId) || (b.minConfidence != null && t.confidence >= b.minConfidence))
+        ) {
+          t.status = to;
+          n++;
+        }
+    return n;
+  }
+  resolveDup(keep: string, hide: string[]) {
+    for (const g of this.dups)
+      for (const t of g.tracks)
+        if (hide.includes(t.id)) {
+          t.hidden = true;
+          t.keptId = keep;
+        } else if (t.id === keep) t.hidden = false;
+    for (const g of this.dups) g.hiddenCount = g.tracks.filter((t) => t.hidden).length;
+    return { hidden: hide.length, keptId: keep };
+  }
+  unhideDup(ids: string[]) {
+    let n = 0;
+    for (const g of this.dups) {
+      for (const t of g.tracks)
+        if (ids.includes(t.id) && t.hidden) {
+          t.hidden = false;
+          t.keptId = null;
+          n++;
+        }
+      g.hiddenCount = g.tracks.filter((t) => t.hidden).length;
+    }
+    return { unhidden: n };
   }
 }
