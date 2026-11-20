@@ -16,7 +16,7 @@ def test_v5_to_v6(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == db.SCHEMA_VERSION == 6
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     for t in ("jams", "jam_guests", "jam_requests", "jam_votes"):
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
     assert conn.execute("SELECT username FROM users").fetchone()[0] == "owner"

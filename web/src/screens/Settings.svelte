@@ -8,6 +8,7 @@
   import type { LevellingMode } from '../lib/listening';
   import { session } from '../lib/session.svelte';
   import { ui } from '../lib/ui.svelte';
+  import VoiceSettings from '../components/VoiceSettings.svelte';
 
   import type { DataSummary } from '../lib/types';
 
@@ -183,6 +184,8 @@
       <input type="checkbox" class="switch" checked={family.mode.hideUnknown} onchange={async (e) => { const el = e.currentTarget; if (!(await family.set({ hideUnknown: el.checked }))) el.checked = family.mode.hideUnknown; }} />
     </label>
   {/if}
+
+  <VoiceSettings />
 
   <div class="section-title">Data &amp; recommendations</div>
   <p class="pad muted small">

@@ -47,6 +47,34 @@ export interface Track {
 
 export type ExplicitStatus = 'explicit' | 'probable' | 'clean' | 'unknown';
 
+/** v7 voice control (Home Assistant Assist). The token itself is only in the create response. */
+export interface VoiceToken {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsed: string | null;
+  token?: string;
+}
+
+export interface VoiceDevice {
+  id: string;
+  name: string;
+  kind: string;
+  castType?: string;
+  online: boolean;
+  aliases: string[];
+  isDefault: boolean;
+}
+
+export interface VoiceResult {
+  ok: boolean;
+  intent: string;
+  speech: string;
+  device?: { id: string; name: string };
+  item?: { kind: string; id: string | null; title: string };
+  queueId?: string;
+}
+
 export interface FamilyMode {
   enabled: boolean;
   hideProbable: boolean;

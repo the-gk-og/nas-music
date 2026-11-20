@@ -18,6 +18,8 @@ import type {
   ToGetStatus,
   DataSummary,
   FamilyMode,
+  VoiceDevice,
+  VoiceToken,
   AdminUser,
   Album,
   Artist,
@@ -283,6 +285,13 @@ export class ApiClient {
   family = () => this.get<FamilyMode>('/me/family');
   putFamily = (b: Partial<Pick<FamilyMode, 'enabled' | 'hideProbable' | 'hideUnknown'>> & { pin?: string }) =>
     this.put<FamilyMode>('/me/family', b);
+  /** v7 voice control: tokens for Home Assistant (POST /voice/command only) and device aliases. */
+  voiceTokens = () => this.get<{ tokens: VoiceToken[] }>('/me/voice/tokens');
+  createVoiceToken = (name: string) => this.post<VoiceToken & { token: string }>('/me/voice/tokens', { name });
+  revokeVoiceToken = (id: string) => this.del<void>(`/me/voice/tokens/${encodeURIComponent(id)}`);
+  voiceDevices = () => this.get<{ devices: VoiceDevice[] }>('/me/voice/devices');
+  putVoiceDevice = (id: string, b: { aliases?: string[]; isDefault?: boolean }) =>
+    this.put<{ id: string; aliases: string[]; isDefault: boolean }>(`/me/voice/devices/${encodeURIComponent(id)}`, b);
   dataExportUrl = () => `${this.base}/me/data/export`;
   dataExport = () => this.get<unknown>('/me/data/export');
   deleteData = (signal: string) =>

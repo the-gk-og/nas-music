@@ -105,6 +105,22 @@ class SpeakerConn:
         return True
 
 
+class RemoteConn:
+    """A requester with no socket (voice control): it can't play; whatever the Hub would send it (errors) is
+    collected in `sent`."""
+
+    ws = None
+    can_play = False
+
+    def __init__(self, device_id: str, name: str, kind: str = "voice"):
+        self.device_id, self.name, self.kind = device_id, name, kind
+        self.sent: list[dict] = []
+
+    async def send(self, msg: dict) -> bool:
+        self.sent.append(msg)
+        return True
+
+
 @dataclass
 class UserHub:
     state: dict = field(default_factory=default_state)
@@ -196,6 +212,42 @@ class Hub:
     def snapshot(self, uid: str) -> dict | None:
         u = self.users.get(uid)
         return dict(u.state) if u else None
+
+    # ---------- remote control without a socket (voice; must run on the Hub's loop) ----------
+
+    async def ensure_speakers(self, timeout_s: float = 6.0) -> None:
+        """Start speaker discovery; right after a server start, wait (bounded) for the first round."""
+        self.loop = self.loop or asyncio.get_running_loop()
+        reg = self.speakers
+        if reg is None or not reg.enabled:
+            return
+        reg.start()
+        if reg.last_refresh is None:
+            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                await asyncio.wait_for(reg.refresh(), timeout_s)
+
+    async def devices_now(self, uid: str) -> list[dict]:
+        return self._devices(await self._user(uid))
+
+    async def state_now(self, uid: str) -> dict:
+        u = await self._user(uid)
+        st = dict(u.state)
+        st["positionMs"] = position_now(st)
+        return st
+
+    async def remote(self, uid: str, msg: dict, requester: RemoteConn) -> list[dict]:
+        """Run a `command` or `transfer` message as if a remote device sent it. Returns the errors."""
+        self.loop = self.loop or asyncio.get_running_loop()
+        u = await self._user(uid)
+        t = msg.get("type")
+        n = len(requester.sent)
+        if t == "command":
+            await self._on_command(uid, u, requester, msg)
+        elif t == "transfer":
+            await self._on_transfer(uid, u, requester, msg)
+        else:
+            raise ValueError(f"unsupported remote message {t!r}")
+        return [m for m in requester.sent[n:] if m.get("type") == "error"]
 
     # ---------- internals ----------
 

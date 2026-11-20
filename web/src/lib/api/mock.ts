@@ -70,6 +70,8 @@ export class MockBackend {
   hub = new MockHub(this);
   admin = new MockAdmin();
   family = { enabled: false, hideProbable: true, hideUnknown: false, locked: false, hasPin: false };
+  voiceTokens: { id: string; name: string; createdAt: string; lastUsed: string | null }[] = [];
+  voicePrefs = new Map<string, { aliases: string[]; isDefault: boolean }>();
   pinsList: { type: PinType; id: string }[] = [];
   toget: ToGetItem[] = [];
   catalog: CatalogItem[] = [];
@@ -250,6 +252,31 @@ export class MockBackend {
         for (const k of ['enabled', 'hideProbable', 'hideUnknown'] as const) if (typeof b[k] === 'boolean') this.family[k] = b[k]!;
       }
       return this.family;
+    }
+    if (path === '/me/voice/tokens') {
+      if (method === 'POST') {
+        const t = { id: `vt${this.voiceTokens.length + 1}`, name: String(body.name || 'Home Assistant'), createdAt: iso(), lastUsed: null };
+        this.voiceTokens.unshift(t);
+        return { ...t, token: `nmv_mock${Math.random().toString(36).slice(2)}` };
+      }
+      return { tokens: this.voiceTokens };
+    }
+    if ((r = m(/^\/me\/voice\/tokens\/([^/]+)$/)) && method === 'DELETE') {
+      this.voiceTokens = this.voiceTokens.filter((t) => t.id !== decodeURIComponent(r![1]));
+      return undefined;
+    }
+    if (path === '/me/voice/devices')
+      return {
+        devices: this.hub.devices().filter((d) => d.canPlay).map((d) => ({ id: d.id, name: d.name, kind: d.kind, online: d.online, ...(this.voicePrefs.get(d.id) ?? { aliases: [], isDefault: false }) })),
+      };
+    if ((r = m(/^\/me\/voice\/devices\/(.+)$/)) && method === 'PUT') {
+      const id = decodeURIComponent(r[1]);
+      const cur = this.voicePrefs.get(id) ?? { aliases: [], isDefault: false };
+      const b = body as { aliases?: string[]; isDefault?: boolean };
+      if (b.isDefault) for (const v of this.voicePrefs.values()) v.isDefault = false;
+      const next = { aliases: b.aliases ?? cur.aliases, isDefault: b.isDefault ?? cur.isDefault };
+      this.voicePrefs.set(id, next);
+      return { id, ...next };
     }
     if (path === '/me/data') {
       if (method === 'DELETE') return undefined;

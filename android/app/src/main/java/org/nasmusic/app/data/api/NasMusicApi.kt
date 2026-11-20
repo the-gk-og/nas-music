@@ -117,6 +117,22 @@ interface NasMusicApi {
     @PUT("me/family")
     suspend fun putFamily(@Body body: FamilyUpdate): FamilyMode
 
+    // v7 voice control (Home Assistant): voice tokens only work on POST /voice/command.
+    @GET("me/voice/tokens")
+    suspend fun voiceTokens(): VoiceTokens
+
+    @POST("me/voice/tokens")
+    suspend fun createVoiceToken(@Body body: NewVoiceToken): VoiceToken
+
+    @DELETE("me/voice/tokens/{id}")
+    suspend fun revokeVoiceToken(@Path("id") id: String): Response<Unit>
+
+    @GET("me/voice/devices")
+    suspend fun voiceDevices(): VoiceDevices
+
+    @PUT("me/voice/devices/{id}")
+    suspend fun putVoiceDevice(@Path("id") id: String, @Body body: VoiceDevicePrefs): VoiceDevicePrefs
+
     @PUT("me/settings")
     suspend fun putMySettings(@Body body: UserSettings): Response<Unit>
 

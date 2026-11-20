@@ -179,3 +179,9 @@ runs when the first device connects and then every 5 minutes. Set `cast_enabled 
 **Android.** The `foss` APK uses only the above. The `full` APK also has a Google Cast button in the Devices
 sheet, which casts the phone's queue straight to a Chromecast. It still uses the server's signed URLs, so
 port 8090 must be reachable from the Chromecast.
+
+## Voice control (Home Assistant Assist)
+
+"Play my Pop radio in the bedroom", "skip", "what's playing?" from Home Assistant voice satellites or the HA
+app: create a voice token in nas-music's Settings → Voice control and follow
+[`homeassistant/README.md`](homeassistant/README.md) (one YAML package, no add-ons).

@@ -103,6 +103,33 @@ data class FamilyMode(
     val hasPin: Boolean = false,
 )
 
+// v7 voice control
+@Serializable
+data class VoiceToken(val id: String, val name: String, val createdAt: String, val lastUsed: String? = null, val token: String? = null)
+
+@Serializable
+data class VoiceTokens(val tokens: List<VoiceToken> = emptyList())
+
+@Serializable
+data class NewVoiceToken(val name: String)
+
+@Serializable
+data class VoiceDevice(
+    val id: String,
+    val name: String,
+    val kind: String = "other",
+    val castType: String? = null,
+    val online: Boolean = false,
+    val aliases: List<String> = emptyList(),
+    val isDefault: Boolean = false,
+)
+
+@Serializable
+data class VoiceDevices(val devices: List<VoiceDevice> = emptyList())
+
+@Serializable
+data class VoiceDevicePrefs(val id: String? = null, val aliases: List<String>? = null, val isDefault: Boolean? = null)
+
 @Serializable
 data class FamilyUpdate(
     val enabled: Boolean? = null,
