@@ -104,6 +104,12 @@ class AppContainer(val context: Context) {
     val contextCollector = ContextCollector(context, scope)
     val feeds = org.nasmusic.app.data.FeedRepository(api)
     val family = org.nasmusic.app.data.FamilyRepository { api }.also { f -> connect.onFamilyChanged = { f.changed(it) } }
+    /** api 0.7 notifications: Connect pushes + catch-up on every (re)connect; NewMusicWorker polls in the background. */
+    val notifications = org.nasmusic.app.notify.NotificationRepository(context) { api }.also { n ->
+        connect.onNotification = { pushed -> scope.launch { if (pushed == null) n.catchUp() else n.pushed(pushed) } }
+    }
+    /** A screen to open from a notification tap (MainActivity sets it, NasMusicRoot navigates). */
+    val pendingRoute = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
     /** Keep both addresses (and, via the tunnel, the LAN pin) current from /server-info. */
     fun startServerInfoRefresh() = scope.launch {

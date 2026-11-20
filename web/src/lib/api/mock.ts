@@ -71,6 +71,34 @@ export class MockBackend {
   latencyMs = 60;
   hub = new MockHub(this);
   admin = new MockAdmin();
+  notes: { id: string; kind: string; title: string; body: string; data: Record<string, unknown>; createdAt: string; read: boolean }[] = [
+    { id: 'n1', kind: 'new_music', title: '12 new songs', body: '2 new albums from AJR', data: { tracks: 12, albums: 2 }, createdAt: new Date().toISOString(), read: false },
+  ];
+  scrobbles: Record<string, { connected: boolean; enabled: boolean; nowPlaying: boolean; username: string | null }> = {
+    listenbrainz: { connected: false, enabled: false, nowPlaying: true, username: null },
+    lastfm: { connected: false, enabled: false, nowPlaying: true, username: null },
+  };
+  private scrobbleMock(path: string, method: string, body: Record<string, unknown>) {
+    const parts = path.split('/'); // ['', 'me', 'scrobble', service?, action?]
+    const svc = parts[3];
+    const s = svc ? this.scrobbles[svc] : undefined;
+    if (svc === 'lastfm' && parts[4] === 'connect') return { authUrl: 'https://www.last.fm/api/auth/?api_key=demo&token=demo' };
+    if (s && parts[4] === 'complete') Object.assign(s, { connected: true, enabled: true, username: 'demo' });
+    if (s && parts[4] === 'connect') Object.assign(s, { connected: true, enabled: true, username: 'demo' });
+    if (s && !parts[4] && method === 'DELETE') Object.assign(s, { connected: false, enabled: false, username: null });
+    if (s && !parts[4] && method === 'PUT') {
+      if (typeof body.enabled === 'boolean') s.enabled = body.enabled;
+      if (typeof body.nowPlaying === 'boolean') s.nowPlaying = body.nowPlaying;
+    }
+    return {
+      services: Object.entries(this.scrobbles).map(([service, v]) => ({
+        service, available: true, ...v, needsReauth: false, lastScrobbleAt: v.connected ? iso() : null, pending: 0, failed: 0, sent: v.connected ? 42 : 0,
+      })),
+      import: null,
+      importedEvents: 0,
+      ...(parts[4] === 'import' && method === 'DELETE' ? { removed: 0 } : {}),
+    };
+  }
   family = { enabled: false, hideProbable: true, hideUnknown: false, locked: false, hasPin: false };
   voiceTokens: { id: string; name: string; createdAt: string; lastUsed: string | null }[] = [];
   voicePrefs = new Map<string, { aliases: string[]; isDefault: boolean }>();
@@ -262,6 +290,17 @@ export class MockBackend {
     if (path === '/me/settings') {
       if (method === 'PUT') Object.assign(this.settings, (body.settings as Record<string, unknown>) ?? {});
       return { settings: this.settings };
+    }
+    if (path === '/me/scrobble' || path.startsWith('/me/scrobble/')) return this.scrobbleMock(path, method, body);
+    if (path === '/me/notifications') return { items: this.notes, unread: this.notes.filter((n) => !n.read).length };
+    if (path === '/me/notifications/read') {
+      const n = this.notes.filter((x) => !x.read).length;
+      this.notes = this.notes.map((x) => ({ ...x, read: true }));
+      return { marked: n, unread: 0 };
+    }
+    if (path === '/library/new') {
+      const albums = L.albums.slice(0, 2);
+      return { since: iso(), days: 7, albums, tracks: L.tracks.filter((t) => !albums.some((a) => a.id === t.albumId)).slice(0, 3).map((t) => this.pub(t)) };
     }
     if (path === '/me/family') {
       if (method === 'PUT') {

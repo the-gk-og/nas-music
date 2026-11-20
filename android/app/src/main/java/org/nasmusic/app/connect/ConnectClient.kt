@@ -51,6 +51,8 @@ class ConnectClient(
     /** v5: live playlist changes for open playlist screens (dropped when nobody listens). */
     /** Set by AppContainer: forwards Connect "family" pushes to FamilyRepository. */
     var onFamilyChanged: ((org.nasmusic.app.data.api.FamilyMode) -> Unit)? = null
+    /** Set by AppContainer: Connect "notification" pushes, and null after every welcome (catch up). */
+    var onNotification: ((org.nasmusic.app.data.api.AppNotification?) -> Unit)? = null
     private val _playlistChanges = kotlinx.coroutines.flow.MutableSharedFlow<ConnectMessage.PlaylistChanged>(extraBufferCapacity = 16)
     val playlistChanges: kotlinx.coroutines.flow.SharedFlow<ConnectMessage.PlaylistChanged> = _playlistChanges
 
@@ -144,6 +146,7 @@ class ConnectClient(
                 _myId.value = m.deviceId
                 _devices.value = m.devices
                 m.state?.let { _state.value = it }
+                onNotification?.invoke(null)
             }
             is ConnectMessage.Devices -> _devices.value = m.devices
             is ConnectMessage.State -> if (ConnectProtocol.accept(_state.value, m.state)) _state.value = m.state
@@ -156,6 +159,7 @@ class ConnectClient(
             is ConnectMessage.Error -> if (m.source == "speaker" && m.detail.isNotBlank()) onSpeakerError(m.detail)
             is ConnectMessage.PlaylistChanged -> _playlistChanges.tryEmit(m)
             is ConnectMessage.FamilyChanged -> onFamilyChanged?.invoke(m.family)
+            is ConnectMessage.Notification -> onNotification?.invoke(m.notification)
             else -> Unit
         }
     }

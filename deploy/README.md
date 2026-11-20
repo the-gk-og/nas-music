@@ -75,6 +75,23 @@ stays read-only.
    "accept all ≥ 90%". **Admin → Duplicates** uses the same fingerprints to hide extra copies
    ("Song (2).flac"); nothing is deleted.
 
+## Scrobbling and "new music" notifications (schema v7)
+
+Scrobbling is per user and off until they connect an account in **Settings → Scrobbling** (web, desktop or
+Android). The server scrobbles from the listening events every client already sends, so a play counts once
+whichever device (or speaker) played it; unsent scrobbles are queued and retried with backoff.
+- **ListenBrainz** (open source, no server setup): each user pastes their user token from
+  https://listenbrainz.org/settings/. They can also import their ListenBrainz history so mixes learn from it
+  (imported listens are marked and can be removed again).
+- **Last.fm** needs one API account for the server: sign in at https://www.last.fm/api/account/create,
+  create an application (name e.g. "nas-music"; callback URL can stay empty), then add to `config.toml`:
+  `lastfm_api_key = "<API key>"` and `lastfm_api_secret = "<Shared secret>"`, and restart the container.
+  Users then press **Connect Last.fm**, approve it on last.fm, and the app finishes the connection.
+- **New music added**: users switch on **Settings → Notifications → New music added**. After each scan that
+  adds songs, they get one notification ("12 new songs: 2 new albums from AJR"). Web/desktop show it live
+  (plus an optional desktop notification); Android shows a system notification (checked about hourly with
+  WorkManager — no Google push). **Library → New this week** lists what was added.
+
 ## Getting the server image (Phase 2)
 
 GitHub Actions builds `ghcr.io/the-gk-og/nasmusic:latest` on every push to `main` that changes `server/`.

@@ -165,6 +165,7 @@ private fun MainScaffold(c: AppContainer) {
             }
         }
     }
+    LaunchedEffect(Unit) { c.pendingRoute.collect { r -> if (r != null) { c.pendingRoute.value = null; runCatching { ui.go(r) } } } }
     LaunchedEffect(current) { org.nasmusic.app.diag.CrashLog.currentScreen = current ?: "?" }
     // Offer a bug report once after a crash.
     LaunchedEffect(Unit) { if (org.nasmusic.app.diag.CrashLog.hasUnsentCrash()) ui.bugReport = true }

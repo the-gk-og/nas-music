@@ -16,6 +16,13 @@ info:
     /art/artist/{id}: photo from Wikimedia Commons with licence + attribution, bio from Wikipedia, genres,
     years active and links from MusicBrainz/Wikidata, top songs, albums/singles, appears-on, similar artists).
     Artist ShelfItems use the artist photo as `artUrl` when there is one.
+    0.7.0 (schema v7): scrobbling and "new music added" notifications. The server scrobbles each user's
+    qualifying play/skip events (track >= 30 s, played >= half or 4 min) to ListenBrainz and/or Last.fm
+    (/me/scrobble*, opt-in; a device opts out with the setting `device.<deviceId>.scrobble: false`), and sends
+    "now playing" from the Connect state. Optional ListenBrainz history import adds events marked as imported
+    (removable). After each library scan, users with the setting `notify.newMusic: true` get ONE batched
+    notification (/me/notifications), pushed over Connect as `{"type": "notification", "notification":
+    Notification}`; clients without a socket poll `GET /me/notifications?since=`. GET /library/new = "New this week".
     0.6.0 (schema v6): explicit-content flags and family mode. Track gains `explicit`
     (explicit|probable|clean|unknown; show an "E" badge for explicit) and, in queues/playlists only,
     `familyHidden`; Album gains `explicit` (contains explicit tracks). With family mode on, the server hides
@@ -699,7 +706,9 @@ paths:
         The user's synced settings: a flat map of client-defined keys to JSON values, shared by all their devices.
         Known keys: `offline.favourites` (bool) and the §10 data switches `context.listening`, `context.output`,
         `context.device`, `context.motion`, `context.location`, `context.weather`, `context.search`, `context.time`,
-        `context.health` (bool, default false). A per-device override is stored as `device.<deviceId>.<key>`.
+        `context.health` (bool, default false), v7 `notify.newMusic` (bool, default false: one notification
+        per library scan that added music) and `device.<deviceId>.scrobble` (bool, default true: false = plays
+        from that device are never scrobbled). A per-device override is stored as `device.<deviceId>.<key>`.
         v3 appearance keys (docs/v3-ux.md §7; validated on PUT): `appearance.animations` off|quick|expressive
         (default quick), `appearance.defaultView` grid|list, `appearance.albumPage` big|simple,
         `appearance.accent` green|blue|purple|pink|orange|red|teal or "#rrggbb", `home.shelves` / `foryou.shelves`
@@ -1314,7 +1323,8 @@ paths:
         Client → server: `hello`, `state` (PlaybackState, active device only), `command`, `transfer`, `ping`.
         Server → client: `welcome {deviceId, devices, state}`, `devices {devices}`, `state` (PlaybackState),
         `command {action, args, fromDeviceId}`, `takeover {state}`, `release`, `queues {queueId}`, `pong`,
-        `error {detail, source?}` (`source: speaker` = a speaker problem worth showing the user), and (v5)
+        `error {detail, source?}` (`source: speaker` = a speaker problem worth showing the user),
+        `notification {notification}` (v7, a new Notification for this user, e.g. new music added), and (v5)
         `playlist {playlistId, rev, deleted}` — sent to every device of the owner and every member when a playlist
         changes (refetch it unless you already have that `rev`; `deleted: true` = deleted, or you lost access).
         Clients must ignore message types they don't know. Speakers (`kind: speaker`, see /cast/speakers) are
@@ -2950,6 +2960,196 @@ paths:
           description: the user's upload settings
           content: { application/json: { schema: { $ref: '#/components/schemas/AdminUploadUser' } } }
         '404': { description: no such user }
+  /me/scrobble:
+    get:
+      summary: v7. Scrobbling status for ListenBrainz and Last.fm (tokens are never returned).
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ScrobbleStatus' } } }
+  /me/scrobble/{service}:
+    parameters:
+      - { name: service, in: path, required: true, schema: { type: string, enum: [listenbrainz, lastfm] } }
+    put:
+      summary: v7. Turn scrobbling / "now playing" on or off for a connected service. 409 if not connected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                nowPlaying: { type: boolean }
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ScrobbleStatus' } } }
+        '409': { description: not connected }
+    delete:
+      summary: v7. Disconnect (forgets the token and drops unsent scrobbles for that service).
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ScrobbleStatus' } } }
+  /me/scrobble/listenbrainz/connect:
+    post:
+      summary: |
+        v7. Connect ListenBrainz with the user token from https://listenbrainz.org/settings/ (validated with
+        ListenBrainz; 400 if it is rejected, 502 if ListenBrainz is unreachable). Enables scrobbling.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, minLength: 8, maxLength: 200 }
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ScrobbleStatus' } } }
+        '400': { description: token rejected }
+  /me/scrobble/lastfm/connect:
+    post:
+      summary: |
+        v7. Step 1 of Last.fm web auth: open `authUrl` in a browser and approve nas-music there, then call
+        /me/scrobble/lastfm/complete (poll it every few seconds; 409 until approved). 503 when the server has no
+        `lastfm_api_key` / `lastfm_api_secret` (ScrobbleService.available false).
+      responses:
+        '200':
+          description: where to approve
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authUrl]
+                properties:
+                  authUrl: { type: string }
+        '503': { description: Last.fm not set up on this server }
+  /me/scrobble/lastfm/complete:
+    post:
+      summary: v7. Step 2 of Last.fm web auth. 409 = not approved yet (keep polling), 410 = request expired.
+      responses:
+        '200':
+          description: connected; status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ScrobbleStatus' } } }
+        '409': { description: not approved yet, or no connect started }
+        '410': { description: expired; start again }
+  /me/scrobble/retry:
+    post:
+      summary: v7. Send failed scrobbles again, and everything waiting for a retry, now.
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ScrobbleStatus' } } }
+  /me/scrobble/listenbrainz/import:
+    post:
+      summary: |
+        v7. Import the user's ListenBrainz listen history (only listens matching tracks in this library, by
+        recording MBID or artist + title) as play events marked imported, so the recommender learns from them.
+        Idempotent; listens the server already has from a client are skipped; imported events are never
+        scrobbled. Runs in the background (202): progress in ScrobbleStatus.import. 409 if not connected or
+        already running.
+      parameters:
+        - { name: wait, in: query, schema: { type: boolean, default: false }, description: run inline }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                maxListens: { type: integer, minimum: 1, maximum: 100000, default: 100000 }
+      responses:
+        '202':
+          description: started; status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ScrobbleStatus' } } }
+    delete:
+      summary: v7. Remove every imported listen (and the play counts they added).
+      responses:
+        '200':
+          description: removed count + status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ScrobbleStatus'
+                  - type: object
+                    required: [removed]
+                    properties:
+                      removed: { type: integer }
+  /me/notifications:
+    get:
+      summary: |
+        v7. The user's notifications (bell list), newest first. `since` (createdAt of the newest one you have
+        shown) returns only newer ones: Android's periodic WorkManager check uses it to raise system
+        notifications without Google push.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+        - { name: unread, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, unread]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+                  unread: { type: integer, description: unread count (all, not just this page) }
+  /me/notifications/read:
+    post:
+      summary: v7. Mark notifications read (`ids`; omitted = all).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids: { type: array, maxItems: 500, items: { type: string } }
+      responses:
+        '200':
+          description: done
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [marked, unread]
+                properties:
+                  marked: { type: integer }
+                  unread: { type: integer }
+  /library/new:
+    get:
+      summary: |
+        v7. "New this week": albums first added in the last `days` (newest first), then songs added to albums
+        that already existed. Family mode applies.
+      parameters:
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 90, default: 7 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: new music
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [since, days, albums, tracks]
+                properties:
+                  since: { type: string, format: date-time }
+                  days: { type: integer }
+                  albums:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/Album'
+                        - type: object
+                          properties:
+                            addedAt: { type: string, format: date-time }
+                  tracks: { type: array, items: { $ref: '#/components/schemas/Track' } }
 components:
   securitySchemes:
     device: { type: http, scheme: bearer }
@@ -4616,3 +4816,61 @@ components:
         reason: { type: string }
         status: { type: string, enum: [new, want, not_interested, have] }
         createdAt: { type: string, format: date-time }
+    ScrobbleService:
+      type: object
+      required: [service, available, connected, enabled, nowPlaying, needsReauth, pending, failed, sent]
+      properties:
+        service: { type: string, enum: [listenbrainz, lastfm] }
+        available: { type: boolean, description: 'lastfm: false when the server has no Last.fm API key/secret' }
+        connected: { type: boolean }
+        enabled: { type: boolean }
+        username: { type: [string, 'null'], description: the account name on that service }
+        nowPlaying: { type: boolean, description: send "now playing" updates }
+        needsReauth: { type: boolean, description: 'the service rejected the token: paused (nothing lost) until reconnected' }
+        authPending: { type: boolean, description: 'lastfm: a connect was started and not completed' }
+        connectedAt: { type: [string, 'null'], format: date-time }
+        lastScrobbleAt: { type: [string, 'null'], format: date-time }
+        lastError: { type: [string, 'null'] }
+        lastErrorAt: { type: [string, 'null'], format: date-time }
+        pending: { type: integer, description: queued, waiting to be sent or retried }
+        failed: { type: integer, description: given up (POST /me/scrobble/retry sends them again) }
+        sent: { type: integer }
+        ignored: { type: integer, description: rejected by the service (e.g. Last.fm drops plays older than 14 days) }
+    ScrobbleStatus:
+      type: object
+      required: [services, importedEvents]
+      properties:
+        services: { type: array, items: { $ref: '#/components/schemas/ScrobbleService' }, description: 'listenbrainz, lastfm (in that order)' }
+        import:
+          type: [object, 'null']
+          description: last ListenBrainz import
+          properties:
+            state: { type: string, enum: [running, done, error] }
+            startedAt: { type: string, format: date-time }
+            finishedAt: { type: string, format: date-time }
+            scanned: { type: integer }
+            matched: { type: integer }
+            imported: { type: integer }
+            alreadyKnown: { type: integer }
+            unmatched: { type: integer }
+            error: { type: string }
+        importedEvents: { type: integer, description: imported events currently stored }
+    Notification:
+      type: object
+      required: [id, kind, title, body, data, createdAt, read]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [new_music], description: clients must ignore kinds they don't know }
+        title: { type: string, description: 'e.g. "12 new songs"' }
+        body: { type: string, description: 'e.g. "2 new albums from AJR, plus 3 songs from Foo"' }
+        data:
+          type: object
+          description: 'new_music: {tracks, albums, artists[], albumIds[], trackIds[]} (id lists capped at 500)'
+          properties:
+            tracks: { type: integer }
+            albums: { type: integer }
+            artists: { type: array, items: { type: string } }
+            albumIds: { type: array, items: { type: string } }
+            trackIds: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+        read: { type: boolean }

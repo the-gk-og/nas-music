@@ -133,6 +133,7 @@
         <button class="sm" onclick={() => ui.go('list', s.k)}><Icon size={22} fill={s.k === 'favourites' ? 'currentColor' : 'none'} />{s.label}</button>
       {/each}
       <button class="sm" onclick={() => ui.go('list', 'all')}><Tag size={22} />All songs</button>
+      <button class="sm" onclick={() => ui.go('new')}><Sparkles size={22} />New this week</button>
       <button class="sm new" onclick={newPlaylist}><Plus size={22} />New playlist</button>
       <button class="sm new" onclick={() => ui.go('smart-edit', '')}><Sparkles size={22} />New smart playlist</button>
     </div>

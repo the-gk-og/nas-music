@@ -37,6 +37,7 @@ class NasMusicApp : Application(), SingletonImageLoader.Factory {
             }
         }
         EventUploadWorker.enqueue(this)
+        org.nasmusic.app.notify.NewMusicWorker.schedule(this)
     }
 
     /** Cover art goes through the routed call factory so it works on LAN (pinned) and tunnel. */

@@ -418,7 +418,7 @@ def migrate_v5_to_v6(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
 # ---------- v6 -> v7 (combined: see V7_TABLES and schema.sql header) ----------
 
 V7_TABLES = ("voice_tokens", "voice_devices", "upload_access", "uploads", "upload_sessions", "smart_playlists",
-             "smart_playlist_tracks", "artist_info")
+             "smart_playlist_tracks", "artist_info", "scrobble_accounts", "scrobble_queue", "notifications")
 
 
 def migrate_v6_to_v7(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
@@ -435,6 +435,9 @@ def migrate_v6_to_v7(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
         if current_version(conn) != 6:
             conn.execute("ROLLBACK")
             return False
+        # scrobbling: listens imported from ListenBrainz are marked so they can be removed again
+        if "imported" not in _columns(conn, "events"):
+            conn.execute("ALTER TABLE events ADD COLUMN imported TEXT")
         for t in V7_TABLES:
             if not _table_exists(conn, t):
                 conn.execute(_create_table(stmts, t))

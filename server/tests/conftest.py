@@ -135,6 +135,9 @@ def offline(app):
         app.state.ctx.hub.speakers.discoverers = []  # no mDNS/SSDP/HA/Snapcast from tests
     if app.state.ctx.jobs is not None:
         app.state.ctx.jobs.lrclib = app.state.ctx.lrclib
+    if getattr(app.state.ctx, "scrobbler", None) is not None:   # no background scrobble threads in tests
+        app.state.ctx.scrobbler.auto = False
+        app.state.ctx.scrobbler.transport = httpx.MockTransport(refuse)
     return app
 
 

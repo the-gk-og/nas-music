@@ -20,6 +20,10 @@ import type {
   FamilyMode,
   VoiceDevice,
   VoiceToken,
+  AppNotification,
+  NewMusic,
+  ScrobbleServiceId,
+  ScrobbleStatus,
   AdminUser,
   Album,
   Artist,
@@ -305,6 +309,24 @@ export class ApiClient {
   voiceDevices = () => this.get<{ devices: VoiceDevice[] }>('/me/voice/devices');
   putVoiceDevice = (id: string, b: { aliases?: string[]; isDefault?: boolean }) =>
     this.put<{ id: string; aliases: string[]; isDefault: boolean }>(`/me/voice/devices/${encodeURIComponent(id)}`, b);
+  // ---- v7 scrobbling ----
+  scrobble = () => this.get<ScrobbleStatus>('/me/scrobble');
+  putScrobble = (service: ScrobbleServiceId, b: { enabled?: boolean; nowPlaying?: boolean }) =>
+    this.put<ScrobbleStatus>(`/me/scrobble/${service}`, b);
+  disconnectScrobble = (service: ScrobbleServiceId) => this.del<ScrobbleStatus>(`/me/scrobble/${service}`);
+  connectListenBrainz = (token: string) => this.post<ScrobbleStatus>('/me/scrobble/listenbrainz/connect', { token });
+  lastfmConnect = () => this.post<{ authUrl: string }>('/me/scrobble/lastfm/connect');
+  /** 409 until the user approved nas-music on last.fm; 410 when the request expired. */
+  lastfmComplete = () => this.post<ScrobbleStatus>('/me/scrobble/lastfm/complete');
+  retryScrobbles = () => this.post<ScrobbleStatus>('/me/scrobble/retry');
+  importListenBrainz = () => this.post<ScrobbleStatus>('/me/scrobble/listenbrainz/import', {});
+  removeImported = () => this.del<ScrobbleStatus & { removed: number }>('/me/scrobble/listenbrainz/import');
+
+  // ---- v7 notifications ----
+  notifications = (since?: string, limit = 50) =>
+    this.get<{ items: AppNotification[]; unread: number }>('/me/notifications', { since, limit });
+  readNotifications = (ids?: string[]) => this.post<{ marked: number; unread: number }>('/me/notifications/read', ids ? { ids } : {});
+  newMusic = (days = 7) => this.get<NewMusic>('/library/new', { days });
   dataExportUrl = () => `${this.base}/me/data/export`;
   dataExport = () => this.get<unknown>('/me/data/export');
   deleteData = (signal: string) =>

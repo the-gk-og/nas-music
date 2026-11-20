@@ -211,6 +211,10 @@ fun SettingsScreen(c: AppContainer) {
         AppearanceSettings(c, settings)
 
         HorizontalDivider()
+        Section("Scrobbling")
+        ScrobbleSettings(c)
+
+        HorizontalDivider()
         Section("Data & recommendations")
         OutlinedButton(onClick = { ui.go("data") }) { Text("Choose what to collect") }
 

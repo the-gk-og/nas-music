@@ -1,6 +1,7 @@
 <script lang="ts">
   // Desktop main-area bar: back/forward, global search (/ or Ctrl+K), avatar.
-  import { ChevronLeft, ChevronRight, Search } from '@lucide/svelte';
+  import { Bell, ChevronLeft, ChevronRight, Search } from '@lucide/svelte';
+  import { notifications } from '../lib/notifications.svelte';
   import { appearance } from '../lib/appearance.svelte';
   import { session } from '../lib/session.svelte';
   import { ui } from '../lib/ui.svelte';
@@ -18,6 +19,9 @@
     <Search size={18} /><span>What do you want to play?</span><kbd>Ctrl K</kbd>
   </button>
   <span class="sp"></span>
+  <button class="round bell" aria-label={notifications.unread ? `Notifications (${notifications.unread} new)` : 'Notifications'} title="New music" onclick={() => ui.go('new')}>
+    <Bell size={18} />{#if notifications.unread}<span class="badge">{notifications.unread > 9 ? '9+' : notifications.unread}</span>{/if}
+  </button>
   <button class="me" aria-label="Profile and settings" onclick={() => ui.open({ kind: 'profile' })}><Avatar name={session.saved.username ?? '?'} size={32} /></button>
 </div>
 
@@ -80,5 +84,22 @@
   }
   .sp {
     flex: 1;
+  }
+  .bell {
+    position: relative;
+  }
+  .badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--accent, #1db954);
+    color: #000;
+    font-size: 0.66rem;
+    font-weight: 700;
+    line-height: 16px;
   }
 </style>

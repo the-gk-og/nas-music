@@ -37,6 +37,8 @@ class Jobs:
         # Shared with the API so on-demand and background transcodes use the same per-track locks.
         self.opus = opus or OpusCache(cfg.data_dir / "opus", int(cfg.opus_cache_gb * 1024**3))
         self.lrclib = None   # nasmusic.library.lrclib.Lrclib for the prefetch job (set by build_context)
+        self.hub = None      # nasmusic.connect.Hub, for "new music" pushes (set by build_context)
+        self.scrobbler = None  # nasmusic.app.scrobble.Scrobbler (set by build_context): retried every few minutes
         self._locks = {n: threading.Lock() for n in JOB_NAMES}
         self._locks["full_scan"] = self._locks["scan"]  # never scan twice at once
         # upload_scan has its own lock (the scanner serialises the actual walk); a request that arrives while
@@ -53,6 +55,12 @@ class Jobs:
 
         res = scanner.scan(self.cfg, conn, full=full).as_dict()
         res["togetGot"] = toget.match_owned(conn)  # wanted albums/songs that the library now has
+        try:
+            from nasmusic.app import notify
+
+            res["newMusic"] = notify.new_music(conn, getattr(self, "hub", None))
+        except Exception:
+            log.exception("new-music notifications failed")
         return res
 
     def _upload_scan(self, conn):
@@ -294,6 +302,8 @@ class Jobs:
         # Smart playlists move with the date ("not played in a month"): refresh after the nightly jobs.
         sched.add_job(self.run, "cron", args=["smart", "schedule"], id="smart", hour=5, minute=30)
         sched.add_job(self.run, "cron", args=["artist_info", "schedule"], id="artist_info", hour=3, minute=30)
+        if self.scrobbler is not None:   # scrobble outbox retries (not a recorded job: it runs every 3 minutes)
+            sched.add_job(self.scrobbler.flush_now, "interval", id="scrobble", minutes=3)
         sched.start()
         self.scheduler = sched
         return sched

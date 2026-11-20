@@ -194,6 +194,7 @@ internal val smartLists = listOf(
     SmartList("recently_played", "Recently played", Icons.Default.History),
     SmartList("most_played", "Most played", Icons.Default.LocalFireDepartment),
     SmartList("not_played", "Not played", Icons.Default.Block),
+    SmartList("new", "New this week", Icons.Default.NewReleases),   // api 0.7: its own screen (NewMusicScreen)
 )
 
 @Composable
@@ -245,6 +246,7 @@ fun PlaylistsScreen(c: AppContainer) {
 
 @Composable
 fun SmartListScreen(c: AppContainer, kind: String) {
+    if (kind == "new") { NewMusicScreen(c); return }
     val title = smartLists.firstOrNull { it.kind == kind }?.title ?: kind
     var tracks by remember { mutableStateOf<List<Track>?>(null) }
     var offline by remember { mutableStateOf(false) }

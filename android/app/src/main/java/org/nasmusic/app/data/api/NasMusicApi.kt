@@ -167,6 +167,45 @@ interface NasMusicApi {
     @PUT("me/settings")
     suspend fun putMySettings(@Body body: UserSettings): Response<Unit>
 
+    // ---- v7 scrobbling ----
+    @GET("me/scrobble")
+    suspend fun scrobble(): ScrobbleStatus
+
+    @PUT("me/scrobble/{service}")
+    suspend fun putScrobble(@Path("service") service: String, @Body body: ScrobbleSettingsBody): ScrobbleStatus
+
+    @DELETE("me/scrobble/{service}")
+    suspend fun disconnectScrobble(@Path("service") service: String): ScrobbleStatus
+
+    @POST("me/scrobble/listenbrainz/connect")
+    suspend fun connectListenBrainz(@Body body: ListenBrainzConnect): ScrobbleStatus
+
+    @POST("me/scrobble/lastfm/connect")
+    suspend fun lastfmConnect(): LastfmAuth
+
+    /** 409 until approved on last.fm, 410 when the request expired. */
+    @POST("me/scrobble/lastfm/complete")
+    suspend fun lastfmComplete(): ScrobbleStatus
+
+    @POST("me/scrobble/retry")
+    suspend fun retryScrobbles(): ScrobbleStatus
+
+    @POST("me/scrobble/listenbrainz/import")
+    suspend fun importListenBrainz(): ScrobbleStatus
+
+    @DELETE("me/scrobble/listenbrainz/import")
+    suspend fun removeImported(): ScrobbleStatus
+
+    // ---- v7 notifications ----
+    @GET("me/notifications")
+    suspend fun notifications(@Query("since") since: String? = null, @Query("limit") limit: Int = 50): NotificationList
+
+    @POST("me/notifications/read")
+    suspend fun readNotifications(@Body body: ReadNotifications): ReadResult
+
+    @GET("library/new")
+    suspend fun newMusic(@Query("days") days: Int = 7): NewMusic
+
     @GET("me/data")
     suspend fun myData(): MyData
 

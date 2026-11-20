@@ -206,7 +206,10 @@ CREATE TABLE IF NOT EXISTS events (
     rating      INTEGER,
     offline     INTEGER NOT NULL DEFAULT 0,
     received_at TEXT NOT NULL,
-    context     TEXT                   -- JSON EventContext (docs/v2.md §10), only enabled signals
+    context     TEXT,                  -- JSON EventContext (docs/v2.md §10), only enabled signals
+    -- v7: NULL = recorded by a client; 'listenbrainz' = imported listen history (never scrobbled back; the user
+    -- can remove every imported event in one go). Imported ids are 'import:<service>:<user>:<ts>:<track>'.
+    imported    TEXT
 );
 CREATE INDEX IF NOT EXISTS events_track ON events(track_id, at);
 CREATE INDEX IF NOT EXISTS events_at ON events(at);
@@ -819,3 +822,59 @@ CREATE TABLE IF NOT EXISTS artist_info (
     fetched_at    TEXT NOT NULL,
     refresh_after TEXT NOT NULL               -- next lookup no earlier than this
 );
+
+-- ---------- v7: scrobbling (ListenBrainz / Last.fm) and "new music added" notifications ----------
+
+-- One row per user and service. `token` is the ListenBrainz user token or the Last.fm session key (secret:
+-- never returned by the API). Last.fm's web-auth flow keeps the unapproved request token in `pending_token`.
+CREATE TABLE IF NOT EXISTS scrobble_accounts (
+    user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service        TEXT NOT NULL CHECK (service IN ('listenbrainz','lastfm')),
+    enabled        INTEGER NOT NULL DEFAULT 0,
+    token          TEXT,
+    username       TEXT,                    -- the account name on that service
+    now_playing    INTEGER NOT NULL DEFAULT 1,
+    pending_token  TEXT,
+    pending_at     TEXT,
+    connected_at   TEXT,
+    last_scrobble_at TEXT,                  -- when the last scrobble was accepted
+    last_error     TEXT,
+    last_error_at  TEXT,
+    needs_reauth   INTEGER NOT NULL DEFAULT 0,  -- the service rejected the token: paused until reconnected
+    PRIMARY KEY (user_id, service)
+);
+
+-- Outbox: one row per (user, service, play). Filled from qualifying listening events (scrobble rules: track
+-- >= 30 s, played >= half or >= 4 min); sent in batches with exponential backoff. Dedupe: the event id is the
+-- key, and a second event for the same track within the same playthrough (listened_at closer than half the
+-- track) is skipped.
+CREATE TABLE IF NOT EXISTS scrobble_queue (
+    user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    service        TEXT NOT NULL CHECK (service IN ('listenbrainz','lastfm')),
+    event_id       TEXT NOT NULL,
+    track_id       TEXT NOT NULL REFERENCES tracks(id),
+    listened_at    INTEGER NOT NULL,        -- unix seconds the playthrough started
+    status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','failed','ignored')),
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL,
+    last_error     TEXT,
+    created_at     TEXT NOT NULL,
+    sent_at        TEXT,
+    PRIMARY KEY (user_id, service, event_id)
+);
+CREATE INDEX IF NOT EXISTS scrobble_queue_due ON scrobble_queue(status, next_attempt_at);
+CREATE INDEX IF NOT EXISTS scrobble_queue_track ON scrobble_queue(user_id, service, track_id, listened_at);
+
+-- In-app notifications (bell list). kind 'new_music': one per user per library scan that added tracks;
+-- data = {"trackIds": [...], "albumIds": [...], "tracks": n, "albums": n, "artists": [names]}.
+CREATE TABLE IF NOT EXISTS notifications (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('new_music')),
+    title       TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    data        TEXT NOT NULL DEFAULT '{}',   -- JSON
+    created_at  TEXT NOT NULL,
+    read_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id, created_at);

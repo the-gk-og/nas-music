@@ -17,6 +17,7 @@ class MainActivity : FragmentActivity() { // FragmentActivity: the Cast button's
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        intent?.getStringExtra(EXTRA_ROUTE)?.let { container.pendingRoute.value = it }
         setContent { NasMusicRoot(container) }
         if (savedInstanceState == null) org.nasmusic.app.ui.LaunchRequests.handle(intent)
     }
@@ -25,6 +26,16 @@ class MainActivity : FragmentActivity() { // FragmentActivity: the Cast button's
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         org.nasmusic.app.ui.LaunchRequests.handle(intent)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(EXTRA_ROUTE)?.let { container.pendingRoute.value = it }
+    }
+
+    companion object {
+        /** A screen to open (e.g. from the "new music" notification). */
+        const val EXTRA_ROUTE = "org.nasmusic.app.ROUTE"
     }
 
     override fun onStart() {
