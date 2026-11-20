@@ -47,6 +47,61 @@ export interface Track {
 
 export type ExplicitStatus = 'explicit' | 'probable' | 'clean' | 'unknown';
 
+/** v7 scrobbling (GET /me/scrobble). Tokens are never returned. */
+export type ScrobbleServiceId = 'listenbrainz' | 'lastfm';
+export interface ScrobbleService {
+  service: ScrobbleServiceId;
+  /** lastfm: false when the server has no Last.fm API key/secret. */
+  available: boolean;
+  connected: boolean;
+  enabled: boolean;
+  username?: string | null;
+  nowPlaying: boolean;
+  needsReauth: boolean;
+  authPending?: boolean;
+  connectedAt?: string | null;
+  lastScrobbleAt?: string | null;
+  lastError?: string | null;
+  lastErrorAt?: string | null;
+  pending: number;
+  failed: number;
+  sent: number;
+  ignored?: number;
+}
+export interface ScrobbleImport {
+  state: 'running' | 'done' | 'error';
+  startedAt?: string;
+  finishedAt?: string;
+  scanned?: number;
+  matched?: number;
+  imported?: number;
+  alreadyKnown?: number;
+  unmatched?: number;
+  error?: string;
+}
+export interface ScrobbleStatus {
+  services: ScrobbleService[];
+  import?: ScrobbleImport | null;
+  importedEvents: number;
+}
+
+/** v7 in-app notification (bell list). */
+export interface AppNotification {
+  id: string;
+  kind: 'new_music' | string;
+  title: string;
+  body: string;
+  data: { tracks?: number; albums?: number; artists?: string[]; albumIds?: string[]; trackIds?: string[] };
+  createdAt: string;
+  read: boolean;
+}
+export interface NewMusic {
+  since: string;
+  days: number;
+  albums: (Album & { addedAt?: string })[];
+  tracks: Track[];
+}
+
 export interface FamilyMode {
   enabled: boolean;
   hideProbable: boolean;
@@ -389,6 +444,7 @@ export type ServerMessage =
   | { type: 'queues'; queueId: string }
   | { type: 'playlist'; playlistId: string; rev: number | null; deleted?: boolean }
   | { type: 'family'; family: FamilyMode }
+  | { type: 'notification'; notification: AppNotification }
   | { type: 'pong' }
   | { type: 'error'; detail: string; source?: 'speaker' };
 

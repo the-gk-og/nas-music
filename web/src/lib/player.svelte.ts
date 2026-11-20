@@ -29,6 +29,7 @@ import {
   type SortKey,
 } from './queue';
 import { family } from './family.svelte';
+import { notifications } from './notifications.svelte';
 import { library } from './library.svelte';
 import { session } from './session.svelte';
 import type { CommandAction, ConnectDevice, PlaybackState, Queue, RadioSeed, RadioStation, RepeatMode, SteerAction, Track } from './types';
@@ -1216,6 +1217,7 @@ export class Player {
         },
         onPlaylistChanged: (pid, rev, deleted) => library.playlistChanged(pid, rev, deleted),
         onFamilyChanged: (f) => family.changed(f),
+        onNotification: (n) => notifications.onPush(n),
       },
     });
     this.connect.start();

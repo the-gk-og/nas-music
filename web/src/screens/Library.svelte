@@ -1,6 +1,6 @@
 <script lang="ts">
   // Library (§3.3): chips Playlists · Albums · Artists · Genres · Folders · Songs; sort; grid/list per chip.
-  import { ArrowUpDown, Ban, ClockPlus, Flame, Heart, History, Plus, Tag } from '@lucide/svelte';
+  import { ArrowUpDown, Ban, ClockPlus, Flame, Heart, History, Plus, Sparkles, Tag } from '@lucide/svelte';
   import ItemGrid from '../components/ItemGrid.svelte';
   import TopBar from '../components/TopBar.svelte';
   import TrackList from '../components/TrackList.svelte';
@@ -125,6 +125,7 @@
         <button class="sm" onclick={() => ui.go('list', s.k)}><Icon size={22} fill={s.k === 'favourites' ? 'currentColor' : 'none'} />{s.label}</button>
       {/each}
       <button class="sm" onclick={() => ui.go('list', 'all')}><Tag size={22} />All songs</button>
+      <button class="sm" onclick={() => ui.go('new')}><Sparkles size={22} />New this week</button>
       <button class="sm new" onclick={newPlaylist}><Plus size={22} />New playlist</button>
     </div>
     <ItemGrid {items} section="lib.playlists" />

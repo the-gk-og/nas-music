@@ -30,6 +30,7 @@ const TAB_OF: Record<string, TabId> = {
   blend: 'foryou',
   search: 'search',
   library: 'library',
+  new: 'library',
   folders: 'library',
   album: 'library',
   artist: 'library',

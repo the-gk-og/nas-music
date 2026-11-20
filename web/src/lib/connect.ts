@@ -6,6 +6,7 @@ import type {
   ConnectDevice,
   DeviceKind,
   FamilyMode,
+  AppNotification,
   PlaybackState,
   ServerMessage,
 } from './types';
@@ -35,6 +36,9 @@ export interface ConnectHandlers {
   /** v5: a playlist you own or are a member of changed (deleted = gone or access removed). */
   onPlaylistChanged?(playlistId: string, rev: number | null, deleted: boolean): void;
   onFamilyChanged?(family: FamilyMode): void;
+  /** v7: a new notification (e.g. new music added). Also called with null after every (re)connect, so the
+   * client can catch up on ones it missed while offline. */
+  onNotification?(n: AppNotification | null): void;
   onStatus?(status: ConnectStatus): void;
   onError?(detail: string, source?: string): void;
 }
@@ -246,6 +250,7 @@ export class ConnectClient {
         if (msg.state) this.acceptState(msg.state);
         // We were active and kept playing while offline: re-assert our state.
         if (prev && msg.state?.activeDeviceId === this.deviceId) this.reportState(prev);
+        this.handlers.onNotification?.(null);
         break;
       }
       case 'devices':
@@ -275,6 +280,9 @@ export class ConnectClient {
         break;
       case 'playlist':
         this.handlers.onPlaylistChanged?.(msg.playlistId, msg.rev ?? null, !!msg.deleted);
+        break;
+      case 'notification':
+        this.handlers.onNotification?.(msg.notification);
         break;
       case 'family':
         this.handlers.onFamilyChanged?.(msg.family);
