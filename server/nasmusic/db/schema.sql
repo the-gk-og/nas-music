@@ -513,3 +513,54 @@ CREATE TABLE IF NOT EXISTS blend_tracks (
     score       REAL,
     PRIMARY KEY (blend_id, position)
 );
+
+-- v6 Jam (listen together, docs/jam.md): a host shares a join link; guests (no account, or signed-in users of
+-- this server) add songs to the host's queue. Tokens are stored as SHA-256 hashes; join codes in clear (the
+-- host can show the link again). All rows die with the host's account.
+CREATE TABLE IF NOT EXISTS jams (
+    id              TEXT PRIMARY KEY,
+    host_user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    queue_id        TEXT,                      -- host queue guests add to (follows what the host plays)
+    join_code       TEXT UNIQUE,               -- NULL = link closed (no new joins)
+    join_expires_at TEXT,
+    settings        TEXT NOT NULL,             -- JSON {approval, allowPlayNext, maxPerGuest}
+    created_at      TEXT NOT NULL,
+    expires_at      TEXT NOT NULL,             -- hard end; every guest token dies with it
+    ended_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS jams_host ON jams(host_user_id, ended_at);
+
+CREATE TABLE IF NOT EXISTS jam_guests (
+    id           TEXT PRIMARY KEY,
+    jam_id       TEXT NOT NULL REFERENCES jams(id) ON DELETE CASCADE,
+    user_id      TEXT REFERENCES users(id) ON DELETE CASCADE,  -- signed-in member joining as themselves
+    name         TEXT NOT NULL,
+    token_hash   TEXT NOT NULL UNIQUE,
+    created_at   TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    last_seen_at TEXT,
+    left_at      TEXT,                         -- left or kicked: the token is dead
+    kicked       INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS jam_guests_jam ON jam_guests(jam_id);
+
+-- Songs guests asked for. 'queued' rows are in the host's queue (matched to entries by track id, in order).
+CREATE TABLE IF NOT EXISTS jam_requests (
+    id          TEXT PRIMARY KEY,
+    jam_id      TEXT NOT NULL REFERENCES jams(id) ON DELETE CASCADE,
+    guest_id    TEXT REFERENCES jam_guests(id) ON DELETE CASCADE,   -- NULL = the host
+    track_id    TEXT NOT NULL REFERENCES tracks(id),
+    mode        TEXT NOT NULL CHECK (mode IN ('end','next')),
+    status      TEXT NOT NULL CHECK (status IN ('pending','queued','rejected','withdrawn','removed')),
+    created_at  TEXT NOT NULL,
+    decided_at  TEXT                       -- approved/rejected/queued time (attribution order)
+);
+CREATE INDEX IF NOT EXISTS jam_requests_jam ON jam_requests(jam_id, status);
+
+CREATE TABLE IF NOT EXISTS jam_votes (
+    jam_id    TEXT NOT NULL REFERENCES jams(id) ON DELETE CASCADE,
+    guest_id  TEXT NOT NULL REFERENCES jam_guests(id) ON DELETE CASCADE,
+    track_id  TEXT NOT NULL,
+    value     INTEGER NOT NULL CHECK (value IN (-1, 1)),
+    PRIMARY KEY (jam_id, guest_id, track_id)
+);

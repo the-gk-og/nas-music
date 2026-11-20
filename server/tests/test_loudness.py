@@ -144,7 +144,7 @@ def test_v4_to_v5(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 5
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     cols = {r[1] for r in conn.execute("PRAGMA table_info(tracks)")}
     assert {c for c, _ in migrations.V5_TRACK_COLUMNS} <= cols
     assert conn.execute("SELECT title, rg_source FROM tracks").fetchone()[:] == ("T", None)

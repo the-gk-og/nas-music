@@ -114,7 +114,7 @@ PLAYER_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-i
 def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None = None) -> FastAPI:
     from nasmusic import web
     from nasmusic.app import (account_api, admin_api, api, cast_api, collections_api, connect_api, discover_api,
-                              insights_api, logbuffer, tags_api)
+                              insights_api, jam_api, logbuffer, tags_api)
     from nasmusic.web import spa
 
     install_token_redaction()
@@ -123,7 +123,7 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
     app.state.ctx = context or build_context(cfg, jobs)
     for r in (api.public, account_api.public, api.router, account_api.router, account_api.admin,
               collections_api.router, discover_api.router, insights_api.router, insights_api.admin, admin_api.router,
-              tags_api.router, connect_api.router, cast_api.media_router, cast_api.router):
+              tags_api.router, connect_api.router, cast_api.media_router, cast_api.router, jam_api.public, jam_api.host):
         app.include_router(r, prefix="/api/v1")
     app.include_router(web.router)
     app.include_router(spa.router_for(cfg, web.render_join))  # catch-all: must stay last
@@ -132,7 +132,7 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
     app.add_middleware(
         CORSMiddleware, allow_origins=TAURI_ORIGINS + list(cfg.cors_origins), allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Range", "CF-Access-Client-Id", "CF-Access-Client-Secret"],
+        allow_headers=["Authorization", "Content-Type", "Range", "X-Jam-Token", "CF-Access-Client-Id", "CF-Access-Client-Secret"],
         expose_headers=["Content-Range", "Content-Length", "Accept-Ranges", "Content-Disposition"], max_age=600,
     )
 
