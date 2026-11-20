@@ -562,3 +562,25 @@ def test_v6_to_v7(tmp_path):
     for t in migrations.V7_TABLES:
         assert migrations._table_exists(conn, t)
     assert not migrations.migrate_v6_to_v7(conn, db.schema_sql())
+
+
+def test_gzipped_feed_is_decoded_once():
+    """Feed servers send gzip when asked (Accept-Encoding). The size-capped read must not leave a
+    Content-Encoding header on the response, or reading .content decodes the body a second time."""
+    import gzip
+
+    import httpx
+
+    from nasmusic.spoken import net
+
+    rss = b'<?xml version="1.0"?><rss version="2.0"><channel><title>T</title></channel></rss>'
+    body = gzip.compress(rss)
+
+    def handler(request):
+        return httpx.Response(200, content=body, headers={"Content-Encoding": "gzip",
+                                                          "Content-Type": "application/rss+xml"})
+
+    with net.client(httpx.MockTransport(handler)) as c:
+        r = net.get_limited(c, "https://feeds.example.com/show.xml", 1_000_000)
+        assert r.content == rss
+        assert "content-encoding" not in r.headers

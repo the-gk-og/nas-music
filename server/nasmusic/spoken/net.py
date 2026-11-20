@@ -60,4 +60,8 @@ def get_limited(c: httpx.Client, url: str, limit: int, headers: dict | None = No
                 buf += chunk
                 if len(buf) > limit:
                     raise BadUrl(f"response larger than {limit // (1024 * 1024)} MB")
-        return httpx.Response(r.status_code, headers=r.headers, content=bytes(buf), request=r.request)
+        # The body above is already decoded (gzip/deflate removed), so drop the encoding headers; otherwise
+        # reading .content would decode it a second time ("incorrect header check").
+        headers = [(k, v) for k, v in r.headers.multi_items()
+                   if k.lower() not in ("content-encoding", "content-length", "transfer-encoding")]
+        return httpx.Response(r.status_code, headers=headers, content=bytes(buf), request=r.request)
