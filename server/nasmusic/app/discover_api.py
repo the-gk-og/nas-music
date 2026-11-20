@@ -223,12 +223,25 @@ def delete_toget(item_id: str, me: Device = Depends(device), conn: Conn = Depend
 
 
 class Seed(BaseModel):
-    type: Literal["random", "track", "artist", "album", "playlist"]
+    type: Literal["random", "track", "artist", "album", "playlist", "moment", "vibe"]
     id: str | None = Field(default=None, max_length=200)
+    text: str | None = Field(default=None, max_length=200)            # vibe
+    constraints: list[dict] | None = Field(default=None, max_length=30)  # vibe chips (from /radio/vibe/parse)
+
+
+class RadioContext(BaseModel):
+    """Hints for the smart shuffle; all optional (the server knows the time and the device kind)."""
+    localHour: int | None = Field(default=None, ge=0, le=23)
+    weekday: int | None = Field(default=None, ge=1, le=7)
+    deviceKind: Literal["phone", "car", "speaker", "desktop", "watch", "web", "tv"] | None = None
+    output: str | None = Field(default=None, max_length=100)
+    motion: str | None = Field(default=None, max_length=20)
+    workout: str | None = Field(default=None, max_length=40)
 
 
 class RadioBody(BaseModel):
     seed: Seed
+    context: RadioContext | None = None
 
 
 def _radio_errors(fn, *a):
@@ -236,8 +249,8 @@ def _radio_errors(fn, *a):
         return fn(*a)
     except NotImplementedError as e:
         raise HTTPException(503, "radio isn't available yet (AI engine update pending)") from e
-    except ValueError as e:  # malformed seed (the AI's signal)
-        raise HTTPException(400, f"bad seed: {e}") from e
+    except ValueError as e:  # malformed seed / steer (the AI's signal)
+        raise HTTPException(400, f"bad request: {e}") from e
     except (discover.NotFound, KeyError) as e:
         raise HTTPException(404, "nothing to build this radio from yet") from e
     except coll.NotFound as e:
@@ -248,7 +261,8 @@ def _radio_errors(fn, *a):
 def start_radio(body: RadioBody, me: Device = Depends(device), conn: Conn = Depends(db),
                 c: AppContext = Depends(ctx)):
     playing = (c.hub.snapshot(me.user_id) or {}).get("queueId") if c.hub else None
-    q = _radio_errors(discover.start_radio, conn, c.cfg, me.user_id, body.seed.model_dump(), playing)
+    q = _radio_errors(discover.start_radio, conn, c.cfg, me.user_id, body.seed.model_dump(), playing,
+                      body.context.model_dump(exclude_none=True) if body.context else None, me.kind)
     if c.hub:
         c.hub.notify_queue(me.user_id, q["id"])
     return q
@@ -265,3 +279,40 @@ def more_radio(queue_id: str, body: MoreBody | None = None, me: Device = Depends
     if c.hub:
         c.hub.notify_queue(me.user_id, queue_id)
     return q
+
+
+# ---------- AI radio (v6): vibe parsing, station state, steering ----------
+
+
+class VibeBody(BaseModel):
+    text: str = Field(max_length=200)
+
+
+@router.post("/radio/vibe/parse")
+def parse_vibe(body: VibeBody, me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    return _radio_errors(discover.parse_vibe, conn, c.cfg, me.user_id, body.text)
+
+
+@router.get("/radio/{queue_id}/station")
+def radio_station(queue_id: str, me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    return _radio_errors(discover.radio_station, conn, c.cfg, me.user_id, queue_id)
+
+
+class SteerBody(BaseModel):
+    action: Literal["more_like", "less_like", "more_energy", "calmer", "more_variety", "more_familiar",
+                    "never_here", "remove", "reset"]
+    trackId: str | None = Field(default=None, max_length=200)
+    scope: Literal["track", "artist"] = "track"
+    refId: str | None = Field(default=None, max_length=200)
+    currentIndex: int | None = Field(default=None, ge=0)
+    refresh: bool = True
+    context: dict | None = None
+
+
+@router.post("/radio/{queue_id}/steer")
+def steer_radio(queue_id: str, body: SteerBody, me: Device = Depends(device), conn: Conn = Depends(db),
+                c: AppContext = Depends(ctx)):
+    res = _radio_errors(discover.steer_radio, conn, c.cfg, me.user_id, queue_id, body.model_dump())
+    if c.hub:
+        c.hub.notify_queue(me.user_id, queue_id)
+    return res

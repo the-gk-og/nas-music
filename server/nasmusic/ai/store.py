@@ -103,6 +103,15 @@ class Store:
             f"SELECT track_id, type, at, position_s, duration_s, {ctx} FROM events WHERE user_id = ? "
             "ORDER BY at, received_at", (user_id,)).fetchall()
 
+    def radio_feedback(self, user_id: str | None) -> list[tuple]:
+        """Steering of AI radio (schema v6): (track_id, action, scope, at, context JSON), oldest first.
+        Empty before v6 or on legacy databases."""
+        if self.legacy or not self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'radio_feedback'").fetchone():
+            return []
+        return self.conn.execute("SELECT track_id, action, scope, at, context FROM radio_feedback WHERE user_id = ? "
+                                 "ORDER BY at", (user_id,)).fetchall()
+
     # ------------------------------------------------------------ the one cross-user read
 
     def popularity(self, exclude_user: str | None) -> dict[str, int]:

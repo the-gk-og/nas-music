@@ -181,17 +181,58 @@ def run_weekly_discovery(conn: sqlite3.Connection, cfg: AIConfig) -> dict[str, i
 
 # ---------------------------------------------------------------- v3: radio and shelves (docs/v3-ux.md §3.2, §5)
 
-def radio_start(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, seed: dict) -> tuple[str, list[str]]:
-    """Start a radio for the user. `seed` = {"type": "random"|"track"|"artist"|"album"|"playlist", "id"?}.
-    Returns (radio_id, ~25 track ids, ready to queue). The title ("<seed> radio") is in
-    radio_sessions.title. Raises KeyError for an unknown user / seed or nothing analysed, ValueError for a
-    malformed seed. No model training: uses the cached library and the latest taste snapshot."""
+def radio_start(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, seed: dict, context: dict | None = None,
+                device_kind: str | None = None) -> tuple[str, list[str]]:
+    """Start a radio for the user. `seed` = {"type": "random"|"track"|"artist"|"album"|"playlist", "id"?}, or
+    (AI radio, v6) {"type": "moment"} (smart shuffle for this moment) or {"type": "vibe", "text"?, "constraints"?}
+    (describe-a-vibe; constraints = chips from `radio_parse_vibe`, possibly edited; text is parsed when absent).
+    `context` (moment): optional EventContext-like hints {localHour, weekday, deviceKind, output, motion, workout};
+    `device_kind` = the registered device's kind. Returns (radio_id, ~25 track ids, ready to queue). The title
+    ("<seed> radio", "Smart shuffle") is in radio_sessions.title. Raises KeyError for an unknown user / seed or
+    nothing analysed / matching, ValueError for a malformed seed. No model training."""
     from . import radio
     from .store import Store
 
     if not Store(conn).user_exists(user_id):
         raise KeyError(f"unknown user {user_id}")
-    return radio.start(conn, cfg, user_id, seed or {"type": "random"})
+    return radio.start(conn, cfg, user_id, seed or {"type": "random"}, context=context, device_kind=device_kind)
+
+
+def radio_steer(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, radio_id: str, action: str,
+                track_id: str | None = None, scope: str = "track", ref_id: str | None = None,
+                context: dict | None = None) -> dict:
+    """Steer a radio's station (v6): action in more_like | less_like | never_here (need track_id; scope track |
+    artist), more_energy | calmer | more_variety | more_familiar, remove (scope + ref_id: undo one entry), reset.
+    Remembered per station and applied to every following radio_more / radio_refill. more/less/never are logged
+    as recommender feedback. Returns radio_station(). KeyError: unknown radio / track; ValueError: bad action."""
+    from . import radio
+
+    return radio.steer(conn, cfg, user_id, radio_id, action, track_id, scope, ref_id, context)
+
+
+def radio_refill(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, radio_id: str, drop_ids: list[str],
+                 keep_ids: list[str], n: int = 25) -> list[str]:
+    """After steering: put the queue's unplayed `drop_ids` back and return `n` fresh picks (avoiding `keep_ids`),
+    so a steer is heard on the next track rather than after the queued batch. KeyError: unknown radio."""
+    from . import radio
+
+    return radio.refill(conn, cfg, user_id, radio_id, drop_ids, keep_ids, max(1, min(int(n), 100)))
+
+
+def radio_station(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, radio_id: str) -> dict:
+    """{radioId, kind, seedId, title, stationKey, explanation, text, constraints, context, steering
+    {energy, variety, moreLike[], lessLike[], never[]}, steeringSummary}. KeyError: unknown / not yours."""
+    from . import radio
+
+    return radio.station(conn, cfg, user_id, radio_id)
+
+
+def radio_parse_vibe(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, text: str) -> dict:
+    """Describe-a-vibe text -> {text, title, constraints: [{id, kind, label, min?, max?, value?, weight?,
+    exclude?, name?}]}. Lexicon + library vocabulary (artists, genre tags); CPU-cheap, stores nothing."""
+    from . import radio
+
+    return radio.parse_vibe(conn, cfg, user_id, text)
 
 
 def radio_more(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, radio_id: str, exclude_ids: list[str],

@@ -74,6 +74,7 @@ N_PCA = 16
 N_TAGS = 24
 N_VOCAB = 16
 MIN_AUC = 0.55
+RADIO_FEEDBACK_WEIGHT = {"more_like": 1.0, "less_like": -0.8, "never_here": -1.0}  # = steering.FEEDBACK_WEIGHT
 
 
 # ---------------------------------------------------------------- signals
@@ -188,6 +189,24 @@ def collect_signals(store: Store, user_id: str | None, lib: Library, settings: S
         if etype in ("play", "skip"):
             last[i] = min(last[i], age)
         events.append((ts, ctx, i, etype, label))
+
+    # AI radio steering (more / less like this, never on this station): explicit feedback on the track.
+    # Counted in the taste weight and, as labelled rows, in the learned model's training data.
+    steered = False
+    for track_id, action, _scope, at, raw_ctx in store.radio_feedback(user_id):
+        i = lib.index.get(track_id)
+        ts = parse_ts(at)
+        w0 = RADIO_FEEDBACK_WEIGHT.get(action)
+        if i is None or ts is None or w0 is None:
+            continue
+        n_feedback += 1
+        age = max((now - ts).total_seconds() / 86400, 0.0)
+        weight[i] += w0 * 0.5 ** (age / half_life)
+        ctx = cx.parse(raw_ctx, ts.astimezone(tz), disabled)
+        events.append((ts, ctx, i, f"radio_{action}", 1 if w0 > 0 else 0))
+        steered = True
+    if steered:
+        events.sort(key=lambda e: e[0])
 
     for i, t in thumbs.items():
         blocked[i] = t == "thumb_down"  # overrides user_tracks.blocked, which may lag behind the events

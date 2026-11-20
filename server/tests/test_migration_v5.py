@@ -31,7 +31,7 @@ def test_v4_to_v5(tmp_path):
     make_v4(path).close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 5
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION  # v5 then later steps
     rows = conn.execute("SELECT id, track_id, position, added_at, added_by FROM playlist_tracks "
                         "ORDER BY position").fetchall()
     assert [r["track_id"] for r in rows] == ["t3", "t1", "t3"]

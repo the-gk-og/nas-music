@@ -354,3 +354,39 @@ def migrate_v4_to_v5(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
         conn.execute("PRAGMA foreign_keys = ON")
     log.warning("schema v4 -> v5 done")
     return True
+
+
+V6_TABLES = ("radio_stations", "radio_feedback")
+
+
+def migrate_v5_to_v6(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """AI radio: two nullable radio_sessions columns and two new tables. Additive. Returns True if it migrated."""
+    if current_version(conn) != 5:
+        return False
+    if make_backup:
+        dest = backup(conn, "v5-backup")
+        if dest:
+            log.warning("schema v5 -> v6: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 5:
+            conn.execute("ROLLBACK")
+            return False
+        if _table_exists(conn, "radio_sessions"):
+            have = _columns(conn, "radio_sessions")
+            for col in ("station_key", "params"):
+                if col not in have:
+                    conn.execute(f"ALTER TABLE radio_sessions ADD COLUMN {col} TEXT")
+        for t in V6_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (6)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v5 -> v6 done")
+    return True
