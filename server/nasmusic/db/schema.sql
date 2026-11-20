@@ -1,11 +1,12 @@
--- nas-music shared schema v5 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v6 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
 -- tag_overrides, tag_edits), collaborative playlists (playlist_members, playlist_activity, playlists.rev;
 -- playlist_tracks rebuilt with entry ids and a fractional REAL position), release_radar, blends,
 -- blend_members and blend_tracks (Release Radar, Blend; Wrapped needs no table), and ReplayGain/loudness
--- columns on tracks. Older databases are upgraded by nasmusic.db.migrations.
+-- columns on tracks. v6 adds explicit-content flags (track_explicit, tag_overrides field 'explicit') and
+-- family mode (family_mode). Older databases are upgraded by nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -341,11 +342,12 @@ CREATE INDEX IF NOT EXISTS bug_reports_created ON bug_reports(created_at);
 
 -- One row per overridden field. `value` is JSON (string, integer or null = "clear this tag").
 -- Fields: title, artist, album_artist, album, track_no, disc_no, year, genre, lyrics (raw LRC/plain text)
--- and cover (sha256 of an uploaded image stored under data_dir/art/uploads/).
+-- and cover (sha256 of an uploaded image stored under data_dir/art/uploads/). v6: explicit ("explicit" or
+-- "clean": an admin's verdict, which beats every automatic source in track_explicit).
 CREATE TABLE IF NOT EXISTS tag_overrides (
     track_id   TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
     field      TEXT NOT NULL CHECK (field IN ('title','artist','album_artist','album','track_no','disc_no',
-                                              'year','genre','lyrics','cover')),
+                                              'year','genre','lyrics','cover','explicit')),
     value      TEXT NOT NULL,
     updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
     updated_at TEXT NOT NULL,
@@ -367,6 +369,43 @@ CREATE TABLE IF NOT EXISTS tag_edits (
 );
 CREATE INDEX IF NOT EXISTS tag_edits_track ON tag_edits(track_id, id);
 CREATE INDEX IF NOT EXISTS tag_edits_at ON tag_edits(at);
+
+-- ---------- v6: explicit-content flags + family mode ----------
+
+-- One row per track that the `explicit` job (nasmusic.library.explicit) has looked at; no row = unknown.
+-- `status` is the effective verdict, in priority order: an admin's tag override (tag_overrides field
+-- 'explicit'), the file's tags (iTunes rtng/ITUNESADVISORY, EXPLICIT, "(Explicit)"/"(Clean)" in title or
+-- album), the matching Deezer track's explicit_lyrics flag, then a profanity word list run over the
+-- track's lyrics (embedded, admin or cached LRCLIB), which only ever gives 'probable'.
+-- Everyone filtering by it goes through nasmusic.db.family.
+CREATE TABLE IF NOT EXISTS track_explicit (
+    track_id     TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    status       TEXT NOT NULL DEFAULT 'unknown' CHECK (status IN ('explicit','probable','clean','unknown')),
+    source       TEXT CHECK (source IN ('admin','tags','deezer','lyrics')),   -- what decided `status`
+    tags_flag    TEXT CHECK (tags_flag IN ('explicit','clean')),              -- NULL = the file says nothing
+    tags_mtime   REAL,                     -- tracks.mtime when the file was read (re-read when it changes)
+    deezer_flag  TEXT CHECK (deezer_flag IN ('explicit','clean','not_found')),
+    deezer_id    INTEGER,
+    deezer_at    TEXT,                     -- not_found is asked again after 90 days
+    lyrics_flag  TEXT CHECK (lyrics_flag IN ('probable','clean','none')),    -- none = no lyrics found
+    lyrics_hits  INTEGER,
+    lyrics_at    TEXT,
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS track_explicit_status ON track_explicit(status);
+
+-- Per-user family mode. Not in user_settings because a locked row must not be writable by the user:
+-- only an admin (or someone with the PIN) can unlock it. No row = off.
+CREATE TABLE IF NOT EXISTS family_mode (
+    user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    enabled       INTEGER NOT NULL DEFAULT 0,
+    hide_probable INTEGER NOT NULL DEFAULT 1,  -- also hide "probably explicit" (lyrics word list) tracks
+    hide_unknown  INTEGER NOT NULL DEFAULT 0,  -- also hide tracks nobody has classified yet
+    locked        INTEGER NOT NULL DEFAULT 0,  -- set by an admin: the user cannot loosen it without the PIN
+    pin_hash      TEXT,                        -- scrypt hash of the unlock PIN (NULL = admin-only unlock)
+    locked_by     TEXT REFERENCES users(id) ON DELETE SET NULL,
+    updated_at    TEXT NOT NULL
+);
 
 -- ---------- AI-owned tables ----------
 

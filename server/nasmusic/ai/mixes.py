@@ -84,7 +84,7 @@ class MixBuilder:
         self.rng = np.random.default_rng(zlib.crc32(f"{self.today}:{rec.user_id}".encode()))
         self.gap = max(self.s.int("ai.mix.artist_gap"), 1)
         recent = self.s.num("ai.mix.recent_days")
-        self.eligible = (~self.sig.blocked) & ~(self.sig.last_played_days < recent)
+        self.eligible = (~self.sig.excluded) & ~(self.sig.last_played_days < recent)
         liked = np.where(self.sig.weight >= 1.0)[0]
         self.liked = liked
 
