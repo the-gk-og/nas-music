@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,6 +10,11 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    0.6.0 (schema v6): automatic tag fixing (/admin/autotag/*: Chromaprint + AcoustID + MusicBrainz suggestions
+    an admin reviews; accepting writes the same tag overrides as /admin/tags) and a duplicate finder
+    (/admin/duplicates*; hidden copies vanish from every listing like missing files, never deleted).
+    TrackTagDetail file/effective also carry the MusicBrainz id fields (mbRecordingId, mbReleaseGroupId,
+    mbArtistId, mbAlbumArtistId), which /admin/tags/edit `revert` accepts too.
     0.5.0 (schema v5): admin tag editing (/admin/tags/*; edits are server-side overrides, every track/album/
     artist/search response shows the effective tags) and collaborative playlists (members, entry ids,
     conflict-safe entry operations, activity, Connect `playlist` messages). Old index-based playlist calls work.
@@ -1563,6 +1568,155 @@ paths:
                   tracks:
                     type: array
                     items: { type: object, properties: { discNo: { type: integer }, trackNo: { type: integer }, title: { type: string }, artist: { type: [string, 'null'] }, recordingMbid: { type: string } } }
+  /admin/autotag/status:
+    get:
+      summary: |
+        Admin only (v6). Progress of automatic tag fixing. The `autotag` job (POST /admin/jobs/autotag/run; also
+        daily) fingerprints tracks with Chromaprint, looks them up on AcoustID (needs `acoustid_api_key` in
+        config.toml) and builds suggestions from MusicBrainz releases. It is time-boxed and resumable.
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/AutotagStatus' } } }
+  /admin/autotag/groups:
+    get:
+      summary: |
+        Admin only (v6). Suggestions grouped by album (one group per album and chosen MusicBrainz release),
+        highest confidence first. `current` values are read live, so the diff stays right after manual edits.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, accepted, rejected], default: pending } }
+        - { name: minConfidence, in: query, schema: { type: number, minimum: 0, maximum: 1, default: 0 }, description: on the group confidence }
+        - { name: q, in: query, schema: { type: string }, description: 'filter: album, artist, title or suggested values' }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: groups
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [total, groups]
+                properties:
+                  total: { type: integer }
+                  groups: { type: array, items: { $ref: '#/components/schemas/AutotagGroup' } }
+  /admin/autotag/accept:
+    post:
+      summary: |
+        Admin only (v6). Accept pending suggestions picked by trackIds and/or groupIds, and/or every pending
+        track whose confidence >= minConfidence ("accept all above X%"). Writes tag overrides in one audit
+        batch (see /admin/tags/history); files are never touched. `fields` = which fields to apply (default
+        per track: `defaultFields`). `edits` replace suggested values per track (edited fields are applied).
+        `cover`: true = set the Cover Art Archive front cover as album art, false = never, omitted = only for
+        albums without art.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                trackIds: { type: array, items: { type: string } }
+                groupIds: { type: array, items: { type: string } }
+                minConfidence: { type: number, minimum: 0, maximum: 1 }
+                fields: { type: array, items: { type: string }, description: 'TagValues/AutotagValues field names' }
+                edits: { type: object, additionalProperties: { $ref: '#/components/schemas/AutotagValues' }, description: 'trackId -> values' }
+                cover: { type: [boolean, 'null'] }
+      responses:
+        '200':
+          description: done
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, changed]
+                properties:
+                  accepted: { type: integer }
+                  batchId: { type: [string, 'null'] }
+                  changed: { type: integer, description: (track, field) changes logged }
+                  coverErrors: { type: array, items: { type: string } }
+        '422': { description: no selection, or bad field/value }
+  /admin/autotag/reject:
+    post:
+      summary: Admin only (v6). Reject pending suggestions (kept, listed under status=rejected; not rebuilt).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AutotagSelection' } } }
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { type: object, properties: { rejected: { type: integer } } } } }
+  /admin/autotag/reopen:
+    post:
+      summary: |
+        Admin only (v6). Undo a decision: back to pending. For accepted suggestions the overrides that accept
+        wrote are reverted (fields edited since are left alone).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TrackIdList' } } }
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { type: object, properties: { reopened: { type: integer }, reverted: { type: integer } } } } }
+  /admin/autotag/rematch:
+    post:
+      summary: Admin only (v6). Forget the AcoustID lookup and pending suggestion of these tracks; the next run redoes them.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TrackIdList' } } }
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { type: object, properties: { queued: { type: integer } } } } }
+  /admin/autotag/cover/{releaseMbid}:
+    get:
+      summary: Admin only (v6). A release's Cover Art Archive front cover (proxied and cached by the server).
+      parameters: [ { name: releaseMbid, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: image, content: { image/jpeg: {}, image/png: {} } }
+        '404': { description: no cover }
+        '502': { description: Cover Art Archive unreachable }
+  /admin/duplicates:
+    get:
+      summary: |
+        Admin only (v6). Groups of duplicate copies found by comparing audio fingerprints (needs the autotag
+        job's fingerprints). Includes groups already resolved (hidden copies), so a choice can be changed.
+      responses:
+        '200':
+          description: groups
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DuplicateGroup' } } } }
+  /admin/duplicates/resolve:
+    post:
+      summary: |
+        Admin only (v6). Keep one copy and hide the others. Hidden tracks disappear from every listing (like
+        missing files) and stay hidden across rescans; the files are never deleted. Playlist and queue entries
+        move to the kept copy; favourites, ratings and play counts are copied onto it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [keepTrackId, hideTrackIds]
+              properties:
+                keepTrackId: { type: string }
+                hideTrackIds: { type: array, items: { type: string }, minItems: 1, maxItems: 100 }
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { type: object, properties: { hidden: { type: integer }, keptId: { type: string } } } } }
+        '404': { description: unknown track }
+        '422': { description: nothing to hide }
+  /admin/duplicates/unhide:
+    post:
+      summary: Admin only (v6). Show hidden copies again.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TrackIdList' } } }
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { type: object, properties: { unhidden: { type: integer } } } } }
   /admin/users/{userId}/devices:
     get:
       summary: Admin only. A user's devices (online from Connect).
@@ -2507,6 +2661,111 @@ components:
         country: { type: [string, 'null'] }
         trackCount: { type: [integer, 'null'] }
         format: { type: [string, 'null'] }
+    AutotagValues:
+      description: 'v6: TagValues plus MusicBrainz ids (applied as tag overrides; artist ids change artist ids to mb:<mbid>)'
+      allOf:
+        - $ref: '#/components/schemas/TagValues'
+        - type: object
+          properties:
+            mbRecordingId: { type: [string, 'null'] }
+            mbReleaseGroupId: { type: [string, 'null'] }
+            mbArtistId: { type: [string, 'null'] }
+            mbAlbumArtistId: { type: [string, 'null'] }
+    AutotagStatus:
+      type: object
+      properties:
+        apiKeyConfigured: { type: boolean }
+        fpcalcAvailable: { type: boolean }
+        running: { type: boolean }
+        tracks: { type: integer }
+        fingerprinted: { type: integer }
+        fingerprintFailed: { type: integer }
+        matched: { type: integer, description: AcoustID found recordings }
+        noMatch: { type: integer }
+        lookupErrors: { type: integer }
+        pending: { type: integer }
+        accepted: { type: integer }
+        rejected: { type: integer }
+    AutotagGroup:
+      type: object
+      required: [groupId, albumId, confidence, tracks]
+      properties:
+        groupId: { type: string }
+        albumId: { type: string, description: the album when it was matched }
+        currentAlbum: { type: [string, 'null'] }
+        currentAlbumArtist: { type: [string, 'null'] }
+        albumHasArt: { type: boolean }
+        confidence: { type: number, description: '0..1: mean track confidence, lowered when the release explains only part of the album' }
+        albumTrackCount: { type: integer }
+        release:
+          type: [object, 'null']
+          description: the chosen MusicBrainz release (null = recording-only matches)
+          properties:
+            mbid: { type: string }
+            title: { type: [string, 'null'] }
+            artist: { type: [string, 'null'] }
+            year: { type: [integer, 'null'] }
+            country: { type: [string, 'null'] }
+            format: { type: [string, 'null'] }
+            trackCount: { type: [integer, 'null'] }
+            type: { type: [string, 'null'] }
+            hasCover: { type: boolean, description: 'GET /admin/autotag/cover/{mbid}' }
+        tracks: { type: array, items: { $ref: '#/components/schemas/AutotagSuggestion' } }
+    AutotagSuggestion:
+      type: object
+      required: [trackId, path, status, confidence, current, suggested, changes, defaultFields]
+      properties:
+        trackId: { type: string }
+        path: { type: string }
+        status: { type: string, enum: [pending, accepted, rejected] }
+        confidence: { type: number, description: '0..1: AcoustID score x duration match x agreement with the current tags x release match' }
+        current: { $ref: '#/components/schemas/AutotagValues' }
+        suggested: { $ref: '#/components/schemas/AutotagValues', description: only the fields MusicBrainz provides }
+        changes: { type: array, items: { type: string }, description: suggested fields that differ from current }
+        defaultFields: { type: array, items: { type: string }, description: 'what an accept applies by default: core tags and recording/release-group ids; genre only when empty; artist ids are opt-in' }
+        recordingMbid: { type: [string, 'null'] }
+        releaseMbid: { type: [string, 'null'] }
+        durationS: { type: number }
+        detail: { type: object, description: 'acoustidScore, durationDiffS, agreement, onRelease, releaseTitle, ...' }
+        decidedAt: { type: [string, 'null'] }
+        batchId: { type: [string, 'null'], description: 'accepted: the tag edit batch' }
+    AutotagSelection:
+      type: object
+      properties:
+        trackIds: { type: array, items: { type: string } }
+        groupIds: { type: array, items: { type: string } }
+    TrackIdList:
+      type: object
+      required: [trackIds]
+      properties:
+        trackIds: { type: array, items: { type: string }, minItems: 1 }
+    DuplicateGroup:
+      type: object
+      required: [groupId, tracks]
+      properties:
+        groupId: { type: string }
+        similarity: { type: [number, 'null'], description: lowest pairwise fingerprint similarity (0..1) }
+        hiddenCount: { type: integer }
+        tracks:
+          type: array
+          description: best copy to keep first
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              path: { type: string }
+              title: { type: string }
+              artist: { type: string }
+              album: { type: string }
+              durationS: { type: number }
+              codec: { type: [string, 'null'] }
+              bitrate: { type: [integer, 'null'] }
+              sampleRate: { type: [integer, 'null'] }
+              bitsPerSample: { type: [integer, 'null'] }
+              bytes: { type: integer }
+              hidden: { type: boolean }
+              keptId: { type: [string, 'null'], description: 'hidden: the copy kept instead' }
+              recommended: { type: boolean }
     Queue:
       type: object
       required: [id, name, slot, currentIndex, positionMs, trackCount, durationS, createdAt, updatedAt]

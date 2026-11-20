@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { etaText, filterLogs, uptimeText, validateBaseUrl, validateCacheGb, validateTimezone, type LogEntry } from './admin';
+import {
+  confidenceClass,
+  confidenceText,
+  countAbove,
+  etaText,
+  filterLogs,
+  groupChanges,
+  qualityText,
+  uptimeText,
+  validateBaseUrl,
+  validateCacheGb,
+  validateTimezone,
+  type AutotagField,
+  type AutotagGroup,
+  type AutotagSuggestion,
+  type LogEntry,
+} from './admin';
 
 describe('validateBaseUrl', () => {
   it('accepts hosts with custom ports (relay)', () => {
@@ -45,4 +61,64 @@ it('filters logs by level and text', () => {
   expect(filterLogs(logs, 'WARNING', '').map((x) => x.seq)).toEqual([3, 4]);
   expect(filterLogs(logs, 'DEBUG', 'scan').map((x) => x.seq)).toEqual([2, 3]);
   expect(filterLogs(logs, 'INFO', 'NASMUSIC').length).toBe(3);
+});
+
+describe('tag fixing helpers', () => {
+  const sug = (id: string, confidence: number, status: 'pending' | 'accepted' = 'pending', changes: AutotagField[] = []) =>
+    ({
+      trackId: id,
+      path: id,
+      status,
+      confidence,
+      current: {},
+      suggested: {},
+      changes,
+      defaultFields: changes,
+    }) as AutotagSuggestion;
+  const group = (tracks: AutotagSuggestion[]) =>
+    ({
+      groupId: 'g',
+      albumId: 'a',
+      currentAlbum: null,
+      currentAlbumArtist: null,
+      albumHasArt: false,
+      confidence: 0.9,
+      albumTrackCount: tracks.length,
+      release: null,
+      tracks,
+    }) as AutotagGroup;
+
+  it('formats and bands confidence', () => {
+    expect(confidenceText(0.876)).toBe('88%');
+    expect(confidenceText(1.2)).toBe('100%');
+    expect(confidenceClass(0.9)).toBe('ok');
+    expect(confidenceClass(0.7)).toBe('warnc');
+    expect(confidenceClass(0.3)).toBe('bad');
+  });
+  it('counts pending tracks above a threshold', () => {
+    const gs = [group([sug('a', 0.95), sug('b', 0.8), sug('c', 0.99, 'accepted')]), group([sug('d', 0.9)])];
+    expect(countAbove(gs, 0.9)).toBe(2);
+    expect(countAbove(gs, 0.5)).toBe(3);
+  });
+  it('lists group changes in display order', () => {
+    expect(groupChanges(group([sug('a', 1, 'pending', ['year', 'title']), sug('b', 1, 'pending', ['album', 'title'])]))).toEqual(['title', 'album', 'year']);
+  });
+  it('describes copy quality', () => {
+    expect(
+      qualityText({
+        codec: 'FLAC',
+        bitrate: 900,
+        sampleRate: 44100,
+        bitsPerSample: 16,
+      }),
+    ).toBe('FLAC · 16-bit/44.1 kHz · 900 kbps');
+    expect(
+      qualityText({
+        codec: 'MP3',
+        bitrate: 320,
+        sampleRate: 48000,
+        bitsPerSample: null,
+      }),
+    ).toBe('MP3 · 48.0 kHz · 320 kbps');
+  });
 });

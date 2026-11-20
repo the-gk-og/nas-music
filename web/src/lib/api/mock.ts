@@ -641,6 +641,25 @@ export class MockBackend {
       if (method === 'PATCH' && body.status) rep.status = body.status as 'open' | 'closed';
       return rep;
     }
+    if (path === '/admin/autotag/status') return A.autotagStatus();
+    if (path === '/admin/autotag/groups') return A.autotagGroups(qs.get('status') ?? 'pending');
+    if (path === '/admin/autotag/accept' && method === 'POST')
+      return {
+        accepted: A.autotagDecide(body, 'accepted'),
+        batchId: 'mock',
+        changed: 1,
+        coverErrors: [],
+      };
+    if (path === '/admin/autotag/reject' && method === 'POST') return { rejected: A.autotagDecide(body, 'rejected') };
+    if (path === '/admin/autotag/reopen' && method === 'POST')
+      return {
+        reopened: A.autotagDecide(body, 'pending', 'accepted') + A.autotagDecide(body, 'pending', 'rejected'),
+        reverted: 0,
+      };
+    if (path === '/admin/autotag/rematch' && method === 'POST') return { queued: (body.trackIds as string[]).length };
+    if (path === '/admin/duplicates') return A.dups;
+    if (path === '/admin/duplicates/resolve' && method === 'POST') return A.resolveDup(body.keepTrackId as string, body.hideTrackIds as string[]);
+    if (path === '/admin/duplicates/unhide' && method === 'POST') return A.unhideDup(body.trackIds as string[]);
     if (path === '/admin/backups') {
       if (method === 'POST') {
         const b = { id: 'b' + Date.now(), createdAt: iso(), bytes: 49e6, kind: 'manual', note: (body.note as string) ?? null };
