@@ -18,6 +18,13 @@ class MainActivity : FragmentActivity() { // FragmentActivity: the Cast button's
         enableEdgeToEdge()
         if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         setContent { NasMusicRoot(container) }
+        if (savedInstanceState == null) org.nasmusic.app.ui.LaunchRequests.handle(intent)
+    }
+
+    /** A widget or quick-settings tile asked for Now Playing (or an item) while the app was open. */
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        org.nasmusic.app.ui.LaunchRequests.handle(intent)
     }
 
     override fun onStart() {

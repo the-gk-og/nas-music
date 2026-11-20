@@ -129,6 +129,9 @@ dependencies {
     implementation(libs.zxing.android.embedded)
     implementation(libs.tink.android)
     implementation(libs.palette)
+    // Home-screen widgets (Jetpack Glance, Apache-2.0).
+    implementation(libs.glance.appwidget)
+    implementation(libs.glance.material3)
 
     // Google Cast SDK: `full` flavour ONLY. Never add Google Play Services to `implementation`.
     "fullImplementation"(libs.play.services.cast.framework)

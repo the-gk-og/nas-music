@@ -461,6 +461,13 @@ class PlaybackService : MediaLibraryService() {
 
     private fun onPlayerEvents(events: Player.Events) {
         if (events.containsAny(
+                Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_TIMELINE_CHANGED,
+                Player.EVENT_MEDIA_METADATA_CHANGED, Player.EVENT_AVAILABLE_COMMANDS_CHANGED,
+            )
+        ) {
+            publishWidgetState()
+        }
+        if (events.containsAny(
                 Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_POSITION_DISCONTINUITY,
                 Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED, Player.EVENT_REPEAT_MODE_CHANGED, Player.EVENT_VOLUME_CHANGED,
                 Player.EVENT_PLAYBACK_PARAMETERS_CHANGED,
@@ -471,6 +478,21 @@ class PlaybackService : MediaLibraryService() {
         if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED) && !player.isPlaying) {
             c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)
         }
+    }
+
+    /** Home-screen widgets and the quick-settings tile follow this phone's player (Cast overlay applied). */
+    private fun publishWidgetState() {
+        val local = NowPlaying(
+            item = player.currentMediaItem,
+            isPlaying = player.isPlaying,
+            hasNext = player.hasNextMediaItem(),
+            hasPrevious = player.hasPreviousMediaItem(),
+            queue = emptyList(),
+            index = player.currentMediaItemIndex,
+        )
+        val e = ext
+        val cast = e?.overlay(local.copy(queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }))
+        org.nasmusic.app.widget.WidgetHub.publishLocal(cast?.copy(queue = emptyList()) ?: local, if (cast != null) e.name ?: "a Cast speaker" else null)
     }
 
     /** A Google Cast session (full flavour) playing this phone's queue; Connect sees it as this phone. */
@@ -664,6 +686,7 @@ class PlaybackService : MediaLibraryService() {
         crossfader.release()
         c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)
         tracker?.release()
+        org.nasmusic.app.widget.WidgetHub.publishLocal(null)
         session?.run {
             player.release()
             release()

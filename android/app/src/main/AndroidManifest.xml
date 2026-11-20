@@ -40,6 +40,10 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Long-pressing a quick-settings tile opens the app (Now Playing / Settings). -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
         </activity>
 
         <service
@@ -52,6 +56,41 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
                 <!-- Android Auto and other MediaBrowser clients browse the library through this. -->
                 <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+
+        <!-- Home-screen player widget (Jetpack Glance). -->
+        <receiver
+            android:name=".widget.NowPlayingWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/now_playing_widget_info" />
+        </receiver>
+
+        <!-- Quick-settings tiles: play/pause (label = current song) and an optional family-mode toggle. -->
+        <service
+            android:name=".widget.PlaybackTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_w_play"
+            android:label="@string/tile_playback"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".widget.FamilyTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_w_family"
+            android:label="@string/tile_family"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
 

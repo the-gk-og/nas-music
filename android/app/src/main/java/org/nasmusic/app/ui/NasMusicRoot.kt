@@ -151,6 +151,18 @@ private fun MainScaffold(c: AppContainer) {
     val snack = remember { SnackbarHostState() }
     LaunchedEffect(ui.toast) { ui.toast?.let { snack.showSnackbar(it); ui.toast = null } }
     LaunchedEffect(Unit) { c.ui.messages.collect { ui.toast = it } }
+    // Widgets and quick-settings tiles open Now Playing or a pinned/recent item.
+    val launchScope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        LaunchRequests.pending.collect { r ->
+            if (r == null) return@collect
+            LaunchRequests.pending.value = null
+            when (r) {
+                is LaunchRequests.Request.Route -> ui.go(r.route)
+                is LaunchRequests.Request.Item -> openShelfItem(c, ui, launchScope, r.item)
+            }
+        }
+    }
     LaunchedEffect(current) { org.nasmusic.app.diag.CrashLog.currentScreen = current ?: "?" }
     // Offer a bug report once after a crash.
     LaunchedEffect(Unit) { if (org.nasmusic.app.diag.CrashLog.hasUnsentCrash()) ui.bugReport = true }
