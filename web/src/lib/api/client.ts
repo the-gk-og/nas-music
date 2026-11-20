@@ -43,6 +43,12 @@ import type {
   Suggestion,
   Track,
   TrackInfo,
+  ArtistInfo,
+  ArtistPage,
+  SmartDefinition,
+  SmartFields,
+  SmartPlaylist,
+  SmartPreview,
 } from '../types';
 import type { JamSettings, JamSnapshot } from '../jam';
 
@@ -307,6 +313,21 @@ export class ApiClient {
   // ---- library ----
   artists = (offset = 0, limit = 1000) => this.get<Artist[]>('/library/artists', { offset, limit });
   artist = (id: string) => this.get<Artist & { albums: Album[] }>(`/library/artists/${encodeURIComponent(id)}`);
+  /** v7 artist page: photo/bio/links + top songs, albums, appears-on, similar artists. */
+  artistPage = (id: string) => this.get<ArtistPage>(`/library/artists/${encodeURIComponent(id)}/page`);
+  artistInfo = (id: string) => this.get<ArtistInfo>(`/library/artists/${encodeURIComponent(id)}/info`);
+  artistTracks = (id: string) => this.get<Track[]>(`/library/artists/${encodeURIComponent(id)}/tracks`);
+  // ---- v7 smart playlists ----
+  smartPlaylists = () => this.get<SmartPlaylist[]>('/smart-playlists');
+  smartFields = () => this.get<SmartFields>('/smart-playlists/fields');
+  smartPlaylist = (id: string) => this.get<SmartPlaylist>(`/smart-playlists/${encodeURIComponent(id)}`);
+  createSmartPlaylist = (name: string, definition: SmartDefinition, preset?: string | null) =>
+    this.post<SmartPlaylist>('/smart-playlists', { name, definition, preset: preset ?? null });
+  updateSmartPlaylist = (id: string, b: { name?: string; definition?: SmartDefinition }) =>
+    this.patch<SmartPlaylist>(`/smart-playlists/${encodeURIComponent(id)}`, b);
+  deleteSmartPlaylist = (id: string) => this.del<void>(`/smart-playlists/${encodeURIComponent(id)}`);
+  previewSmartPlaylist = (definition: SmartDefinition, smartPlaylistId?: string | null, sample = 25) =>
+    this.post<SmartPreview>('/smart-playlists/preview', { definition, smartPlaylistId: smartPlaylistId ?? null, sample });
   albums = (sort: 'name' | 'year' | 'added' = 'name', offset = 0, limit = 1000, artistId?: string) =>
     this.get<Album[]>('/library/albums', { sort, offset, limit, artistId });
   album = (id: string) => this.get<Album & { tracks: Track[] }>(`/library/albums/${encodeURIComponent(id)}`);

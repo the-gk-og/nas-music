@@ -12,7 +12,9 @@
 -- (radio_sessions.station_key/params, radio_stations, radio_feedback). v7 adds voice control (voice_tokens,
 -- voice_devices). Older databases are upgraded by nasmusic.db.migrations. Also v7 adds uploads (upload_access,
 -- uploads, upload_sessions): files people upload live under config upload_root (a second, writable library
--- root; tracks.path '@uploads/<path>').
+-- root; tracks.path '@uploads/<path>'). Also v7 adds smart playlists (smart_playlists + the
+-- smart_playlist_tracks cache) and the artist-page metadata cache (artist_info). Older databases are upgraded
+-- by nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -774,3 +776,46 @@ CREATE TABLE IF NOT EXISTS upload_sessions (
     updated_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS upload_sessions_user ON upload_sessions(user_id, status);
+
+-- ---------- v7: smart playlists (rule-based, per user) ----------
+-- `definition` is JSON {match, rules, sort, limit} (api/openapi.yaml SmartPlaylistDefinition), evaluated by
+-- nasmusic.app.smart in SQL. The result is cached in smart_playlist_tracks; `stamp` records what it was
+-- computed from (rules, user's listening, library, family mode, the date) so a stale cache is recomputed on read
+-- and by the nightly `smart` job. The AI reads smart_playlist_tracks for smart-playlist radio seeds.
+CREATE TABLE IF NOT EXISTS smart_playlists (
+    id            TEXT PRIMARY KEY,           -- 'sp' + uuid4 hex
+    user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name          TEXT NOT NULL,
+    definition    TEXT NOT NULL,              -- JSON
+    preset        TEXT,                       -- preset id it was created from, if any
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    refreshed_at  TEXT,                       -- when the cache was last computed
+    stamp         TEXT,                       -- cache key of the last computation
+    track_count   INTEGER NOT NULL DEFAULT 0,
+    duration_s    REAL NOT NULL DEFAULT 0,
+    rev           INTEGER NOT NULL DEFAULT 0  -- bumped whenever the cached list changes
+);
+CREATE INDEX IF NOT EXISTS smart_playlists_user ON smart_playlists(user_id);
+
+CREATE TABLE IF NOT EXISTS smart_playlist_tracks (
+    smart_playlist_id TEXT NOT NULL REFERENCES smart_playlists(id) ON DELETE CASCADE,
+    position          INTEGER NOT NULL,
+    track_id          TEXT NOT NULL REFERENCES tracks(id),
+    PRIMARY KEY (smart_playlist_id, position)
+);
+CREATE INDEX IF NOT EXISTS smart_playlist_tracks_track ON smart_playlist_tracks(track_id);
+
+-- ---------- v7: artist pages (shared metadata cache) ----------
+-- From MusicBrainz (+ Wikidata, Wikipedia, Wikimedia Commons). Refreshed rarely (nasmusic.library.artistinfo).
+-- The photo (only ever a Wikimedia Commons file, with its licence and attribution) is cached under
+-- <data_dir>/artist-art/<artist_id>.jpg.
+CREATE TABLE IF NOT EXISTS artist_info (
+    artist_id     TEXT PRIMARY KEY REFERENCES artists(id) ON DELETE CASCADE,
+    status        TEXT NOT NULL CHECK (status IN ('ok','not_found','error')),
+    mbid          TEXT,                       -- the MusicBrainz artist it resolved to
+    data          TEXT,                       -- JSON ArtistInfo (bio, genres, lifeSpan, links, image credits)
+    error         TEXT,
+    fetched_at    TEXT NOT NULL,
+    refresh_after TEXT NOT NULL               -- next lookup no earlier than this
+);

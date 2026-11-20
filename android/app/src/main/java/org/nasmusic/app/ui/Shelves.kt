@@ -96,6 +96,7 @@ fun iconFor(type: String): ImageVector = when (type) {
     "blend" -> Icons.Default.Group
     "wrapped" -> Icons.Default.Celebration
     "playlist", "smart_list" -> Icons.AutoMirrored.Filled.List
+    "smart_playlist" -> Icons.Default.AutoAwesome
     else -> Icons.Default.MusicNote
 }
 
@@ -106,6 +107,7 @@ fun openShelfItem(c: AppContainer, ui: UiController, scope: CoroutineScope, item
         "artist" -> ui.go("artist/${item.id}")
         "playlist" -> ui.go("playlist/${item.id}")
         "smart_list" -> ui.go("list/${item.id}")
+        "smart_playlist" -> ui.go("smart/${item.id}")
         "genre" -> ui.go("genre/${android.net.Uri.encode(item.id)}")
         "folder" -> ui.go("folder/${android.net.Uri.encode(item.id)}")
         "toget" -> ui.go("toget")
@@ -136,7 +138,7 @@ fun openShelfItem(c: AppContainer, ui: UiController, scope: CoroutineScope, item
 }
 
 /** PinType in the contract. */
-private val PINNABLE = setOf("album", "artist", "playlist", "mix", "queue", "smart_list", "genre", "folder")
+private val PINNABLE = setOf("album", "artist", "playlist", "mix", "queue", "smart_list", "smart_playlist", "genre", "folder")
 
 /** A YouTube-Music-style card: art + title + subtitle. Long-press → Pin to Home / Start radio. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -173,7 +175,7 @@ fun ShelfCard(c: AppContainer, item: ShelfItem, width: Dp = 140.dp, siblings: Li
 }
 
 fun radioSeedFor(item: ShelfItem): RadioSeed? = when (item.type) {
-    "album", "artist", "playlist", "track" -> RadioSeed(item.type, item.id)
+    "album", "artist", "playlist", "smart_playlist", "track" -> RadioSeed(item.type, item.id)
     else -> null
 }
 

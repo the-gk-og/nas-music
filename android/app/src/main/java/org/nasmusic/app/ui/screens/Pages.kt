@@ -53,7 +53,6 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import org.nasmusic.app.AppContainer
 import org.nasmusic.app.data.api.AlbumDetail
-import org.nasmusic.app.data.api.ArtistDetail
 import org.nasmusic.app.data.api.RadioSeed
 import org.nasmusic.app.data.api.ShelfItem
 import org.nasmusic.app.data.api.Track
@@ -204,47 +203,102 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
 fun ArtistScreen(c: AppContainer, artistId: String) {
     val ui = LocalUi.current
     val scope = rememberCoroutineScope()
-    var artist by remember { mutableStateOf<ArtistDetail?>(null) }
+    var page by remember { mutableStateOf<org.nasmusic.app.data.api.ArtistPage?>(null) }
+    var failed by remember { mutableStateOf(false) }
     var style by rememberPageStyle(c)
+    var showAll by remember { mutableStateOf(false) }
+    var bioOpen by remember { mutableStateOf(false) }
     val list = rememberLazyListState()
-    LaunchedEffect(artistId) { artist = runCatching { c.api.artist(artistId) }.getOrNull() }
-    val a = artist ?: return Loading()
-    val coverAlbum = a.albums.firstOrNull()?.id
-    val radio = { startRadio(c, ui, scope, RadioSeed("artist", a.id)); Unit }
-    // Without top tracks from the server, "Play" plays the newest album.
-    suspend fun allTracks(): List<Track> = a.topTracks.ifEmpty {
-        a.albums.sortedByDescending { it.year ?: 0 }.firstOrNull()?.let { runCatching { c.api.album(it.id).tracks }.getOrNull() }.orEmpty()
+    LaunchedEffect(artistId) {
+        page = runCatching { c.api.artistPage(artistId) }.getOrElse {
+            // Older server (< api 0.7): build the page from /library/artists/{id}.
+            runCatching { c.api.artist(artistId) }.map { a ->
+                org.nasmusic.app.data.api.ArtistPage(a.id, a.name, a.mbid, topTracks = a.topTracks, albums = a.albums,
+                    similar = a.similar.map { s -> org.nasmusic.app.data.api.SimilarArtist(s.id, s.name, s.albumCount) })
+            }.onFailure { failed = true }.getOrNull()
+        }
+        // Metadata is fetched by the server in the background: poll a few times while it's pending.
+        var n = 0
+        while (page?.info?.status == "pending" && n < 6) {
+            kotlinx.coroutines.delay(2500L + n * 1500L); n++
+            val info = runCatching { c.api.artistInfo(artistId) }.getOrNull() ?: break
+            page = page?.let { it.copy(info = info, photoUrl = info.photoUrl, artUrl = info.photoUrl ?: it.artUrl) }
+        }
     }
-    val play = { scope.launch { allTracks().takeIf { it.isNotEmpty() }?.let { c.player.play(it, 0, PlaySource.LIBRARY, "Artist: ${a.name}") } }; Unit }
-    val shuffle = { scope.launch { allTracks().takeIf { it.isNotEmpty() }?.let { c.player.play(it.shuffled(), 0, PlaySource.LIBRARY, "Artist: ${a.name}") } }; Unit }
+    if (failed && page == null) return org.nasmusic.app.ui.Message("Couldn't load this artist.")
+    val a = page ?: return Loading()
+    val info = a.info
+    val coverAlbum = (a.albums + a.singles + a.appearsOn).firstOrNull()?.id
+    val headerArt: Any? = org.nasmusic.app.ui.artModel(a.artUrl, 512) ?: coverAlbum?.let { MediaItems.artUrl(it, 512) }
+    val tintArt = org.nasmusic.app.ui.artModel(a.artUrl, 128) ?: coverAlbum?.let { MediaItems.artUrl(it, 128) }
+    val queueName = "Artist: ${a.name}"
+    val radio = { startRadio(c, ui, scope, a.radioSeed ?: RadioSeed("artist", a.id)); Unit }
+    suspend fun allTracks(): List<Track> = runCatching { c.api.artistTracks(a.id) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: a.topTracks.ifEmpty {
+        a.albums.firstOrNull()?.let { runCatching { c.api.album(it.id).tracks }.getOrNull() }.orEmpty()
+    }
+    val play = { scope.launch { allTracks().takeIf { it.isNotEmpty() }?.let { c.player.play(it, 0, PlaySource.LIBRARY, queueName) } }; Unit }
+    val shuffle = { scope.launch { allTracks().takeIf { it.isNotEmpty() }?.let { c.player.play(it.shuffled(), 0, PlaySource.LIBRARY, queueName) } }; Unit }
+    val years = info.yearsActive?.from?.let { "$it–${info.yearsActive.to ?: "present"}" }
+    val meta = listOfNotNull(years, info.area ?: info.country, "${a.stats.trackCount.takeIf { it > 0 } ?: a.topTracks.size} songs").joinToString(" · ")
     val menu: @Composable () -> Unit = {
         PageMenu(style, { style = it }) { close ->
             DropdownMenuItem({ Text("Pin to Home") }, { close(); scope.launch { runCatching { c.api.pin(org.nasmusic.app.data.api.NewPin("artist", a.id)) }; ui.toast = "Pinned to Home" } })
         }
     }
+    fun albumCards(l: List<org.nasmusic.app.data.api.Album>, withArtist: Boolean = false) =
+        l.map { ShelfItem("album", it.id, it.title, listOfNotNull(if (withArtist) it.artist else null, it.year?.toString()).joinToString(" · ").ifEmpty { null }, artUrl = org.nasmusic.app.data.FeedRepository.art(it.id), album = it) }
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     LazyColumn(Modifier.fillMaxSize(), state = list) {
         item {
-            if (style == "big") BigHeader(coverAlbum?.let { MediaItems.artUrl(it, 512) }, a.name, null, "${a.albums.size} albums", coverAlbum?.let { MediaItems.artUrl(it, 128) }, list, play, shuffle, radio, null, menu, round = true)
-            else SimpleHeader(c, coverAlbum, a.name, null, "${a.albums.size} albums", play, shuffle, radio, menu)
+            if (style == "big") BigHeader(headerArt, a.name, info.genres.take(3).joinToString(", ").ifEmpty { null }, meta, tintArt, list, play, shuffle, radio, null, menu, round = true)
+            else SimpleHeader(c, coverAlbum, a.name, info.genres.take(3).joinToString(", ").ifEmpty { null }, meta, play, shuffle, radio, menu)
         }
         if (a.topTracks.isNotEmpty()) {
-            item { ShelfHeader("Top tracks") }
-            songItems(c, a.topTracks.take(5), "Artist: ${a.name}", PlaySource.LIBRARY)
+            item { ShelfHeader("Top songs") { if (a.topTracks.size > 5) androidx.compose.material3.TextButton({ showAll = !showAll }) { Text(if (showAll) "Less" else "More") } } }
+            songItems(c, if (showAll) a.topTracks else a.topTracks.take(5), queueName, PlaySource.LIBRARY)
         }
-        item {
-            ShelfHeader("Albums")
-            ShelfRow(c, a.albums.sortedByDescending { it.year ?: 0 }.map { ShelfItem("album", it.id, it.title, it.year?.toString(), artUrl = org.nasmusic.app.data.FeedRepository.art(it.id), album = it) })
-        }
+        if (a.albums.isNotEmpty()) item { ShelfHeader("Albums"); ShelfRow(c, albumCards(a.albums.sortedByDescending { it.year ?: 0 })) }
+        if (a.singles.isNotEmpty()) item { ShelfHeader("Singles & EPs"); ShelfRow(c, albumCards(a.singles.sortedByDescending { it.year ?: 0 })) }
+        if (a.appearsOn.isNotEmpty()) item { ShelfHeader("Appears on"); ShelfRow(c, albumCards(a.appearsOn, true)) }
         item {
             ShelfHeader("Artist radio")
-            ShelfRow(c, listOf(ShelfItem("radio", "artist:${a.id}", "${a.name} radio", "Similar sound from your library", artUrl = org.nasmusic.app.data.FeedRepository.art(coverAlbum), seed = RadioSeed("artist", a.id))))
+            ShelfRow(c, listOf(ShelfItem("radio", "artist:${a.id}", "${a.name} radio", "Similar sound from your library", artUrl = a.artUrl ?: org.nasmusic.app.data.FeedRepository.art(coverAlbum), seed = RadioSeed("artist", a.id))))
         }
         if (a.similar.isNotEmpty()) item {
-            ShelfHeader("Similar artists")
-            ShelfRow(c, a.similar.map { ShelfItem("artist", it.id, it.name, "${it.albumCount} albums") }, cardWidth = 110.dp)
+            ShelfHeader("Similar artists in your library")
+            ShelfRow(c, a.similar.map { ShelfItem("artist", it.id, it.name, "${it.albumCount} albums", artUrl = it.artUrl) }, cardWidth = 110.dp)
+        }
+        if (info.bio != null || info.links.isNotEmpty()) item {
+            Column(Modifier.padding(16.dp)) {
+                Text("About", style = MaterialTheme.typography.titleLarge)
+                info.bio?.let { b ->
+                    Text(b.text, maxLines = if (bioOpen) Int.MAX_VALUE else 5, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 8.dp).clickable { bioOpen = !bioOpen })
+                    Text("From Wikipedia · ${b.license}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp).clickable { runCatching { uriHandler.openUri(b.url) } })
+                }
+                if (info.links.isNotEmpty()) androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                    info.links.forEach { l ->
+                        androidx.compose.material3.AssistChip({ runCatching { uriHandler.openUri(l.url) } }, { Text(linkLabel(l.kind)) })
+                    }
+                }
+                if (a.photoUrl != null) info.image?.let { im ->
+                    Text("Photo: ${im.author ?: "unknown author"}${im.license?.let { ", $it" } ?: ""}, ${im.source}",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp).clickable { im.filePage?.let { runCatching { uriHandler.openUri(it) } } })
+                }
+            }
+        } else if (info.status == "pending") item {
+            Text("Looking up ${a.name} on MusicBrainz and Wikipedia…", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp))
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
+}
+
+private fun linkLabel(kind: String) = when (kind) {
+    "musicbrainz" -> "MusicBrainz"; "wikipedia" -> "Wikipedia"; "wikidata" -> "Wikidata"; "official" -> "Official site"
+    "discogs" -> "Discogs"; "bandcamp" -> "Bandcamp"; "allmusic" -> "AllMusic"; "lastfm" -> "Last.fm"
+    "soundcloud" -> "SoundCloud"; "youtube" -> "YouTube"; "songkick" -> "Songkick"; else -> kind
 }
 
 /** "Download" / "Remove download" for a whole album or playlist (kept offline, follows later changes). */

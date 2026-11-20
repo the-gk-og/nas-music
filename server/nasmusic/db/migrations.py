@@ -417,7 +417,8 @@ def migrate_v5_to_v6(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
 
 # ---------- v6 -> v7 (combined: see V7_TABLES and schema.sql header) ----------
 
-V7_TABLES = ("voice_tokens", "voice_devices", "upload_access", "uploads", "upload_sessions")
+V7_TABLES = ("voice_tokens", "voice_devices", "upload_access", "uploads", "upload_sessions", "smart_playlists",
+             "smart_playlist_tracks", "artist_info")
 
 
 def migrate_v6_to_v7(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:

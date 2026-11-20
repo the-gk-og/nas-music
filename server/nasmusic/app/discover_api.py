@@ -20,7 +20,7 @@ from nasmusic.library import art, queries
 log = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(device)])
 Conn = sqlite3.Connection
-PinType = Literal["album", "artist", "playlist", "mix", "queue", "smart_list", "genre", "folder"]
+PinType = Literal["album", "artist", "playlist", "mix", "queue", "smart_list", "smart_playlist", "genre", "folder"]
 
 
 # ---------- Home / For You / pins ----------
@@ -223,7 +223,7 @@ def delete_toget(item_id: str, me: Device = Depends(device), conn: Conn = Depend
 
 
 class Seed(BaseModel):
-    type: Literal["random", "track", "artist", "album", "playlist", "moment", "vibe"]
+    type: Literal["random", "track", "artist", "album", "playlist", "smart_playlist", "moment", "vibe"]
     id: str | None = Field(default=None, max_length=200)
     text: str | None = Field(default=None, max_length=200)            # vibe
     constraints: list[dict] | None = Field(default=None, max_length=30)  # vibe chips (from /radio/vibe/parse)

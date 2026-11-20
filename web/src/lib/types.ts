@@ -435,13 +435,14 @@ export type ItemType =
   | 'suggestion'
   | 'toget'
   | 'smart_list'
+  | 'smart_playlist'
   | 'genre'
   | 'folder'
   | 'blend'
   | 'wrapped';
 
 export interface RadioSeed {
-  type: 'random' | 'track' | 'artist' | 'album' | 'playlist' | 'moment' | 'vibe';
+  type: 'random' | 'track' | 'artist' | 'album' | 'playlist' | 'smart_playlist' | 'moment' | 'vibe';
   id?: string | null;
   title?: string | null;
   /** vibe: what the user typed / said */
@@ -524,6 +525,7 @@ export interface ShelfItem {
   queue?: Queue;
   mix?: { kind?: string; trackCount?: number; durationS?: number };
   seed?: RadioSeed;
+  smartPlaylist?: SmartPlaylist;
   device?: { kind?: ConnectDevice['kind']; canPlay?: boolean; isActive?: boolean; playing?: boolean; nowPlaying?: Track | null };
   progress?: { index?: number; count?: number; positionMs?: number; queueId?: string | null };
   catalog?: CatalogItem;
@@ -622,7 +624,7 @@ export interface ToGetItem {
   links?: { name: string; url: string }[];
 }
 
-export type PinType = 'album' | 'artist' | 'playlist' | 'mix' | 'queue' | 'smart_list' | 'genre' | 'folder';
+export type PinType = 'album' | 'artist' | 'playlist' | 'mix' | 'queue' | 'smart_list' | 'smart_playlist' | 'genre' | 'folder';
 
 // ---- v5 discovery phase 2: Release Radar, Wrapped, Blend ----
 
@@ -713,4 +715,111 @@ export interface Blend {
   createdAt?: string;
   updatedAt?: string;
   tracks?: { track: Track; forUsers: string[]; reason: 'shared' | 'top' | 'match' | string }[];
+}
+
+// ---------- v7: smart playlists ----------
+
+export type SmartFieldType = 'number' | 'percent' | 'text' | 'date' | 'bool' | 'enum' | 'playlist';
+export type SmartUnit = 'days' | 'weeks' | 'months' | 'years';
+
+export interface SmartRule {
+  field: string;
+  op: string;
+  value?: number | string | boolean | [number, number] | null;
+  unit?: SmartUnit;
+}
+
+export interface SmartGroup {
+  match: 'all' | 'any';
+  rules: (SmartRule | SmartGroup)[];
+}
+
+export interface SmartDefinition extends SmartGroup {
+  sort: string;
+  limit: { type: 'songs' | 'minutes' | 'none'; value?: number };
+}
+
+export interface SmartPlaylist {
+  id: string;
+  name: string;
+  definition: SmartDefinition;
+  preset?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  refreshedAt?: string | null;
+  trackCount: number;
+  durationS: number;
+  rev: number;
+  tracks?: Track[];
+}
+
+export interface SmartFieldSpec {
+  id: string;
+  label: string;
+  type: SmartFieldType;
+  ops: string[];
+  options?: string[];
+  suggest?: 'genres' | 'artists';
+  unit?: string;
+}
+
+export interface SmartPreset {
+  id: string;
+  name: string;
+  description?: string;
+  definition: SmartDefinition;
+}
+
+export interface SmartFields {
+  fields: SmartFieldSpec[];
+  sorts: { id: string; label: string }[];
+  units: SmartUnit[];
+  presets: SmartPreset[];
+}
+
+export interface SmartPreview {
+  trackCount: number;
+  durationS: number;
+  tracks: Track[];
+}
+
+// ---------- v7: artist pages ----------
+
+export interface ArtistLink {
+  kind: string;
+  url: string;
+}
+
+export interface ArtistInfo {
+  status: 'ok' | 'not_found' | 'error' | 'pending' | 'none';
+  fetchedAt?: string;
+  mbid?: string | null;
+  type?: string | null;
+  disambiguation?: string | null;
+  country?: string | null;
+  area?: string | null;
+  beginArea?: string | null;
+  lifeSpan?: { begin?: string | null; end?: string | null; ended?: boolean };
+  yearsActive?: { from?: number | null; to?: number | null };
+  genres?: string[];
+  links?: ArtistLink[];
+  bio?: { text: string; source: string; url: string; license: string; licenseUrl: string } | null;
+  image?: { source: string; author?: string | null; license?: string | null; licenseUrl?: string | null; filePage?: string | null; credit?: string | null } | null;
+  photoUrl?: string | null;
+}
+
+export interface ArtistPage {
+  id: string;
+  name: string;
+  mbid?: string | null;
+  artUrl?: string | null;
+  photoUrl?: string | null;
+  info: ArtistInfo;
+  stats: { trackCount: number; durationS: number; playCount: number; albumCount: number; singleCount: number };
+  topTracks: (Track & { playCount?: number })[];
+  albums: Album[];
+  singles: Album[];
+  appearsOn: Album[];
+  similar: (Artist & { similarity?: number; artUrl?: string | null })[];
+  radioSeed: RadioSeed;
 }

@@ -23,7 +23,7 @@
     menu,
   }: {
     item: ShelfItem;
-    kind: 'album' | 'artist' | 'playlist' | 'mix' | 'smart_list' | 'genre';
+    kind: 'album' | 'artist' | 'playlist' | 'mix' | 'smart_list' | 'smart_playlist' | 'genre';
     label: string;
     meta?: string;
     onplay?: () => void;

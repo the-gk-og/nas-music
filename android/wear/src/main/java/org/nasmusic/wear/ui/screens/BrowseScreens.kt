@@ -38,7 +38,11 @@ object ListKinds {
     const val FAVOURITES = "favourites"
     const val MIX = "mix"
     const val QUEUE = "queue"
-    val OFFLINE_CAPABLE = setOf(PLAYLIST, ALBUM, FAVOURITES)
+    /** api 0.7: an artist's top songs (by your plays) */
+    const val ARTIST = "artist"
+    /** api 0.7: a smart playlist (evaluated on the server) */
+    const val SMART = "smart_playlist"
+    val OFFLINE_CAPABLE = setOf(PLAYLIST, ALBUM, FAVOURITES, SMART)
 }
 
 /** Loads a list from the server, falling back to its offline snapshot. */
@@ -50,6 +54,8 @@ suspend fun loadList(c: WearContainer, kind: String, id: String): Pair<String, L
             ListKinds.FAVOURITES -> "Favourites" to c.api.favourites()
             ListKinds.MIX -> c.api.mix(id).let { m -> m.title to m.tracks.map { it.track } }
             ListKinds.QUEUE -> c.api.queue(id).let { it.name to it.tracks }
+            ListKinds.ARTIST -> c.api.artistPage(id).let { "${it.name}: top songs" to it.topTracks }
+            ListKinds.SMART -> c.api.smartPlaylist(id).let { it.name to it.tracks }
             else -> null
         }
     }.getOrNull()
@@ -88,6 +94,8 @@ fun FeedScreen(c: WearContainer, open: (kind: String, id: String) -> Unit, nowPl
                             "playlist" -> open(ListKinds.PLAYLIST, it.id)
                             "mix" -> open(ListKinds.MIX, it.id)
                             "queue" -> open(ListKinds.QUEUE, it.id)
+                            "artist" -> open(ListKinds.ARTIST, it.id)
+                            "smart_playlist" -> open(ListKinds.SMART, it.id)
                             "track" -> it.track?.let { t -> c.player.playTracks(listOf(t), 0, t.title); nowPlaying() }
                             "radio" -> scope.launch {
                                 val seed = it.seed ?: return@launch
@@ -108,10 +116,10 @@ fun FeedScreen(c: WearContainer, open: (kind: String, id: String) -> Unit, nowPl
     }
 }
 
-private val OPENABLE = setOf("album", "playlist", "mix", "queue", "track", "radio")
+private val OPENABLE = setOf("album", "playlist", "mix", "queue", "track", "radio", "artist", "smart_playlist")
 
 private fun artAlbum(i: ShelfItem): String? =
-    i.album?.id ?: i.track?.albumId ?: i.artUrl?.takeIf { it.startsWith("art/") }?.removePrefix("art/")?.substringBefore('?')
+    i.album?.id ?: i.track?.albumId ?: i.artUrl?.takeIf { it.startsWith("art/") && !it.startsWith("art/artist/") }?.removePrefix("art/")?.substringBefore('?')
 
 @Composable
 fun PlaylistsScreen(c: WearContainer, open: (kind: String, id: String) -> Unit) {

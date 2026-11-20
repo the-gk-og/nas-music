@@ -89,6 +89,8 @@ import org.nasmusic.app.ui.screens.HomeScreen
 import org.nasmusic.app.ui.screens.LibraryScreen
 import org.nasmusic.app.ui.screens.NowPlayingScreen
 import org.nasmusic.app.ui.screens.PlaylistScreen
+import org.nasmusic.app.ui.screens.SmartEditorScreen
+import org.nasmusic.app.ui.screens.SmartPlaylistScreen
 import org.nasmusic.app.ui.screens.QueuesScreen
 import org.nasmusic.app.ui.screens.GlobalSearchScreen
 import org.nasmusic.app.ui.screens.SettingsScreen
@@ -251,6 +253,8 @@ private fun NavGraphBuilder.routes(c: AppContainer, motion: MotionLevel) {
     composable("artist/{id}") { e -> ArtistScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("genre/{name}") { e -> GenreScreen(c, android.net.Uri.decode(e.arguments?.getString("name").orEmpty())) }
     composable("playlist/{id}") { e -> PlaylistScreen(c, e.arguments?.getString("id").orEmpty()) }
+    composable("smart/{id}") { e -> SmartPlaylistScreen(c, e.arguments?.getString("id").orEmpty()) }
+    composable("smart-edit/{param}") { e -> SmartEditorScreen(c, android.net.Uri.decode(e.arguments?.getString("param").orEmpty())) }
     composable("list/{kind}") { e -> SmartListScreen(c, e.arguments?.getString("kind").orEmpty()) }
     composable("toget") { ToGetScreen(c) }
     composable("release-radar") { ReleaseRadarScreen(c) }

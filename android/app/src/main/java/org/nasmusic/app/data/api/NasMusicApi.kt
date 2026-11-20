@@ -24,6 +24,37 @@ interface NasMusicApi {
     @GET("library/artists/{id}")
     suspend fun artist(@Path("id") id: String): ArtistDetail
 
+    // ---- api 0.7: artist pages + smart playlists ----
+    @GET("library/artists/{id}/page")
+    suspend fun artistPage(@Path("id") id: String): ArtistPage
+
+    @GET("library/artists/{id}/info")
+    suspend fun artistInfo(@Path("id") id: String): ArtistInfo
+
+    @GET("library/artists/{id}/tracks")
+    suspend fun artistTracks(@Path("id") id: String): List<Track>
+
+    @GET("smart-playlists")
+    suspend fun smartPlaylists(): List<SmartPlaylist>
+
+    @GET("smart-playlists/fields")
+    suspend fun smartFields(): SmartFields
+
+    @GET("smart-playlists/{id}")
+    suspend fun smartPlaylist(@Path("id") id: String): SmartPlaylist
+
+    @POST("smart-playlists")
+    suspend fun createSmartPlaylist(@Body body: NewSmartPlaylist): SmartPlaylist
+
+    @PATCH("smart-playlists/{id}")
+    suspend fun updateSmartPlaylist(@Path("id") id: String, @Body body: SmartPatch): SmartPlaylist
+
+    @DELETE("smart-playlists/{id}")
+    suspend fun deleteSmartPlaylist(@Path("id") id: String): Response<Unit>
+
+    @POST("smart-playlists/preview")
+    suspend fun previewSmartPlaylist(@Body body: SmartPreviewRequest): SmartPreview
+
     @GET("library/albums")
     suspend fun albums(
         @Query("artistId") artistId: String? = null,

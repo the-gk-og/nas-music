@@ -355,3 +355,37 @@ def likely_next(conn: sqlite3.Connection, cfg: AIConfig, user_id: str) -> dict[s
     except Exception:
         log.exception("likely_next failed for user %s", user_id)
         return {}
+
+
+def similar_artists(conn: sqlite3.Connection, cfg: AIConfig, artist_id: str, limit: int = 12
+                    ) -> list[tuple[str, float]]:
+    """(v7 artist pages) Library artists that sound most like `artist_id`: [(artist_id, similarity 0..1)],
+    best first, from the mean audio embedding of each artist's analysed tracks. Shared (not per user): the
+    server filters the result for the user (family mode). Never raises; [] when the artist isn't analysed."""
+    import numpy as np
+
+    from .common import active_version, load_library
+    from .extractors import effective_version
+
+    try:
+        lib = load_library(conn, active_version(conn, effective_version(cfg.model_version)))
+        if not len(lib):
+            return []
+        artists = np.array(lib.artist)
+        mine = artists == artist_id
+        if not mine.any():
+            return []
+        uniq, inv = np.unique(artists, return_inverse=True)
+        sums = np.zeros((len(uniq), lib.emb.shape[1]), dtype=np.float64)
+        np.add.at(sums, inv, lib.emb)
+        counts = np.bincount(inv, minlength=len(uniq)).astype(np.float64)
+        cent = sums / counts[:, None]
+        cent /= np.maximum(np.linalg.norm(cent, axis=1, keepdims=True), 1e-9)
+        me = int(np.flatnonzero(uniq == artist_id)[0])
+        sim = cent @ cent[me]
+        sim[me] = -np.inf
+        order = np.argsort(-sim, kind="stable")[:limit]
+        return [(str(uniq[j]), round(float((sim[j] + 1) / 2), 4)) for j in order if np.isfinite(sim[j])]
+    except Exception:
+        log.exception("similar_artists failed for %s", artist_id)
+        return []

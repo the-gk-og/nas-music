@@ -10,6 +10,12 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    0.7.0 (schema v7): smart playlists (/smart-playlists/*: rule-based, per user, evaluated and cached on the
+    server, family-mode filtered; pinnable as `smart_playlist`, usable as a queue source and as a radio seed
+    `{"type": "smart_playlist", "id"}`) and artist pages (/library/artists/{id}/page|info|tracks,
+    /art/artist/{id}: photo from Wikimedia Commons with licence + attribution, bio from Wikipedia, genres,
+    years active and links from MusicBrainz/Wikidata, top songs, albums/singles, appears-on, similar artists).
+    Artist ShelfItems use the artist photo as `artUrl` when there is one.
     0.6.0 (schema v6): explicit-content flags and family mode. Track gains `explicit`
     (explicit|probable|clean|unknown; show an "E" badge for explicit) and, in queues/playlists only,
     `familyHidden`; Album gains `explicit` (contains explicit tracks). With family mode on, the server hides
@@ -118,6 +124,48 @@ paths:
                     properties:
                       albums: { type: array, items: { $ref: '#/components/schemas/Album' } }
         '404': { description: not found }
+  /library/artists/{artistId}/page:
+    get:
+      summary: Artist page (v7) - everything the artist screen shows
+      description: |
+        Library parts are family-mode filtered (404 when the caller can see nothing by this artist). The
+        metadata comes from the server's cache; when it is missing or due, a lookup is queued in the background
+        and `info.status` is "pending": fetch /library/artists/{id}/info again after a few seconds.
+      parameters: [ { name: artistId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: the page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArtistPage' }
+        '404': { description: not found }
+  /library/artists/{artistId}/info:
+    get:
+      summary: Artist metadata only (v7), for polling while `status` is "pending"
+      parameters: [ { name: artistId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: metadata
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ArtistInfo'
+                  - type: object
+                    properties:
+                      photoUrl: { type: [string, 'null'], description: relative to the API base }
+        '404': { description: not found }
+  /library/artists/{artistId}/tracks:
+    get:
+      summary: All tracks by the artist (own albums first, then appearances), for play all / shuffle (v7)
+      parameters: [ { name: artistId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: tracks
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Track' } }
+        '404': { description: not found }
   /library/albums:
     get:
       parameters:
@@ -225,6 +273,125 @@ paths:
       responses:
         '200': { description: image/jpeg }
         '404': { description: no art }
+  /art/artist/{artistId}:
+    get:
+      summary: Cached artist photo (v7; Wikimedia Commons, max 600 px wide). Show ArtistInfo.image credits with it.
+      parameters:
+        - { name: artistId, in: path, required: true, schema: { type: string } }
+        - { name: token, in: query, schema: { type: string }, description: device token (for <img>) }
+      responses:
+        '200': { description: image/jpeg }
+        '404': { description: no photo }
+  /smart-playlists:
+    get:
+      summary: The caller's smart playlists (v7), refreshed if stale
+      responses:
+        '200':
+          description: smart playlists by name
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SmartPlaylist' } }
+    post:
+      summary: Create a smart playlist (max 200 per user)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, definition]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                definition: { $ref: '#/components/schemas/SmartPlaylistDefinition' }
+                preset: { type: [string, 'null'], description: preset id it was started from }
+      responses:
+        '201':
+          description: created, with its tracks
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SmartPlaylistDetail' }
+        '422': { description: invalid definition (detail says what) }
+  /smart-playlists/fields:
+    get:
+      summary: Rule editor catalogue - fields (type, operators, options), sorts, units and presets
+      responses:
+        '200':
+          description: catalogue
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SmartPlaylistFields' }
+  /smart-playlists/preview:
+    post:
+      summary: Evaluate a definition without saving it (live count in the editor)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition: { $ref: '#/components/schemas/SmartPlaylistDefinition' }
+                smartPlaylistId: { type: [string, 'null'], description: the one being edited (self-reference check) }
+                sample: { type: integer, default: 25, minimum: 0, maximum: 200, description: how many tracks to return }
+      responses:
+        '200':
+          description: count, total duration and the first `sample` tracks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trackCount, durationS, tracks]
+                properties:
+                  trackCount: { type: integer }
+                  durationS: { type: number }
+                  tracks: { type: array, items: { $ref: '#/components/schemas/Track' } }
+        '422': { description: invalid definition }
+  /smart-playlists/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      summary: A smart playlist with its (fresh) tracks
+      responses:
+        '200':
+          description: smart playlist
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SmartPlaylistDetail' }
+        '404': { description: not found (or not the caller's) }
+    patch:
+      summary: Rename and/or change the rules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                definition: { $ref: '#/components/schemas/SmartPlaylistDefinition' }
+      responses:
+        '200':
+          description: updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SmartPlaylistDetail' }
+        '404': { description: not found }
+        '422': { description: invalid definition }
+    delete:
+      responses:
+        '204': { description: deleted (its pin too) }
+        '404': { description: not found }
+  /smart-playlists/{id}/refresh:
+    post:
+      summary: Recompute now (normally automatic on read and nightly)
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: refreshed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SmartPlaylistDetail' }
+        '404': { description: not found }
   /favourites:
     get:
       responses:
@@ -3246,7 +3413,7 @@ components:
         `artUrl` is RELATIVE TO THE API BASE (/api/v1/), e.g. "art/<albumId>" or "catalog/<id>/cover"; null = no art.
       required: [type, id, title]
       properties:
-        type: { type: string, enum: [track, album, artist, playlist, mix, radio, queue, device, catalog, suggestion, toget, smart_list, genre, folder, blend, wrapped] }
+        type: { type: string, enum: [track, album, artist, playlist, mix, radio, queue, device, catalog, suggestion, toget, smart_list, smart_playlist, genre, folder, blend, wrapped] }
         id: { type: string }
         title: { type: string }
         subtitle: { type: [string, 'null'] }
@@ -3258,6 +3425,7 @@ components:
         queue: { $ref: '#/components/schemas/Queue' }
         mix: { type: object, properties: { kind: { type: string }, trackCount: { type: integer }, durationS: { type: number } } }
         seed: { $ref: '#/components/schemas/RadioSeed' }
+        smartPlaylist: { $ref: '#/components/schemas/SmartPlaylist' }
         device:
           type: object
           properties:
@@ -3423,12 +3591,12 @@ components:
               reason: { type: string, enum: [shared, top, match], description: "shared = two or more members love it; top = one member's favourite; match = theirs, likely to suit the others" }
     PinType:
       type: string
-      enum: [album, artist, playlist, mix, queue, smart_list, genre, folder]
+      enum: [album, artist, playlist, mix, queue, smart_list, smart_playlist, genre, folder]
     RadioSeed:
       type: object
       required: [type]
       properties:
-        type: { type: string, enum: [random, track, artist, album, playlist, moment, vibe] }
+        type: { type: string, enum: [random, track, artist, album, playlist, smart_playlist, moment, vibe] }
         id: { type: [string, 'null'], description: required unless type=random / moment / vibe }
         title: { type: [string, 'null'], description: set by the server in responses }
         text: { type: [string, 'null'], maxLength: 200, description: 'vibe: what the user typed or said' }
@@ -3883,7 +4051,7 @@ components:
       description: What a queue was started from; drives Home's Recently played / Continue listening.
       required: [type]
       properties:
-        type: { type: string, enum: [album, artist, playlist, mix, radio, genre, folder, smart_list, search, other] }
+        type: { type: string, enum: [album, artist, playlist, mix, radio, genre, folder, smart_list, smart_playlist, search, other] }
         id: { type: [string, 'null'] }
     QueueDetail:
       allOf:
@@ -4022,6 +4190,182 @@ components:
         holiday: { type: [string, 'null'] }
         heartRate: { type: number }
         workout: { type: string }
+    SmartRule:
+      type: object
+      required: [field, op]
+      description: |
+        One condition. Field types (from /smart-playlists/fields): number/percent (ops eq ne gt gte lt lte between;
+        percent values are 0..1, between takes [lo, hi]), text (is isNot contains notContains startsWith;
+        case-insensitive), date (inLast notInLast with `unit` days|weeks|months|years, before/after YYYY-MM-DD,
+        never, ever), bool (is isNot with true/false), enum (is isNot one of `options`), playlist (is isNot
+        with a playlist or smart playlist id). Fields: playCount skipCount skipRate lastPlayed addedAt
+        favouritedAt favourite rating thumbs(up|down|none) genre artist album title year decade("1990")
+        durationS energy danceability tempo mood(happy|sad|relaxed|aggressive|party|acoustic) explicit inPlaylist.
+      properties:
+        field: { type: string }
+        op: { type: string }
+        value: { description: 'number, [number, number], string, boolean or date by field type; omitted for never/ever' }
+        unit: { type: string, enum: [days, weeks, months, years] }
+    SmartRuleGroup:
+      type: object
+      required: [match, rules]
+      properties:
+        match: { type: string, enum: [all, any] }
+        rules:
+          type: array
+          maxItems: 60
+          items: { oneOf: [ { $ref: '#/components/schemas/SmartRule' }, { $ref: '#/components/schemas/SmartRuleGroup' } ] }
+    SmartPlaylistDefinition:
+      description: A rule group (nested at most 3 deep, at most 60 rules) plus sort and limit. No rules = all tracks.
+      allOf:
+        - $ref: '#/components/schemas/SmartRuleGroup'
+        - type: object
+          properties:
+            sort:
+              type: string
+              default: random
+              enum: [random, most_played, least_played, recently_added, oldest_added, recently_played,
+                     least_recently_played, recently_favourited, rating, title, artist, album, year_newest,
+                     year_oldest, duration_longest, duration_shortest, energy_high, energy_low, tempo_fast, tempo_slow]
+              description: random is a stable shuffle that changes daily
+            limit:
+              type: object
+              required: [type]
+              properties:
+                type: { type: string, enum: [songs, minutes, none] }
+                value: { type: integer, minimum: 1 }
+    SmartPlaylist:
+      type: object
+      required: [id, name, definition, trackCount, durationS, rev]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        definition: { $ref: '#/components/schemas/SmartPlaylistDefinition' }
+        preset: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        refreshedAt: { type: [string, 'null'], format: date-time }
+        trackCount: { type: integer }
+        durationS: { type: number }
+        rev: { type: integer, description: bumped whenever the track list changes (re-download when it does) }
+    SmartPlaylistDetail:
+      allOf:
+        - $ref: '#/components/schemas/SmartPlaylist'
+        - type: object
+          required: [tracks]
+          properties:
+            tracks: { type: array, items: { $ref: '#/components/schemas/Track' } }
+    SmartPlaylistFields:
+      type: object
+      required: [fields, sorts, units, presets]
+      properties:
+        fields:
+          type: array
+          items:
+            type: object
+            required: [id, label, type, ops]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              type: { type: string, enum: [number, percent, text, date, bool, enum, playlist] }
+              ops: { type: array, items: { type: string } }
+              options: { type: array, items: { type: string } }
+              suggest: { type: string, enum: [genres, artists], description: where clients can get value suggestions }
+              unit: { type: string }
+        sorts: { type: array, items: { type: object, properties: { id: { type: string }, label: { type: string } } } }
+        units: { type: array, items: { type: string } }
+        presets:
+          type: array
+          items:
+            type: object
+            required: [id, name, definition]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              description: { type: string }
+              definition: { $ref: '#/components/schemas/SmartPlaylistDefinition' }
+    ArtistLink:
+      type: object
+      required: [kind, url]
+      properties:
+        kind: { type: string, enum: [musicbrainz, wikipedia, wikidata, official, discogs, bandcamp, allmusic, lastfm, songkick, soundcloud, youtube] }
+        url: { type: string }
+    ArtistInfo:
+      type: object
+      required: [status]
+      description: 'Online metadata (MusicBrainz, Wikidata, Wikipedia, Wikimedia Commons), cached on the server and refreshed rarely.'
+      properties:
+        status: { type: string, enum: [ok, not_found, error, pending, none], description: 'pending = a lookup is running; none = lookups are turned off on the server' }
+        fetchedAt: { type: string, format: date-time }
+        mbid: { type: [string, 'null'] }
+        type: { type: [string, 'null'], description: 'Person, Group, ...' }
+        disambiguation: { type: [string, 'null'] }
+        country: { type: [string, 'null'] }
+        area: { type: [string, 'null'] }
+        beginArea: { type: [string, 'null'] }
+        lifeSpan: { type: object, properties: { begin: { type: [string, 'null'] }, end: { type: [string, 'null'] }, ended: { type: boolean } } }
+        yearsActive: { type: object, properties: { from: { type: [integer, 'null'] }, to: { type: [integer, 'null'] } } }
+        genres: { type: array, items: { type: string } }
+        links: { type: array, items: { $ref: '#/components/schemas/ArtistLink' } }
+        bio:
+          type: [object, 'null']
+          description: Wikipedia summary; show its source link and licence
+          properties:
+            text: { type: string }
+            source: { type: string }
+            url: { type: string }
+            license: { type: string }
+            licenseUrl: { type: string }
+        image:
+          type: [object, 'null']
+          description: Credits of the photo at photoUrl (always show author + licence with the photo)
+          properties:
+            source: { type: string }
+            author: { type: [string, 'null'] }
+            license: { type: [string, 'null'] }
+            licenseUrl: { type: [string, 'null'] }
+            filePage: { type: [string, 'null'] }
+            credit: { type: [string, 'null'] }
+    ArtistPage:
+      type: object
+      required: [id, name, info, stats, topTracks, albums, singles, appearsOn, similar, radioSeed]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        mbid: { type: [string, 'null'] }
+        artUrl: { type: [string, 'null'], description: 'photo, else an album cover; relative to the API base' }
+        photoUrl: { type: [string, 'null'], description: 'art/artist/<id> when a photo is cached' }
+        info: { $ref: '#/components/schemas/ArtistInfo' }
+        stats:
+          type: object
+          properties:
+            trackCount: { type: integer }
+            durationS: { type: number }
+            playCount: { type: integer, description: the caller's plays }
+            albumCount: { type: integer }
+            singleCount: { type: integer }
+        topTracks:
+          description: by the caller's plays (then everyone's, then album order), up to 10
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/Track'
+              - type: object
+                properties: { playCount: { type: integer } }
+        albums: { type: array, items: { $ref: '#/components/schemas/Album' } }
+        singles: { type: array, items: { $ref: '#/components/schemas/Album' }, description: 'releases with 3 tracks or fewer' }
+        appearsOn: { type: array, items: { $ref: '#/components/schemas/Album' }, description: other artists' albums with tracks by this artist }
+        similar:
+          type: array
+          description: library artists that sound alike (AI audio embeddings), best first
+          items:
+            allOf:
+              - $ref: '#/components/schemas/Artist'
+              - type: object
+                properties:
+                  similarity: { type: number, minimum: 0, maximum: 1 }
+                  artUrl: { type: [string, 'null'] }
+        radioSeed: { $ref: '#/components/schemas/RadioSeed' }
     Artist:
       type: object
       required: [id, name, albumCount]

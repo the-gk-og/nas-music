@@ -33,7 +33,7 @@ from .recommender import Recommender, build_cold, build_new_user
 log = logging.getLogger("nasmusic.ai.radio")
 
 BATCH = 25
-SEED_TYPES = ("random", "track", "artist", "album", "playlist", "moment", "vibe")
+SEED_TYPES = ("random", "track", "artist", "album", "playlist", "smart_playlist", "moment", "vibe")
 AI_TYPES = ("moment", "vibe")
 
 RADIO_DDL = """
@@ -177,6 +177,18 @@ def _resolve_seed(rec: Recommender, seed: dict, rng: np.random.Generator) -> tup
         idx = [lib.index[t] for t in tids if t in lib.index]
         if not idx:
             raise KeyError(f"playlist {sid} has no analysed tracks")
+        return f"{row[0]} radio", idx
+    if kind == "smart_playlist":
+        # v7: the server keeps the evaluated list in smart_playlist_tracks (refreshed before radio starts).
+        row = rec.conn.execute("SELECT name FROM smart_playlists WHERE id = ? AND user_id = ?",
+                               (sid, rec.user_id)).fetchone()
+        if row is None:
+            raise KeyError(f"smart playlist {sid} not found")
+        tids = [r[0] for r in rec.conn.execute(
+            "SELECT track_id FROM smart_playlist_tracks WHERE smart_playlist_id = ? ORDER BY position", (sid,))]
+        idx = [lib.index[t] for t in tids if t in lib.index]
+        if not idx:
+            raise KeyError(f"smart playlist {sid} has no analysed tracks")
         return f"{row[0]} radio", idx
     # random: one of the user's taste centres (weighted by how much they like it), varied each time
     m = _fast_model(rec)

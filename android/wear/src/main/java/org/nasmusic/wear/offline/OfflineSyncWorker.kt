@@ -77,6 +77,7 @@ class OfflineSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorke
                 val tracks: List<Track>? = runCatching {
                     when (l.kind) {
                         "playlist" -> api.playlist(l.id).tracks
+                        "smart_playlist" -> api.smartPlaylist(l.id).tracks
                         "album" -> api.album(l.id).tracks
                         "favourites" -> api.favourites()
                         else -> null
