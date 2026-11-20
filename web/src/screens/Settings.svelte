@@ -6,6 +6,7 @@
   import { WEB_SIGNALS, type SignalKey } from '../lib/events';
   import { player } from '../lib/player.svelte';
   import type { LevellingMode } from '../lib/listening';
+  import type { TransitionMode } from '../lib/automix';
   import { session } from '../lib/session.svelte';
   import { ui } from '../lib/ui.svelte';
 
@@ -138,11 +139,48 @@
 
   <div class="section-title">Playback</div>
   <div class="pad form">
-    <div>
-      <div>Crossfade: {player.listening.crossfadeS ? `${player.listening.crossfadeS} s` : 'off (gapless)'}</div>
-      <div class="muted small">Blend the end of a song into the next. Songs that follow each other on the same album always play gapless.</div>
-      <input type="range" min="0" max="12" step="1" value={player.listening.crossfadeS} style:--p="{(player.listening.crossfadeS / 12) * 100}%" aria-label="Crossfade seconds" oninput={(e) => player.setListening({ crossfadeS: +e.currentTarget.value })} />
+    <div class="opt">
+      <div>
+        <div>Transitions</div>
+        <div class="muted small">
+          {#if player.listening.transition === 'off'}Gapless: each song follows straight on.
+          {:else if player.listening.transition === 'crossfade'}Blend the end of a song into the next.
+          {:else}DJ automix: beat-matched mixes from each song's outro into the next one's intro, with a bass swap. Songs the server hasn't analysed yet, or that don't match, get a smooth crossfade.{/if}
+          Songs that follow each other on the same album always play gapless.
+        </div>
+      </div>
+      <div class="seg" role="radiogroup" aria-label="Transitions">
+        {#each [['off', 'Off'], ['crossfade', 'Crossfade'], ['dj', 'DJ automix']] as [k, label]}
+          <button role="radio" aria-checked={player.listening.transition === k} class:on={player.listening.transition === k}
+            onclick={() => player.setListening({ transition: k as TransitionMode, crossfadeS: k === 'crossfade' && !player.listening.crossfadeS ? 6 : player.listening.crossfadeS })}>{label}</button>
+        {/each}
+      </div>
     </div>
+    {#if player.listening.transition !== 'off'}
+      <div>
+        <div>{player.listening.transition === 'dj' ? 'Crossfade when songs don’t match' : 'Crossfade'}: {player.listening.crossfadeS || 6} s</div>
+        <input type="range" min="1" max="12" step="1" value={player.listening.crossfadeS || 6} style:--p="{((player.listening.crossfadeS || 6) / 12) * 100}%" aria-label="Crossfade seconds" oninput={(e) => player.setListening({ crossfadeS: +e.currentTarget.value })} />
+      </div>
+    {/if}
+    {#if player.listening.transition === 'dj'}
+      <div class="opt">
+        <div><div>Mix length</div><div class="muted small">How many beats two songs play together.</div></div>
+        <div class="seg" role="radiogroup" aria-label="Mix length">
+          {#each [8, 16, 32] as b}
+            <button role="radio" aria-checked={player.listening.djBeats === b} class:on={player.listening.djBeats === b} onclick={() => player.setListening({ djBeats: b })}>{b} beats</button>
+          {/each}
+        </div>
+      </div>
+      <label class="sig inline">
+        <div><div>Allow tempo change</div><div class="muted small">Speed the next song up or down (up to 8 %, pitch kept) so the beats line up. Off: only songs at the same tempo are beat-matched.</div></div>
+        <input type="checkbox" class="switch" checked={player.listening.allowTempo} onchange={(e) => player.setListening({ allowTempo: e.currentTarget.checked })} />
+      </label>
+      <label class="sig inline">
+        <div><div>Reorder for flow</div><div class="muted small">When radio, a mix or a playlist starts, order it by tempo, key and energy. Songs only move a few places.</div></div>
+        <input type="checkbox" class="switch" checked={player.listening.automixOrder} onchange={(e) => player.setListening({ automixOrder: e.currentTarget.checked })} />
+      </label>
+      <div class="muted small">When you cast to a speaker, the speaker plays normally (gapless, or its own crossfade); DJ mixing happens only when this device plays the music.</div>
+    {/if}
     <div class="opt">
       <div><div>Volume levelling</div><div class="muted small">ReplayGain from your server. Auto uses album gain while an album plays in order, so quiet songs stay quiet.</div></div>
       <div class="seg" role="radiogroup" aria-label="Volume levelling">

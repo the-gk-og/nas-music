@@ -45,7 +45,7 @@ describe('albums in order', () => {
 });
 
 describe('crossfade', () => {
-  const s = { ...defaultListening(), crossfadeS: 8 };
+  const s = { ...defaultListening(), transition: 'crossfade' as const, crossfadeS: 8 };
   it('is off by default and skipped between consecutive album tracks', () => {
     expect(defaultListening().crossfadeS).toBe(0);
     expect(crossfadeFor(defaultListening(), t('1', 'x', 1), t('2', 'y', 1))).toBe(0);
@@ -86,9 +86,15 @@ describe('settings', () => {
     const store = new Map<string, string>();
     const st = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
     expect(loadListening(st)).toEqual(defaultListening());
-    saveListening(st, { crossfadeS: 5, levelling: 'album', preampDb: -2, preventClipping: false });
-    expect(loadListening(st)).toEqual({ crossfadeS: 5, levelling: 'album', preampDb: -2, preventClipping: false });
-    expect(normaliseListening({ crossfadeS: 99, levelling: 'loud' as never, preampDb: -40 })).toEqual({ ...defaultListening(), crossfadeS: 12, preampDb: -15 });
+    // settings saved before automix: crossfadeS > 0 means crossfade mode
+    store.set('nm.listening', JSON.stringify({ crossfadeS: 5, levelling: 'album', preampDb: -2, preventClipping: false }));
+    expect(loadListening(st)).toEqual({ ...defaultListening(), transition: 'crossfade', crossfadeS: 5, levelling: 'album', preampDb: -2, preventClipping: false });
+    const dj = { ...defaultListening(), transition: 'dj' as const, crossfadeS: 4, djBeats: 32, allowTempo: false, automixOrder: false };
+    saveListening(st, dj);
+    expect(loadListening(st)).toEqual(dj);
+    expect(normaliseListening({ crossfadeS: 99, levelling: 'loud' as never, preampDb: -40 })).toEqual({ ...defaultListening(), transition: 'crossfade', crossfadeS: 12, preampDb: -15 });
+    expect(normaliseListening({ transition: 'dj', djBeats: 20 }).djBeats).toBe(16);
+    expect(normaliseListening({ transition: 'off', crossfadeS: 6 }).transition).toBe('off');
   });
 });
 

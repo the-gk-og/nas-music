@@ -1,5 +1,7 @@
 import type {
   AutoEqEntry,
+  AutomixTransition,
+  TrackMixDetail,
   AutoEqProfile,
   Feed,
   Blend,
@@ -428,13 +430,19 @@ export class ApiClient {
   pins = () => this.get<ShelfItem[]>('/pins');
   pin = (type: PinType, id: string, position?: number) => this.post<ShelfItem[]>('/pins', { type, id, position });
   unpin = (type: PinType, id: string) => this.del<void>(`/pins/${type}/${encodeURIComponent(id)}`);
-  startRadio = (seed: RadioSeed, context?: RadioContext) => this.post<Queue>('/radio', context ? { seed, context } : { seed });
+  startRadio = (seed: RadioSeed, context?: RadioContext, automix = false) =>
+    this.post<Queue>('/radio', { seed, ...(context ? { context } : {}), ...(automix ? { automix } : {}) });
   // ---- AI radio (v6) ----
   parseVibe = (text: string) => this.post<VibeParse>('/radio/vibe/parse', { text });
   radioStation = (queueId: string) => this.get<RadioStation>(`/radio/${encodeURIComponent(queueId)}/station`);
   steerRadio = (queueId: string, body: { action: SteerAction; trackId?: string | null; scope?: 'track' | 'artist'; refId?: string | null; currentIndex?: number | null; refresh?: boolean }) =>
     this.post<{ station: RadioStation; queue: Queue }>(`/radio/${encodeURIComponent(queueId)}/steer`, body);
-  radioMore = (queueId: string, count = 25) => this.post<Queue>(`/radio/${encodeURIComponent(queueId)}/more`, { count });
+  radioMore = (queueId: string, count = 25, automix = false) =>
+    this.post<Queue>(`/radio/${encodeURIComponent(queueId)}/more`, automix ? { count, automix } : { count });
+  // ---- v7: DJ automix ----
+  automixOrder = (trackIds: string[], opts: { keepFirst?: boolean; window?: number; arc?: boolean } = {}) =>
+    this.post<{ trackIds: string[]; transitions: AutomixTransition[] }>('/automix/order', { trackIds, ...opts });
+  trackMix = (trackId: string) => this.get<TrackMixDetail>(`/tracks/${encodeURIComponent(trackId)}/mix`);
 
   // ---- v5: Release Radar, Wrapped, Blend ----
   releaseRadar = () => this.get<ReleaseRadar>('/release-radar');

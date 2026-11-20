@@ -1,13 +1,23 @@
 // Listening settings (per device, localStorage): gapless/crossfade, volume levelling (ReplayGain),
 // and the sleep timer's pure rules. The audio engine that uses them lives in player.svelte.ts.
+import { djBeats, type TransitionMode } from './automix';
 import type { QueueModel } from './queue';
 import type { Track } from './types';
 
 export type LevellingMode = 'off' | 'track' | 'album' | 'auto';
 
 export interface ListeningSettings {
-  /** 0 = gapless (no fade); 1–12 s crossfade between tracks. */
+  /** How tracks hand over: off = gapless, crossfade = `crossfadeS`, dj = beat-matched automix (falls back to a
+   *  crossfade between the mix points, or the plain crossfade, when two tracks can't be matched). */
+  transition: TransitionMode;
+  /** Crossfade length, 1–12 s (also the DJ fallback). 0 is read as gapless. */
   crossfadeS: number;
+  /** DJ automix transition length: 8, 16 or 32 beats. */
+  djBeats: number;
+  /** DJ automix: time-stretch the incoming track (±8 %, pitch kept) to match tempos. */
+  allowTempo: boolean;
+  /** DJ automix: reorder radio, mixes and playlists for smooth flow when they start. */
+  automixOrder: boolean;
   levelling: LevellingMode;
   /** Added to every ReplayGain value, −15…+15 dB. */
   preampDb: number;
@@ -22,7 +32,7 @@ export const PRELOAD_AHEAD_S = 30;
 export const SLEEP_FADE_S = 10;
 
 export function defaultListening(): ListeningSettings {
-  return { crossfadeS: 0, levelling: 'auto', preampDb: 0, preventClipping: true };
+  return { transition: 'off', crossfadeS: 0, djBeats: 16, allowTempo: true, automixOrder: true, levelling: 'auto', preampDb: 0, preventClipping: true };
 }
 
 const KEY = 'nm.listening';
@@ -47,8 +57,17 @@ export function saveListening(storage: Pick<Storage, 'setItem'> | null, s: Liste
 export function normaliseListening(p: Partial<ListeningSettings>): ListeningSettings {
   const d = defaultListening();
   const num = (v: unknown, lo: number, hi: number, dflt: number) => (typeof v === 'number' && isFinite(v) ? Math.max(lo, Math.min(hi, v)) : dflt);
+  const crossfadeS = num(p.crossfadeS, 0, CROSSFADE_MAX_S, d.crossfadeS);
+  // Settings saved before automix had only crossfadeS (0 = gapless).
+  const transition: TransitionMode = (['off', 'crossfade', 'dj'] as const).includes(p.transition as TransitionMode)
+    ? (p.transition as TransitionMode)
+    : crossfadeS > 0 ? 'crossfade' : 'off';
   return {
-    crossfadeS: num(p.crossfadeS, 0, CROSSFADE_MAX_S, d.crossfadeS),
+    transition,
+    crossfadeS,
+    djBeats: djBeats(p.djBeats),
+    allowTempo: typeof p.allowTempo === 'boolean' ? p.allowTempo : d.allowTempo,
+    automixOrder: typeof p.automixOrder === 'boolean' ? p.automixOrder : d.automixOrder,
     levelling: (['off', 'track', 'album', 'auto'] as const).includes(p.levelling as LevellingMode) ? (p.levelling as LevellingMode) : d.levelling,
     preampDb: num(p.preampDb, -15, 15, d.preampDb),
     preventClipping: typeof p.preventClipping === 'boolean' ? p.preventClipping : d.preventClipping,
@@ -76,11 +95,22 @@ export function playingAlbumInOrder(q: QueueModel | null, index: number): boolea
 /** Crossfade length for an automatic transition a → b. Consecutive album tracks are kept gapless
  *  (live albums, DJ mixes, classical), and so is repeat-one. */
 export function crossfadeFor(s: ListeningSettings, a: Track | null, b: Track | null): number {
-  if (!a || !b || s.crossfadeS <= 0 || a.id === b.id) return 0;
+  const len = s.transition === 'off' ? 0 : s.transition === 'dj' ? djFallbackS(s) : s.crossfadeS;
+  if (!a || !b || len <= 0 || a.id === b.id) return 0;
   if (followsOnAlbum(a, b)) return 0;
   const shortest = Math.min(a.durationS || Infinity, b.durationS || Infinity);
   // Never fade over more than a third of a short track.
-  return Math.max(0, Math.min(s.crossfadeS, shortest / 3));
+  return Math.max(0, Math.min(len, shortest / 3));
+}
+
+/** Crossfade used by DJ mode when two tracks can't be beat-matched. */
+export function djFallbackS(s: ListeningSettings): number {
+  return s.crossfadeS > 0 ? s.crossfadeS : 6;
+}
+
+/** Use DJ automix for a → b? Never between consecutive album tracks (they stay gapless) or for repeat-one. */
+export function djFor(s: ListeningSettings, a: Track | null, b: Track | null): boolean {
+  return s.transition === 'dj' && !!a && !!b && a.id !== b.id && !followsOnAlbum(a, b);
 }
 
 // ---------- ReplayGain ----------

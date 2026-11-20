@@ -43,6 +43,49 @@ export interface Track {
   explicit?: ExplicitStatus;
   /** v6, queues/playlists only: hidden by the caller's family mode — players skip it. */
   familyHidden?: boolean;
+  /** v7 DJ automix analysis (beat grid, key, mix points); absent until the server has analysed the track. */
+  mix?: TrackMix | null;
+}
+
+export interface AutomixTransition {
+  fromId: string;
+  toId: string;
+  tempoRatio?: number | null;
+  tempoMultiplier?: number | null;
+  keyDistance?: number | null;
+  beatmatch: boolean;
+}
+
+export interface TrackMixDetail {
+  trackId: string;
+  status: 'done' | 'failed';
+  version?: string;
+  error?: string | null;
+  analysedAt?: string;
+  bpmConfidence?: number | null;
+  keyStrength?: number | null;
+  energyCurve?: number[];
+  curveStepS?: number | null;
+  durationS?: number | null;
+  mix?: TrackMix;
+}
+
+/** api 0.7 TrackMix: seconds into the file; beat k at beatS + k·60/bpm, bars from downbeatS. */
+export interface TrackMix {
+  bpm?: number;
+  beatS?: number;
+  downbeatS?: number;
+  beatsPerBar?: number;
+  /** Only beat-match when true (else the tempo drifts). */
+  gridStable: boolean;
+  key?: string;
+  camelot?: string;
+  mixInS?: number;
+  mixOutS?: number;
+  introEndS?: number;
+  outroStartS?: number;
+  lastBeatS?: number;
+  energy?: number;
 }
 
 export type ExplicitStatus = 'explicit' | 'probable' | 'clean' | 'unknown';
