@@ -52,7 +52,9 @@ fun SongRow(
 ) {
     val ui = LocalUi.current
     var quick by remember { mutableStateOf(false) }
-    val color = if (highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    val base = if (highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+    // Family mode: tracks the server flags in a queue/playlist are dimmed (the player skips them).
+    val color = if (track.familyHidden) base.copy(alpha = 0.4f) else base
     Box(modifier) {
         Row(
             Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { quick = true })
@@ -63,7 +65,10 @@ fun SongRow(
             leading?.invoke()
             AlbumArt(track.albumId, 52.dp)
             Column(Modifier.weight(1f)) {
-                Text(track.title, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ExplicitBadge(track.explicit)
+                    Text(track.title, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                }
                 Text(track.artist, color = color.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                 Row {
                     Text(track.album, color = color.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))

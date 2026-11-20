@@ -112,7 +112,7 @@ fun GlobalSearchScreen(c: AppContainer) {
             songItems(c, r.tracks.take(8), "Search: ${q.take(12)}", PlaySource.SEARCH, searchQuery = q)
             if (r.albums.isNotEmpty()) item(key = "albums") {
                 ShelfHeader("Albums")
-                ShelfRow(c, r.albums.map { ShelfItem("album", it.id, it.title, it.artist, artUrl = org.nasmusic.app.data.FeedRepository.art(it.id)) })
+                ShelfRow(c, r.albums.map { ShelfItem("album", it.id, it.title, it.artist, artUrl = org.nasmusic.app.data.FeedRepository.art(it.id), album = it) })
             }
             if (r.artists.isNotEmpty()) item(key = "artists") {
                 ShelfHeader("Artists")

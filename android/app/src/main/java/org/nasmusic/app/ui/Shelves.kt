@@ -151,7 +151,10 @@ fun ShelfCard(c: AppContainer, item: ShelfItem, width: Dp = 140.dp, siblings: Li
         ) {
             ShelfArt(item, width, round = item.type == "artist")
             item.progress?.let { p -> LinearProgressIndicator(progress = { p.fraction }, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) }
-            Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
+            androidx.compose.foundation.layout.Row(Modifier.padding(top = 6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                ExplicitBadge(if (item.album?.explicit == true) "explicit" else item.track?.explicit)
+                Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+            }
             item.subtitle?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         DropdownMenu(menu, { menu = false }) {

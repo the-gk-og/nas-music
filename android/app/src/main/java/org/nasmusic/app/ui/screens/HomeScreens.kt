@@ -76,6 +76,9 @@ fun TopBar(c: AppContainer, title: String) {
     val ui = LocalUi.current
     val cfg by c.secureStore.config.collectAsStateWithLifecycle()
     var menu by remember { mutableStateOf(false) }
+    val family by c.family.mode.collectAsStateWithLifecycle()
+    val familyActions = org.nasmusic.app.ui.rememberFamilyActions(c)
+    familyActions.Dialog()
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         IconButton(onClick = { ui.go("search") }) { Icon(Icons.Default.Search, "Search") }
@@ -90,6 +93,11 @@ fun TopBar(c: AppContainer, title: String) {
                     .forEach { (label, route) ->
                         DropdownMenuItem({ Text(label) }, { menu = false; if (route == null) ui.devicesOpen = true else ui.go(route) })
                     }
+                // Quick toggle (api 0.6): the server enforces it; locked by an admin -> needs the PIN to turn off.
+                DropdownMenuItem(
+                    { Text("Family mode: " + (if (family.enabled) "on" else "off") + (if (family.locked) " 🔒" else "")) },
+                    { menu = false; familyActions.toggle() },
+                )
             }
         }
     }

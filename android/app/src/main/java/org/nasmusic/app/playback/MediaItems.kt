@@ -18,6 +18,7 @@ object MediaItems {
     const val EXTRA_DURATION_S = "nas.durationS"
     const val EXTRA_REASON = "nas.reason"
     const val EXTRA_STARRED = "nas.starred"
+    const val EXTRA_FAMILY_HIDDEN = "nas.familyHidden"
     const val EXTRA_ALBUM_ID = "nas.albumId"
     const val EXTRA_ARTIST_ID = "nas.artistId"
     const val EXTRA_SEARCH_QUERY = "nas.searchQuery"
@@ -40,6 +41,7 @@ object MediaItems {
             putDouble(EXTRA_DURATION_S, t.durationS)
             reason?.let { putString(EXTRA_REASON, it) }
             putBoolean(EXTRA_STARRED, t.starred)
+            if (t.familyHidden) putBoolean(EXTRA_FAMILY_HIDDEN, true)
             putString(EXTRA_ALBUM_ID, t.albumId)
             putString(EXTRA_ARTIST_ID, t.artistId)
             searchQuery?.let { putString(EXTRA_SEARCH_QUERY, it) }

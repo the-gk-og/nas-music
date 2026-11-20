@@ -92,6 +92,7 @@ class AppContainer(val context: Context) {
     val sleep = org.nasmusic.app.playback.SleepTimerState()
     val contextCollector = ContextCollector(context, scope)
     val feeds = org.nasmusic.app.data.FeedRepository(api)
+    val family = org.nasmusic.app.data.FamilyRepository { api }.also { f -> connect.onFamilyChanged = { f.changed(it) } }
 
     /** Keep both addresses (and, via the tunnel, the LAN pin) current from /server-info. */
     fun startServerInfoRefresh() = scope.launch {
@@ -101,6 +102,7 @@ class AppContainer(val context: Context) {
             queueSync.refresh()
             contextCollector.syncFrom(api)
             pullAppearance()
+            family.refresh()
         }
     }
 

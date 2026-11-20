@@ -65,6 +65,8 @@ sealed interface ConnectMessage {
     data class QueuesChanged(val queueId: String?) : ConnectMessage
     /** v5: a playlist you own or are a member of changed; deleted = gone or your access was removed. */
     data class PlaylistChanged(val playlistId: String, val rev: Int?, val deleted: Boolean) : ConnectMessage
+    /** api 0.6: the user's family mode changed (another device or an admin). */
+    data class FamilyChanged(val family: org.nasmusic.app.data.api.FamilyMode) : ConnectMessage
     data object Pong : ConnectMessage
     /** `source` "speaker": a speaker problem worth showing (others are protocol noise). */
     data class Error(val detail: String, val source: String? = null) : ConnectMessage
@@ -94,6 +96,9 @@ object ConnectProtocol {
             "takeover" -> ConnectMessage.Takeover(state() ?: PlaybackState())
             "release" -> ConnectMessage.Release
             "queues" -> ConnectMessage.QueuesChanged(o["queueId"]?.jsonPrimitive?.contentOrNull)
+            "family" -> o["family"]?.let { f ->
+                runCatching { json.decodeFromJsonElement(org.nasmusic.app.data.api.FamilyMode.serializer(), f) }.getOrNull()
+            }?.let { ConnectMessage.FamilyChanged(it) } ?: ConnectMessage.Unknown(type)
             "playlist" -> o["playlistId"]?.jsonPrimitive?.contentOrNull?.let { pid ->
                 ConnectMessage.PlaylistChanged(
                     pid,
