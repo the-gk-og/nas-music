@@ -36,6 +36,9 @@ const TAB_OF: Record<string, TabId> = {
   genre: 'library',
   playlist: 'library',
   list: 'library',
+  spoken: 'library',
+  podcast: 'library',
+  book: 'library',
   queue: 'queue',
   queues: 'queue',
 };
