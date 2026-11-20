@@ -4,6 +4,9 @@ import type { SocketLike } from '../connect';
 import { parseLrc } from '../lyrics';
 import type {
   Blend,
+  RadioSeed,
+  RadioStation,
+  VibeConstraint,
   CatalogItem,
   ReleaseRadar,
   ServerWrapped,
@@ -70,7 +73,8 @@ export class MockBackend {
   toget: ToGetItem[] = [];
   catalog: CatalogItem[] = [];
   radioSeen = new Map<string, Set<string>>();
-  radioSeeds = new Map<string, { type: 'random' | 'track' | 'artist' | 'album' | 'playlist'; id?: string | null; title?: string | null }>();
+  radioSeeds = new Map<string, RadioSeed>();
+  radioSteering = new Map<string, RadioStation['steering']>();
 
   constructor() {
     const t = this.lib.tracks;
@@ -587,14 +591,58 @@ export class MockBackend {
       this.pinsList = this.pinsList.filter((p) => !(p.type === r![1] && p.id === decodeURIComponent(r![2])));
       return undefined;
     }
+    if (path === '/radio/vibe/parse' && method === 'POST') {
+      const text = String(body.text ?? '');
+      const words = text.toLowerCase();
+      const constraints: VibeConstraint[] = [];
+      if (/chill|calm|rain|relax/.test(words)) constraints.push({ id: 'energy:-0.45', kind: 'energy', label: 'Low energy', max: 0.45 }, { id: 'mood:chill:+', kind: 'mood', label: 'Chill', value: 'chill', weight: 1 });
+      if (/gym|workout|upbeat|no slow/.test(words)) constraints.push({ id: 'energy:0.65-', kind: 'energy', label: 'High energy', min: 0.65 });
+      if (/no lyrics|instrumental/.test(words)) constraints.push({ id: 'vocals:instrumental', kind: 'vocals', label: 'No vocals', value: 'instrumental' });
+      const dec = /(\d0)s/.exec(words);
+      if (dec) {
+        const y = Number(dec[1].length === 2 ? (Number(dec[1]) >= 30 ? '19' : '20') + dec[1] : dec[1]);
+        constraints.push({ id: `year:${y}-${y + 9}`, kind: 'year', label: `${y}s`, min: y, max: y + 9 });
+      }
+      return { text, title: text, constraints };
+    }
     if (path === '/radio' && method === 'POST') {
-      const seed = (body.seed ?? { type: 'random' }) as { type: 'random' | 'track' | 'artist' | 'album' | 'playlist'; id?: string };
-      const name = seed.type === 'random' ? 'Random radio' : `${this.describe(seed.type, seed.id ?? '').title} radio`;
-      const picks = this.radioPicks(seed, new Set(), 25);
+      const seed = (body.seed ?? { type: 'random' }) as RadioSeed;
+      const name =
+        seed.type === 'random' ? 'Random radio' : seed.type === 'moment' ? 'Smart shuffle' : seed.type === 'vibe' ? `${seed.text || 'Vibe'} radio` : `${this.describe(seed.type, seed.id ?? '').title} radio`;
+      const pickSeed = seed.type === 'moment' || seed.type === 'vibe' ? { type: 'random' as const } : (seed as { type: 'random' | 'track' | 'artist' | 'album' | 'playlist'; id?: string });
+      const picks = this.radioPicks(pickSeed, new Set(), 25);
       const q = this.createQueue(name, picks, 0);
       this.radioSeen.set(q.id, new Set(picks));
-      this.radioSeeds.set(q.id, { ...seed, title: name.replace(/ radio$/, '') });
+      const explanation = seed.type === 'moment' ? 'Because it’s this time of day and you’ve been playing upbeat music (demo).' : seed.type === 'vibe' ? `Vibe: ${(seed.constraints ?? []).map((c) => c.label).join(', ') || 'anything'}.` : null;
+      this.radioSeeds.set(q.id, { ...seed, title: name.replace(/ radio$/, ''), explanation });
       return this.queueOut(q);
+    }
+    if ((r = m(/^\/radio\/([^/]+)\/(station|steer)$/))) {
+      const q = this.getQ(r[1]);
+      const seed = this.radioSeeds.get(q.id);
+      if (!seed) throw new HttpError(404, 'not a radio queue');
+      const st = this.radioSteering.get(q.id) ?? { energy: 0, variety: 0, moreLike: [], lessLike: [], never: [] };
+      if (r[2] === 'steer') {
+        const a = String(body.action);
+        if (a === 'more_energy') st.energy = Math.min(3, st.energy + 1);
+        if (a === 'calmer') st.energy = Math.max(-3, st.energy - 1);
+        if (a === 'more_variety') st.variety = Math.min(2, st.variety + 1);
+        if (a === 'more_familiar') st.variety = Math.max(-2, st.variety - 1);
+        if (a === 'reset') Object.assign(st, { energy: 0, variety: 0, moreLike: [], lessLike: [], never: [] });
+        const t = L.tracks.find((x) => x.id === body.trackId);
+        if (t) {
+          const ref = body.scope === 'artist' ? { type: 'artist' as const, id: t.artistId, name: t.artist } : { type: 'track' as const, id: t.id, name: t.title };
+          if (a === 'more_like') st.moreLike.push(ref);
+          if (a === 'less_like') st.lessLike.push(ref);
+          if (a === 'never_here') st.never.push(ref);
+        }
+        if (a === 'remove') for (const k of ['moreLike', 'lessLike', 'never'] as const) st[k] = st[k].filter((x) => x.id !== body.refId);
+        this.radioSteering.set(q.id, st);
+      }
+      const summary = [st.energy > 0 ? 'more energy' : st.energy < 0 ? 'calmer' : '', st.variety > 0 ? 'more variety' : st.variety < 0 ? 'more familiar' : ''].filter(Boolean).join(', ') || null;
+      seed.steering = summary;
+      const station: RadioStation = { queueId: q.id, radioId: q.id, kind: seed.type, title: q.name, stationKey: seed.type, explanation: seed.explanation, text: seed.text, constraints: seed.constraints, steeringSummary: summary, steering: st };
+      return r[2] === 'steer' ? { station, queue: this.queueOut(q) } : station;
     }
     if ((r = m(/^\/radio\/([^/]+)\/more$/))) {
       const q = this.getQ(r[1]);

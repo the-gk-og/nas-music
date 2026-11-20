@@ -116,3 +116,25 @@ it('greets by time of day', () => {
 it('matches owned music by normalised artist + title', () => {
   expect(matchKey('Beyoncé & Jay', 'Halo (Remastered)')).toBe(matchKey('beyonce and jay', 'Halo'));
 });
+
+describe('AI radio helpers', () => {
+  it('builds the smart-shuffle context with ISO weekdays', async () => {
+    const { radioContext } = await import('./v3');
+    expect(radioContext(new Date(2026, 10, 20, 19, 5), 'web')).toEqual({ localHour: 19, weekday: 5, deviceKind: 'web' });
+    expect(radioContext(new Date(2026, 10, 22, 8), 'desktop')).toEqual({ localHour: 8, weekday: 7, deviceKind: 'desktop' });
+  });
+  it('replaces only what comes after the current and next track', async () => {
+    const { replaceUpcoming } = await import('./v3');
+    const t = (id: string) => ({ id });
+    const local = ['a', 'b', 'c', 'd', 'e'].map(t);
+    const server = ['a', 'b', 'c', 'x', 'y', 'z'].map(t);
+    expect(replaceUpcoming(local, server, 1).map((x) => x.id)).toEqual(['a', 'b', 'c', 'x', 'y', 'z']);
+    expect(replaceUpcoming(local, ['a', 'b', 'c', 'b', 'q'].map(t), 1).map((x) => x.id)).toEqual(['a', 'b', 'c', 'q']);
+  });
+  it('parses moment radio ids and drops chips', async () => {
+    const { parseRadioId, withoutChip } = await import('./v3');
+    expect(parseRadioId('moment')).toEqual({ type: 'moment' });
+    const chips = [{ id: 'a', kind: 'energy' as const, label: 'Low energy' }, { id: 'b', kind: 'mood' as const, label: 'Chill' }];
+    expect(withoutChip(chips, 'a').map((c) => c.id)).toEqual(['b']);
+  });
+});

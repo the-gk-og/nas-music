@@ -30,8 +30,8 @@ import {
 } from './queue';
 import { library } from './library.svelte';
 import { session } from './session.svelte';
-import type { CommandAction, ConnectDevice, PlaybackState, Queue, RadioSeed, RepeatMode, Track } from './types';
-import { appendNew, needsTopUp } from './v3';
+import type { CommandAction, ConnectDevice, PlaybackState, Queue, RadioSeed, RadioStation, RepeatMode, SteerAction, Track } from './types';
+import { appendNew, needsTopUp, radioContext, replaceUpcoming } from './v3';
 import {
   PRELOAD_AHEAD_S,
   crossfadeFor,
@@ -738,7 +738,7 @@ export class Player {
     ui.toast(`Starting ${label}…`);
     let created: Queue;
     try {
-      created = await session.api.startRadio(seed);
+      created = await session.api.startRadio(seed, seed.type === 'moment' ? radioContext(new Date(), deviceKind()) : undefined);
     } catch (e) {
       ui.toast(e instanceof ApiError && (e.status === 404 || e.status === 503) ? 'Radio isn’t available on this server yet' : (e as Error).message);
       return;
@@ -753,6 +753,37 @@ export class Player {
     this.queueMeta.set(created.id, { source: 'mix', addedFrom: 'radio' });
     this.setQueue({ id: created.id, name: created.name, slot: created.slot, tracks, index: 0, radio: true });
     await this.playIndex(0);
+  }
+
+  /** AI radio (v6): steer the radio that's playing (here or on the active device). Returns the station. */
+  async steerRadio(action: SteerAction, scope: 'track' | 'artist' = 'track', refId?: string): Promise<RadioStation | null> {
+    const remote = this.isRemote;
+    const qid = remote ? this.remoteState?.queueId : this.queue?.id;
+    const track = remote ? this.remoteTrack : this.current;
+    if (!qid) return null;
+    const needsTrack = action === 'more_like' || action === 'less_like' || action === 'never_here';
+    if (needsTrack && !track) return null;
+    try {
+      const res = await session.api.steerRadio(qid, {
+        action,
+        scope,
+        trackId: needsTrack ? track!.id : null,
+        refId: refId ?? null,
+        currentIndex: remote ? (this.remoteState?.index ?? null) : (this.queue?.index ?? null),
+      });
+      const fresh = res.queue.tracks ?? [];
+      for (const t of fresh) this.trackCache.set(t.id, t);
+      if (!remote && this.queue?.id === qid) {
+        const tracks = replaceUpcoming(this.queue.tracks, fresh, this.queue.index);
+        this.queue = { ...this.queue, tracks, order: this.shuffle ? shuffleOrder(tracks.length, this.queue.index) : null };
+        if (this.viewQueue?.id === qid) this.viewQueue = this.queue;
+      }
+      if (action === 'never_here' && !remote && track && this.current?.id === track.id) void this.next();
+      return res.station;
+    } catch (e) {
+      ui.toast(e instanceof ApiError && (e.status === 404 || e.status === 503) ? 'Steering isn’t available on this server yet' : (e as Error).message);
+      return null;
+    }
   }
 
   private toppingUp = false;

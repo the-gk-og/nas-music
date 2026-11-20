@@ -19,6 +19,7 @@
     VolumeX,
   } from '@lucide/svelte';
   import Cover from '../components/Cover.svelte';
+  import RadioSteer from '../components/RadioSteer.svelte';
   import { appearance, withTransition } from '../lib/appearance.svelte';
   import { gesture } from '../lib/gesture';
   import { session } from '../lib/session.svelte';
@@ -125,6 +126,8 @@
     </button>
     <button class="icon-btn" class:on={s.shuffle} aria-label="Shuffle" title="Shuffle" onclick={() => player.toggleShuffle()}><Shuffle size={26} /></button>
   </div>
+
+  <RadioSteer />
 
   <div class="seek">
     <span>{fmtTime(pos)}</span>

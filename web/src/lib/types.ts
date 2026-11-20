@@ -393,9 +393,73 @@ export type ItemType =
   | 'wrapped';
 
 export interface RadioSeed {
-  type: 'random' | 'track' | 'artist' | 'album' | 'playlist';
+  type: 'random' | 'track' | 'artist' | 'album' | 'playlist' | 'moment' | 'vibe';
   id?: string | null;
   title?: string | null;
+  /** vibe: what the user typed / said */
+  text?: string | null;
+  /** vibe: interpreted chips (from POST /radio/vibe/parse, possibly with some removed) */
+  constraints?: VibeConstraint[] | null;
+  /** responses: why these picks */
+  explanation?: string | null;
+  /** responses: short steering summary */
+  steering?: string | null;
+}
+
+/** AI radio (v6): one interpreted describe-a-vibe chip. Clients show `label` and may drop chips. */
+export interface VibeConstraint {
+  id: string;
+  kind: 'energy' | 'tempo' | 'danceability' | 'year' | 'vocals' | 'mood' | 'genre' | 'familiarity' | 'like';
+  label: string;
+  min?: number;
+  max?: number;
+  value?: string;
+  weight?: number;
+  exclude?: boolean;
+  name?: string;
+}
+
+export interface VibeParse {
+  text: string;
+  title: string;
+  constraints: VibeConstraint[];
+}
+
+export interface RadioContext {
+  localHour?: number;
+  weekday?: number;
+  deviceKind?: 'phone' | 'car' | 'speaker' | 'desktop' | 'watch' | 'web' | 'tv';
+  output?: string;
+}
+
+export type SteerAction =
+  | 'more_like'
+  | 'less_like'
+  | 'more_energy'
+  | 'calmer'
+  | 'more_variety'
+  | 'more_familiar'
+  | 'never_here'
+  | 'remove'
+  | 'reset';
+
+export interface RadioSteerRef {
+  type: 'track' | 'artist';
+  id: string;
+  name?: string | null;
+}
+
+export interface RadioStation {
+  queueId?: string;
+  radioId: string;
+  kind: RadioSeed['type'];
+  title: string;
+  stationKey: string;
+  explanation?: string | null;
+  text?: string | null;
+  constraints?: VibeConstraint[] | null;
+  steeringSummary?: string | null;
+  steering: { energy: number; variety: number; moreLike: RadioSteerRef[]; lessLike: RadioSteerRef[]; never: RadioSteerRef[] };
 }
 
 /** Generic card. `artUrl` is relative to the API base, e.g. "art/<albumId>" or "catalog/<id>/cover". */
