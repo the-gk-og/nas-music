@@ -210,6 +210,26 @@
 {/if}
 
 <style>
+  /* same row styles as Settings.svelte (its styles are scoped) */
+  .pad {
+    padding: 4px 18px 10px;
+  }
+  .small {
+    font-size: 0.85rem;
+  }
+  .sig {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+  }
+  .sig.inline {
+    padding: 8px 0;
+    border: 0;
+  }
   .svc {
     display: flex;
     flex-direction: column;
