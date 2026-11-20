@@ -27,6 +27,10 @@ object ApiFactory {
     fun jam(callFactory: Call.Factory, baseUrl: String = RoutedCallFactory.VIRTUAL_BASE): JamApi =
         retrofit(callFactory, baseUrl).create(JamApi::class.java)
 
+    /** 0.7.0: podcasts, audiobooks, internet radio. */
+    fun spoken(callFactory: Call.Factory, baseUrl: String = RoutedCallFactory.VIRTUAL_BASE): SpokenApi =
+        retrofit(callFactory, baseUrl).create(SpokenApi::class.java)
+
     private fun retrofit(callFactory: Call.Factory, baseUrl: String): Retrofit =
         Retrofit.Builder()
             .baseUrl(baseUrl)

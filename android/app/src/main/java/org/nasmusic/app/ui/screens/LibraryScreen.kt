@@ -75,6 +75,7 @@ private val SORTS = mapOf(
 /** Library (docs/v3-ux.md §3.3): filter chips, sort menu, grid/list toggle remembered per chip. */
 @Composable
 fun LibraryScreen(c: AppContainer) {
+    val ui = LocalUi.current
     val scope = rememberCoroutineScope()
     val settings by c.settings.settings.collectAsStateWithLifecycle()
     // Offline, the server sections can't load: open on what's downloaded.
@@ -88,6 +89,8 @@ fun LibraryScreen(c: AppContainer) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CHIPS.forEach { (k, label) -> FilterChip(chip == k, { chip = k }, label = { Text(label) }) }
+                // Spoken word + live radio live apart from music (their own player, no recommendations).
+                FilterChip(false, { ui.go("spoken") }, label = { Text("Podcasts & more") })
             }
             SORTS[chip]?.let { sorts -> Box {
                 IconButton(onClick = { sortMenu = true }) { Icon(Icons.AutoMirrored.Filled.Sort, "Sort") }

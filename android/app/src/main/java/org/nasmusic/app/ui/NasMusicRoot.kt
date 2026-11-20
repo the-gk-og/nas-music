@@ -73,6 +73,10 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlin.math.abs
 import org.nasmusic.app.AppContainer
+import org.nasmusic.app.ui.screens.BookScreen
+import org.nasmusic.app.ui.screens.PodcastScreen
+import org.nasmusic.app.ui.screens.SpokenMiniBar
+import org.nasmusic.app.ui.screens.SpokenScreen
 import org.nasmusic.app.ui.screens.AccountScreen
 import org.nasmusic.app.ui.screens.AdminScreen
 import org.nasmusic.app.ui.screens.AlbumScreen
@@ -171,6 +175,7 @@ private fun MainScaffold(c: AppContainer) {
             bottomBar = {
                 if (!wide && !fullScreenNow) {
                     Column(Modifier.background(MaterialTheme.colorScheme.background)) {
+                        SpokenMiniBar(c)
                         MiniPlayer(c)
                         NavigationBar(containerColor = MaterialTheme.colorScheme.background, windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)) {
                             dests.forEach { d ->
@@ -208,6 +213,7 @@ private fun MainScaffold(c: AppContainer) {
                         enterTransition = { if (motion.enabled) fadeIn(motion.spec()) else EnterTransition.None },
                         exitTransition = { if (motion.enabled) fadeOut(motion.spec()) else ExitTransition.None },
                     ) { routes(c, motion) }
+                    if (wide && current != "now") SpokenMiniBar(c)
                     if (wide && !sidePane && current != "now") MiniPlayer(c)
                 }
                 if (sidePane) {
@@ -252,6 +258,9 @@ private fun NavGraphBuilder.routes(c: AppContainer, motion: MotionLevel) {
     composable("admin") { AdminScreen(c) }
     composable("data") { DataSettingsScreen(c) }
     composable("downloads") { DownloadsScreen(c) }
+    composable("spoken") { SpokenScreen(c) }
+    composable("podcast/{id}") { e -> PodcastScreen(c, e.arguments?.getString("id").orEmpty()) }
+    composable("book/{id}") { e -> BookScreen(c, e.arguments?.getString("id").orEmpty()) }
 }
 
 private fun NavHostController.goTab(route: String) = navigate(route) {

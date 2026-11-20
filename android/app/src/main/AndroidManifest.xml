@@ -55,6 +55,16 @@
             </intent-filter>
         </service>
 
+        <!-- Podcasts, audiobooks, internet radio: its own session, apart from music. -->
+        <service
+            android:name=".spoken.SpokenService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+
         <!-- Sharing Wrapped card images (cache/shared only). -->
         <provider
             android:name="androidx.core.content.FileProvider"
