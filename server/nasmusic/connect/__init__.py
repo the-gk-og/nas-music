@@ -130,6 +130,16 @@ class Hub:
         self.users: dict[str, UserHub] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
         self.speakers = None   # nasmusic.cast.SpeakerRegistry (attach_speakers)
+        # Observers of a user's playback/queue changes (Jam): fn(uid, kind, payload), kind "state" (payload = the
+        # PlaybackState) or "queues" (payload = queue id). Called from any thread; must not block.
+        self.listeners: list[Callable[[str, str, object], None]] = []
+
+    def _emit(self, uid: str, kind: str, payload) -> None:
+        for fn in list(self.listeners):
+            try:
+                fn(uid, kind, payload)
+            except Exception:
+                log.exception("connect listener failed")
 
     def attach_speakers(self, registry) -> None:
         """Offer the registry's speakers as Connect devices to every user (see nasmusic.cast)."""
@@ -156,6 +166,7 @@ class Hub:
 
     def notify_queue(self, uid: str, queue_id: str) -> None:
         """A queue changed (REST API): tell all the user's devices to refetch it."""
+        self._emit(uid, "queues", queue_id)
         self._call_soon(self._broadcast, uid, {"type": "queues", "queueId": queue_id})
 
     def notify_playlist(self, uids, playlist_id: str, rev: int | None, deleted: bool = False) -> None:
@@ -308,6 +319,7 @@ class Hub:
         """Bump rev, broadcast the state, persist (throttled unless forced)."""
         u.state["rev"] = int(u.state.get("rev", 0)) + 1
         await self._broadcast(uid, {"type": "state", "state": dict(u.state)})
+        self._emit(uid, "state", dict(u.state))
         u.dirty = True
         if force_persist:
             await self._flush(uid, u)
@@ -525,6 +537,7 @@ class Hub:
                 await conn.send({"type": "error", "detail": f"could not create queue: {e}"})
                 return
             await self._broadcast(uid, {"type": "queues", "queueId": qid})
+            self._emit(uid, "queues", qid)
             action, args = "playQueue", {"queueId": qid, "index": index}
 
         active_id = u.state.get("activeDeviceId")

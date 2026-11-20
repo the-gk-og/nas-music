@@ -356,10 +356,11 @@ def migrate_v4_to_v5(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
     return True
 
 
-# ---------- v5 -> v6 (explicit flags, family mode, automatic tag fixing, duplicates) ----------
+# ---------- v5 -> v6 (explicit flags, family mode, automatic tag fixing, duplicates, Jam) ----------
 
 V6_TABLES = ("track_explicit", "family_mode",
-             "fingerprints", "acoustid_lookups", "mb_releases", "autotag_suggestions", "duplicate_hidden")
+             "fingerprints", "acoustid_lookups", "mb_releases", "autotag_suggestions", "duplicate_hidden",
+             "jams", "jam_guests", "jam_requests", "jam_votes")
 
 
 def _rebuild_tag_overrides(conn: sqlite3.Connection, stmts: list[str]) -> None:

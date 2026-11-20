@@ -38,6 +38,7 @@ import type {
   Track,
   TrackInfo,
 } from '../types';
+import type { JamSettings, JamSnapshot } from '../jam';
 
 export class ApiError extends Error {
   constructor(
@@ -348,6 +349,29 @@ export class ApiClient {
     this.del<void>(`/playlists/${encodeURIComponent(id)}/tracks/${position}`);
   movePlaylistTrack = (id: string, from: number, to: number) =>
     this.post<void>(`/playlists/${encodeURIComponent(id)}/move`, { from, to });
+
+  // ---- Jam (listen together; host side) ----
+  startJam = (b: Partial<JamSettings> & { linkTtlMinutes?: number } = {}) => this.post<JamSnapshot>('/jams', b);
+  currentJam = () => this.get<JamSnapshot | undefined>('/jams/current');
+  jam = (id: string) => this.get<JamSnapshot>(`/jams/${encodeURIComponent(id)}`);
+  patchJam = (id: string, b: Partial<JamSettings>) => this.patch<JamSnapshot>(`/jams/${encodeURIComponent(id)}`, b);
+  endJam = (id: string) => this.del<void>(`/jams/${encodeURIComponent(id)}`);
+  jamLink = (id: string, b: { ttlMinutes?: number; close?: boolean } = {}) =>
+    this.post<JamSnapshot>(`/jams/${encodeURIComponent(id)}/link`, b);
+  jamQr = (id: string) =>
+    this.get<{ joinUrl: string | null; lanJoinUrl: string | null; qr: string | null; lanQr: string | null }>(`/jams/${encodeURIComponent(id)}/qr`);
+  decideJamRequest = (id: string, requestId: string, approve: boolean) =>
+    this.post<JamSnapshot>(`/jams/${encodeURIComponent(id)}/requests/${encodeURIComponent(requestId)}`, { approve });
+  removeJamEntry = (id: string, position: number, trackId?: string) =>
+    this.del<JamSnapshot>(`/jams/${encodeURIComponent(id)}/queue/${position}`, trackId ? { trackId } : undefined);
+  kickJamGuest = (id: string, guestId: string) =>
+    this.del<JamSnapshot>(`/jams/${encodeURIComponent(id)}/guests/${encodeURIComponent(guestId)}`);
+  /** Host's live Jam updates. Browsers can't set headers, so bearer mode uses `?token=`. */
+  jamWsUrl(id: string): string {
+    const httpBase = this.origin || globalThis.location.origin;
+    const ws = `${httpBase.replace(/^http/, 'ws')}/api/v1/jam/ws?jam=${encodeURIComponent(id)}`;
+    return this.mode === 'bearer' && this.token ? `${ws}&token=${encodeURIComponent(this.token)}` : ws;
+  }
 
   // ---- queues ----
   queues = () => this.get<Queue[]>('/queues');

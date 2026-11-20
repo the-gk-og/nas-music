@@ -71,6 +71,7 @@ export type Dialog =
   | { kind: 'sleep' }
   | { kind: 'lyricsEditor'; track: Track; raw: string }
   | { kind: 'devices' }
+  | { kind: 'jam' }
   | { kind: 'tagEdit'; trackIds: string[]; albumId?: string; title: string }
   | { kind: 'playlistShare'; playlistId: string }
   | { kind: 'itemMenu'; item: import('./types').ShelfItem }

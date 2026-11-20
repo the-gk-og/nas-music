@@ -23,6 +23,10 @@ object ApiFactory {
     fun discovery(callFactory: Call.Factory, baseUrl: String = RoutedCallFactory.VIRTUAL_BASE): DiscoveryApi =
         retrofit(callFactory, baseUrl).create(DiscoveryApi::class.java)
 
+    /** Jam (listen together), host side. */
+    fun jam(callFactory: Call.Factory, baseUrl: String = RoutedCallFactory.VIRTUAL_BASE): JamApi =
+        retrofit(callFactory, baseUrl).create(JamApi::class.java)
+
     private fun retrofit(callFactory: Call.Factory, baseUrl: String): Retrofit =
         Retrofit.Builder()
             .baseUrl(baseUrl)

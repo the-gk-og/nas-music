@@ -43,6 +43,8 @@ def router_for(cfg: Config, render_join) -> APIRouter:
         if root is None:
             if path.startswith("join/"):
                 return render_join(request, path.removeprefix("join/").strip("/"))
+            if path.startswith("jam/"):
+                return HTMLResponse(JAM_PLACEHOLDER, status_code=503, headers={"Cache-Control": "no-store"})
             return HTMLResponse(PLACEHOLDER, headers={"Cache-Control": "no-store"})
         f = _file(root, path) if path else None
         if f is not None:
@@ -50,8 +52,11 @@ def router_for(cfg: Config, render_join) -> APIRouter:
             media = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
             return FileResponse(f, media_type=media, headers={
                 "Cache-Control": "public, max-age=31536000, immutable" if immutable else "no-cache"})
-        if "." in path.rsplit("/", 1)[-1] and not path.startswith("join/"):
+        if "." in path.rsplit("/", 1)[-1] and not path.startswith(("join/", "jam/")):
             raise HTTPException(404, "not found")  # a missing asset, not an app route
+        if path.startswith("jam/") and (root / "jam.html").is_file():
+            # Jam guest page: a small separate entry (no account, no player), see web/jam.html.
+            return FileResponse(root / "jam.html", media_type="text/html", headers={"Cache-Control": "no-cache"})
         return FileResponse(root / "index.html", media_type="text/html", headers={"Cache-Control": "no-cache"})
 
     return router
@@ -63,3 +68,10 @@ PLACEHOLDER = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 a{color:#2f6f5e}@media(prefers-color-scheme:dark){body{background:#000;color:#eee}a{color:#4ade80}}</style></head>
 <body><h1>&#9835; nas-music</h1><p>The web player isn't installed on this server yet.</p>
 <p>Use the Android or desktop app, or the <a href="/admin">admin pages</a>.</p></body></html>"""
+
+
+JAM_PLACEHOLDER = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark">
+<title>Jam</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem}</style>
+</head><body><h1>&#9835; Jam</h1><p>The guest page isn't installed on this server yet. Ask the host to update it.</p>
+</body></html>"""
