@@ -308,6 +308,21 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SyncManifest' }
+  /sync/smart:
+    get:
+      summary: |
+        Smart-download candidates for the phone's rolling offline set: favourites, active mixes, the last
+        7 days' Daily Mixes, recent plays, Release Radar albums already in the library, "because you played"
+        and the recommender's likely picks. Each track appears once with all its reasons and the AI's
+        likelihood. The phone picks what fits its storage budget and evicts the least likely first.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 5000, default: 1500 } }
+      responses:
+        '200':
+          description: candidates, favourites and current mixes first, then by score
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SmartCandidates' }
   /events:
     post:
       summary: Batch upload of listening feedback. Idempotent by event id; duplicates are ignored.
@@ -2799,6 +2814,27 @@ components:
                   true = `bytes` is exact (FLAC, or Opus already in the transcode cache). false = estimate
                   from duration x bitrate; the server pre-transcodes manifest tracks after the nightly run,
                   so by sync time Opus sizes are normally exact.
+    SmartCandidates:
+      type: object
+      required: [generatedAt, items]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        items:
+          type: array
+          items:
+            type: object
+            required: [trackId, reasons, score]
+            properties:
+              trackId: { type: string }
+              reasons:
+                type: array
+                items: { type: string, enum: [favourite, mix, week_mix, recent, release_radar, foryou, predicted] }
+              score: { type: number, minimum: 0, maximum: 1, description: "AI likelihood the user wants this track soon (percentile rank); 0 when unknown" }
+              plays: { type: integer }
+              lastPlayedAt: { type: [string, 'null'], format: date-time }
+              durationS: { type: [number, 'null'] }
+              flacBytes: { type: [integer, 'null'], description: size of the original file (format=flac stream) }
+              track: { oneOf: [ { $ref: '#/components/schemas/Track' }, { type: 'null' } ] }
     Event:
       type: object
       required: [id, type, trackId, at]

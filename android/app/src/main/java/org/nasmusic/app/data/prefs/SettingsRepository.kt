@@ -23,6 +23,12 @@ data class AppSettings(
     val streamBitrate: Int = 160,
     /** v2: off by default — stream like Spotify; when on, favourites + mixes download overnight. */
     val offlineFavourites: Boolean = false,
+    /** Smart downloads: keep a rolling offline set (favourites, this week's mixes, recent, AI picks). Off by default. */
+    val smartDownloads: Boolean = false,
+    /** [org.nasmusic.app.sync.StorageBudget] key, e.g. "gb:5" or "pct:25". */
+    val smartBudget: String = "gb:5",
+    /** [org.nasmusic.app.sync.DownloadQuality] key for smart and manual downloads. */
+    val downloadQuality: String = "opus128",
     /** Lyrics text size multiplier (Tt button). */
     val lyricsScale: Float = 1f,
     // ---- v3 Appearance (docs/v3-ux.md §7) ----
@@ -63,6 +69,9 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     private val tunnelSync = booleanPreferencesKey("allow_tunnel_sync")
     private val bitrate = intPreferencesKey("stream_bitrate")
     private val offline = booleanPreferencesKey("offline_favourites")
+    private val smartKey = booleanPreferencesKey("smart_downloads")
+    private val smartBudgetKey = stringPreferencesKey("smart_budget")
+    private val qualityKey = stringPreferencesKey("download_quality")
     private val lyricsScaleKey = androidx.datastore.preferences.core.floatPreferencesKey("lyrics_scale")
     private val animationsKey = stringPreferencesKey("ui_animations")
     private val defaultViewKey = stringPreferencesKey("ui_default_view")
@@ -78,6 +87,9 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             allowTunnelSync = p[tunnelSync] ?: false,
             streamBitrate = p[bitrate] ?: 160,
             offlineFavourites = p[offline] ?: false,
+            smartDownloads = p[smartKey] ?: false,
+            smartBudget = p[smartBudgetKey] ?: "gb:5",
+            downloadQuality = p[qualityKey] ?: "opus128",
             lyricsScale = p[lyricsScaleKey] ?: 1f,
             animations = p[animationsKey] ?: "quick",
             defaultView = p[defaultViewKey] ?: "grid",
@@ -120,6 +132,9 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         it[accentKey] = s.accent; it[homeShelvesKey] = s.homeShelves.joinToString(",")
     }
     suspend fun setOfflineFavourites(on: Boolean) = context.dataStore.edit { it[offline] = on }
+    suspend fun setSmartDownloads(on: Boolean) = context.dataStore.edit { it[smartKey] = on }
+    suspend fun setSmartBudget(key: String) = context.dataStore.edit { it[smartBudgetKey] = key }
+    suspend fun setDownloadQuality(key: String) = context.dataStore.edit { it[qualityKey] = key }
     suspend fun setLyricsScale(s: Float) = context.dataStore.edit { it[lyricsScaleKey] = s.coerceIn(0.7f, 2f) }
     suspend fun setStreamBitrate(kbps: Int) = context.dataStore.edit { it[bitrate] = kbps }
 }

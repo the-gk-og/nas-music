@@ -39,6 +39,27 @@ interface DownloadDao {
 
     @Query("DELETE FROM downloads WHERE trackId = :id")
     suspend fun delete(id: String)
+
+    @Query("SELECT * FROM downloads WHERE trackId = :id")
+    suspend fun get(id: String): DownloadEntity?
+}
+
+@Dao
+interface OfflinePinDao {
+    @Upsert
+    suspend fun upsert(p: OfflinePinEntity)
+
+    @Query("SELECT * FROM offline_pins ORDER BY addedAtMs")
+    suspend fun all(): List<OfflinePinEntity>
+
+    @Query("SELECT * FROM offline_pins ORDER BY addedAtMs")
+    fun observeAll(): Flow<List<OfflinePinEntity>>
+
+    @Query("SELECT * FROM offline_pins WHERE `key` = :key")
+    suspend fun get(key: String): OfflinePinEntity?
+
+    @Query("DELETE FROM offline_pins WHERE `key` = :key")
+    suspend fun delete(key: String)
 }
 
 @Dao

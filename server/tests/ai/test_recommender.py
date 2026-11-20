@@ -138,3 +138,17 @@ def test_latest_thumb_wins_and_clear_cancels(conn, cfg, synth):
     assert list(rec.sig.blocked[i]) == [False, True, False, False, True]
     assert list(rec.sig.weight[i]) == [0.0, 0.0, 2.0, 0.0, 0.0]
     assert rec.sig.n_feedback == 8
+
+
+def test_likely_next_ranks_taste(conn, cfg, synth):
+    from datetime import timedelta
+
+    from nasmusic.ai import api
+    from tests.ai.conftest import NOW, USER
+    for t in synth.by_cluster(0)[:20]:
+        for d in (3, 10):
+            synth.play(t, NOW - timedelta(days=d), user=USER)
+    p = api.likely_next(conn, cfg, USER)
+    assert p and all(0 < v <= 1 for v in p.values())
+    assert max(p.values()) == 1.0
+    assert api.likely_next(conn, cfg, "nobody") == {}

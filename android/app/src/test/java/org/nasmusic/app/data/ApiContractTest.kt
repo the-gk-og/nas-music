@@ -59,6 +59,19 @@ class ApiContractTest {
         assertEquals("/api/v1/sync/manifest?favouritesFormat=flac", server.takeRequest().path)
     }
 
+    @Test fun `smart candidates parse`() = runBlocking {
+        server.enqueue(MockResponse().setBody(
+            """{"generatedAt":"2026-11-18T02:00:00Z","items":[{"trackId":"t1","reasons":["favourite","mix"],"score":0.8,
+               "plays":3,"lastPlayedAt":"2026-11-17T20:00:00Z","durationS":201.5,"flacBytes":30000000,"track":$track},
+               {"trackId":"t2","reasons":["predicted"],"score":0.4,"plays":0,"lastPlayedAt":null,"durationS":null,"flacBytes":null,"track":null}]}""",
+        ))
+        val r = api.smartCandidates()
+        assertEquals(listOf("favourite", "mix"), r.items[0].reasons)
+        assertEquals("Song", r.items[0].track?.title)
+        assertNull(r.items[1].track)
+        assertEquals("/api/v1/sync/smart?limit=1500", server.takeRequest().path)
+    }
+
     @Test fun `pair, star, suggestion status`() = runBlocking {
         server.enqueue(MockResponse().setBody("""{"deviceId":"d1","deviceToken":"secret"}"""))
         server.enqueue(MockResponse().setResponseCode(204))

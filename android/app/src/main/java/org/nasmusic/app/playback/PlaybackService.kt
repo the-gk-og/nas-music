@@ -389,8 +389,27 @@ class PlaybackService : MediaLibraryService() {
 
     private var errorRetries = 0
 
+    /** One "offline" message per offline spell, not one per song that can't be streamed. */
+    private var offlineNoticeShown = false
+
     private fun recover(error: androidx.media3.common.PlaybackException) {
         android.util.Log.w(org.nasmusic.app.diag.CrashLog.TAG, "Playback error ${error.errorCodeName} (retry $errorRetries)", error)
+        if (c.router.route.value == org.nasmusic.app.net.Route.OFFLINE) {
+            // No connection: don't retry streams, jump to the next downloaded song instead.
+            val ids = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
+            val next = OfflinePlayback.nextPlayable(ids, player.currentMediaItemIndex, c.offline.downloadedIds.value)
+            if (!offlineNoticeShown) {
+                offlineNoticeShown = true
+                c.ui.toast(if (next != null) "Offline: skipping songs that aren't downloaded" else "You're offline and the rest of this queue isn't downloaded")
+            }
+            if (next != null) { player.seekTo(next, 0); player.prepare(); player.play() }
+            scope.launch {
+                // Back online meanwhile? Retry the current song as normal.
+                if (next == null && c.router.refresh() != org.nasmusic.app.net.Route.OFFLINE) player.prepare()
+            }
+            return
+        }
+        offlineNoticeShown = false
         when (val a = PlaybackRecovery.decide(error.errorCode, errorRetries, player.hasNextMediaItem())) {
             is PlaybackRecovery.Action.Retry -> {
                 errorRetries++
@@ -418,8 +437,13 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             try {
                 val localIds = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
-                val resp = runCatching { c.api.radioMore(qid) }.getOrNull() ?: return@launch
-                val fresh = RadioLogic.newTracks(resp, localIds, org.nasmusic.app.data.api.ApiFactory.json)
+                val resp = if (c.router.route.value == org.nasmusic.app.net.Route.OFFLINE) null else runCatching { c.api.radioMore(qid) }.getOrNull()
+                val fresh = if (resp != null) RadioLogic.newTracks(resp, localIds, org.nasmusic.app.data.api.ApiFactory.json)
+                else if (c.router.route.value == org.nasmusic.app.net.Route.OFFLINE) {
+                    // Offline: keep the radio going with downloaded songs it hasn't played yet.
+                    val held = localIds.toSet()
+                    OfflinePlayback.spreadArtists(c.offline.offlineTracks.value.filter { it.id !in held }.shuffled()).take(15)
+                } else return@launch
                 if (fresh.isEmpty() || c.queueSync.currentId.value != qid) return@launch
                 val items = withContext(Dispatchers.IO) { fresh.map { resolve(MediaItems.fromTrack(it, PlaySource.MIX)) } }
                 player.addMediaItems(items)

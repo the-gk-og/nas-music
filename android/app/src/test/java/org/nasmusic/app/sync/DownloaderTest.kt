@@ -59,4 +59,18 @@ class DownloaderTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("full"))
         assertEquals("full", downloader.download("t3", AudioFormat.OPUS, 160).readText())
     }
+
+    @Test fun `bitrate in the name keeps partials of different qualities apart, deleteAll clears every variant`() = runBlocking {
+        assertEquals("t4.192.opus", downloader.fileFor("t4", AudioFormat.OPUS, 192, kbpsInName = true).name)
+        assertEquals("t4.opus", downloader.fileFor("t4", AudioFormat.OPUS, 192).name)
+        File(downloader.fileFor("t4", AudioFormat.OPUS, 128, kbpsInName = true).path + ".part").writeText("old")
+        server.enqueue(MockResponse().setBody("new"))
+        val f = downloader.download("t4", AudioFormat.OPUS, 192, kbpsInName = true)
+        assertEquals("new", f.readText())          // not resumed from the 128 kbps partial
+        assertEquals("bitrate=192", server.takeRequest().requestUrl!!.query!!.split('&').first { it.startsWith("bitrate") })
+        File(dir, "t4.flac").writeText("x")
+        File(dir, "t4x.opus").writeText("other track")
+        downloader.deleteAll("t4")
+        assertEquals(listOf("t4x.opus"), dir.list()!!.sorted())
+    }
 }

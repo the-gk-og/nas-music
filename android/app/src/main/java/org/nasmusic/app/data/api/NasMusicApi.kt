@@ -69,6 +69,9 @@ interface NasMusicApi {
     @GET("sync/manifest")
     suspend fun manifest(@Query("favouritesFormat") favouritesFormat: String): SyncManifest
 
+    @GET("sync/smart")
+    suspend fun smartCandidates(@Query("limit") limit: Int = 1500): SmartCandidates
+
     @POST("events")
     suspend fun events(@Body batch: EventBatch): EventsResponse
 

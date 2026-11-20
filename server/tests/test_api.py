@@ -212,3 +212,39 @@ def test_suggestions(client, conn):
     assert conn.execute("SELECT status, answered_at FROM suggestions WHERE id='s1'").fetchone()[0] == "have"
     assert client.post("/api/v1/suggestions/s1", json={"status": "new"}).status_code == 422
     assert client.post("/api/v1/suggestions/zzz", json={"status": "want"}).status_code == 404
+
+
+# ---------- smart downloads ----------
+
+
+def test_sync_smart_candidates(client, conn, monkeypatch):
+    from nasmusic.app import ai_adapter as adapter
+    ids = track_ids(conn)
+    _make_mix(conn, "m1", "daily", [ids["Opening"]])
+    _make_mix(conn, "wk", "daily", [ids["Closing"]], active=0,
+              created=__import__("nasmusic.core", fromlist=["now_iso"]).now_iso())
+    _make_mix(conn, "old", "daily", [ids["untagged"]], active=0, created="2020-01-01T00:00:00Z")
+    client.put(f"/api/v1/favourites/{ids['Song 1']}")
+    monkeypatch.setattr(adapter, "likely_next", lambda *a: {ids["Song 2"]: 0.9, ids["Opening"]: 0.5})
+    monkeypatch.setattr(adapter, "because_you_played", lambda *a: [])
+    monkeypatch.setattr(adapter, "release_radar", lambda *a: {})
+    r = client.get("/api/v1/sync/smart")
+    assert r.status_code == 200
+    items = {i["trackId"]: i for i in r.json()["items"]}
+    assert items[ids["Song 1"]]["reasons"] == ["favourite"]
+    assert items[ids["Opening"]]["reasons"][0] == "mix" and items[ids["Opening"]]["score"] == 0.5
+    assert items[ids["Closing"]]["reasons"] == ["week_mix"]
+    assert "predicted" in items[ids["Song 2"]]["reasons"] and items[ids["Song 2"]]["score"] == 0.9
+    assert ids["untagged"] not in items or "week_mix" not in items[ids["untagged"]]["reasons"]
+    assert items[ids["Song 1"]]["track"]["title"] == "Song 1"
+    assert r.json()["items"][0]["trackId"] == ids["Song 1"]          # favourites first
+    # Thumbs-down tracks never come back, even when predicted.
+    conn.execute("UPDATE user_tracks SET blocked = 1 WHERE track_id = ?", (ids["Song 1"],))
+    assert ids["Song 1"] not in {i["trackId"] for i in client.get("/api/v1/sync/smart").json()["items"]}
+
+
+def test_sync_smart_without_ai(client, conn):
+    ids = track_ids(conn)
+    client.put(f"/api/v1/favourites/{ids['Song 2']}")
+    items = client.get("/api/v1/sync/smart").json()["items"]
+    assert ids["Song 2"] in {i["trackId"] for i in items}

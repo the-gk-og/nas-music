@@ -20,7 +20,7 @@ def test_health_is_public(anon):
     assert anon.get("/api/v1/health").json()["serverId"] == body["serverId"]
 
 
-@pytest.mark.parametrize("path", ["/api/v1/library/artists", "/api/v1/favourites", "/api/v1/sync/manifest",
+@pytest.mark.parametrize("path", ["/api/v1/library/artists", "/api/v1/favourites", "/api/v1/sync/manifest", "/api/v1/sync/smart",
                                   "/api/v1/mixes/today", "/api/v1/suggestions", "/api/v1/stream/x"])
 def test_endpoints_need_token(anon, path):
     assert anon.get(path).status_code == 401

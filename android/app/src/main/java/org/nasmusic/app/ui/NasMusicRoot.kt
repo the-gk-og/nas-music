@@ -80,6 +80,7 @@ import org.nasmusic.app.ui.screens.ArtistScreen
 import org.nasmusic.app.ui.screens.ConnectScreen
 import org.nasmusic.app.ui.screens.DataSettingsScreen
 import org.nasmusic.app.ui.screens.DiscoverScreen
+import org.nasmusic.app.ui.screens.DownloadsScreen
 import org.nasmusic.app.ui.screens.EqualizerScreen
 import org.nasmusic.app.ui.screens.FoldersScreen
 import org.nasmusic.app.ui.screens.ForYouScreen
@@ -250,6 +251,7 @@ private fun NavGraphBuilder.routes(c: AppContainer, motion: MotionLevel) {
     composable("account") { AccountScreen(c) }
     composable("admin") { AdminScreen(c) }
     composable("data") { DataSettingsScreen(c) }
+    composable("downloads") { DownloadsScreen(c) }
 }
 
 private fun NavHostController.goTab(route: String) = navigate(route) {

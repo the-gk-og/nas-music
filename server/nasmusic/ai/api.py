@@ -284,3 +284,33 @@ def run_blends(conn: sqlite3.Connection, cfg: AIConfig) -> dict[str, int]:
     except Exception:
         log.exception("blend refresh failed")
         return {}
+
+
+def likely_next(conn: sqlite3.Connection, cfg: AIConfig, user_id: str) -> dict[str, float]:
+    """How likely the user is to want each library track soon, for smart downloads: {track_id: p} with p in
+    (0, 1], the percentile rank of the recommender's score (1 = most likely). Blocked tracks are left out.
+    Uses the latest taste snapshot (trains in memory, without saving, if there is none). Never raises;
+    returns {} for an unknown user or an empty / unanalysed library."""
+    import numpy as np
+
+    from .recommender import Recommender
+    from .store import Store
+
+    try:
+        store = Store(conn)
+        if not store.user_exists(user_id):
+            return {}
+        rec = Recommender(conn, cfg, user_id, store=store)
+        if not len(rec.lib):
+            return {}
+        s = rec.scores()
+        ok = np.isfinite(s)
+        n = int(ok.sum())
+        if n == 0:
+            return {}
+        idx = np.flatnonzero(ok)
+        order = idx[np.argsort(-s[idx], kind="stable")]
+        return {rec.lib.ids[int(j)]: round(1.0 - rank / n, 4) for rank, j in enumerate(order)}
+    except Exception:
+        log.exception("likely_next failed for user %s", user_id)
+        return {}
