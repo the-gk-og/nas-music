@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -20,6 +20,8 @@ info:
     v4: lyrics fall back to LRCLIB (source "lrclib"); admin console API under /admin/*; POST /me/bug-report.
     v5 (discovery phase 2): Release Radar (/release-radar), Wrapped (/wrapped, /admin/wrapped), Blend (/blends);
     For You returns the shelf kinds release_radar, blends and wrapped, with ShelfItem types blend and wrapped.
+    0.6.0 (schema v6): Jam - listen together (/jams for the host, /jam/* for guests with `X-Jam-Token`, /jam/ws).
+    Guest tokens are not device tokens: they work only on /jam/* and never stream audio.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
     Times are ISO-8601 UTC strings. IDs are opaque strings.
 servers:
@@ -955,6 +957,321 @@ paths:
       responses:
         '101': { description: switching protocols }
         '403': { description: bad token (the socket is closed with code 4401) }
+  # ---------- Jam: listen together (0.6.0, schema v6, docs/jam.md) ----------
+  /jams:
+    post:
+      tags: [jam]
+      summary: |
+        Start a Jam (or get the one you're already hosting). Guests add to the queue you're playing (Connect
+        state), else to a new empty "Jam" queue; the Jam follows whichever of your queues you play. Returns your
+        host view with the join links. The link expires after `linkTtlMinutes` (default 60, max 1440); the Jam
+        itself ends after 12 hours at the latest.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/JamSettingsPatch'
+                - type: object
+                  properties:
+                    linkTtlMinutes: { type: integer, minimum: 5, maximum: 1440 }
+      responses:
+        '200': { description: host view, content: { application/json: { schema: { $ref: '#/components/schemas/JamSnapshot' } } } }
+  /jams/current:
+    get:
+      tags: [jam]
+      summary: The Jam you're hosting, if any.
+      responses:
+        '200': { description: host view, content: { application/json: { schema: { $ref: '#/components/schemas/JamSnapshot' } } } }
+        '204': { description: not hosting a Jam }
+  /jams/{jamId}:
+    parameters: [{ name: jamId, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [jam]
+      summary: Host view of your Jam (404 if it isn't yours, 410 once ended).
+      responses:
+        '200': { description: host view, content: { application/json: { schema: { $ref: '#/components/schemas/JamSnapshot' } } } }
+        '404': { description: no such Jam (or not yours) }
+        '410': { description: ended }
+    patch:
+      tags: [jam]
+      summary: Change settings (approve-before-add, allow "play next", max songs waiting per guest; null = no cap).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/JamSettingsPatch' } } }
+      responses:
+        '200': { description: host view, content: { application/json: { schema: { $ref: '#/components/schemas/JamSnapshot' } } } }
+    delete:
+      tags: [jam]
+      summary: End the Jam. Every guest token dies, guest sockets get `ended` and close with 4410. The queue stays.
+      responses:
+        '204': { description: ended }
+  /jams/{jamId}/link:
+    parameters: [{ name: jamId, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [jam]
+      summary: |
+        New join link (the old one stops working; guests already in stay), or `close: true` = no new joins.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ttlMinutes: { type: integer, minimum: 5, maximum: 1440 }
+                close: { type: boolean, default: false }
+      responses:
+        '200': { description: host view, content: { application/json: { schema: { $ref: '#/components/schemas/JamSnapshot' } } } }
+        '429': { description: too many link changes }
+  /jams/{jamId}/qr:
+    parameters: [{ name: jamId, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [jam]
+      summary: QR codes (PNG data URIs) of the public and LAN join links (null when the link is closed).
+      responses:
+        '200':
+          description: QR codes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  joinUrl: { type: [string, 'null'] }
+                  lanJoinUrl: { type: [string, 'null'] }
+                  qr: { type: [string, 'null'] }
+                  lanQr: { type: [string, 'null'] }
+  /jams/{jamId}/requests/{requestId}:
+    parameters:
+      - { name: jamId, in: path, required: true, schema: { type: string } }
+      - { name: requestId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [jam]
+      summary: Approve (adds it to the queue, at the end or next as asked) or reject a pending request.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [approve], properties: { approve: { type: boolean } } } } }
+      responses:
+        '200': { description: host view, content: { application/json: { schema: { $ref: '#/components/schemas/JamSnapshot' } } } }
+        '409': { description: already handled }
+  /jams/{jamId}/queue:
+    parameters: [{ name: jamId, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [jam]
+      summary: The host adds a song through the Jam (no approval or caps). Plain queue edits work too.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackId]
+              properties:
+                trackId: { type: string }
+                playNext: { type: boolean, default: false }
+      responses:
+        '200': { description: host view, content: { application/json: { schema: { $ref: '#/components/schemas/JamSnapshot' } } } }
+        '409': { description: already playing or coming up }
+  /jams/{jamId}/queue/{position}:
+    parameters:
+      - { name: jamId, in: path, required: true, schema: { type: string } }
+      - { name: position, in: path, required: true, schema: { type: integer } }
+      - { name: trackId, in: query, required: false, schema: { type: string }, description: guard against a stale view }
+    delete:
+      tags: [jam]
+      summary: Remove a queue entry (position in the host queue, as in JamEntry.position).
+      responses:
+        '200': { description: host view, content: { application/json: { schema: { $ref: '#/components/schemas/JamSnapshot' } } } }
+        '409': { description: the entry at that position isn't `trackId` any more }
+  /jams/{jamId}/guests/{guestId}:
+    parameters:
+      - { name: jamId, in: path, required: true, schema: { type: string } }
+      - { name: guestId, in: path, required: true, schema: { type: string } }
+    delete:
+      tags: [jam]
+      summary: |
+        Kick a guest: their token dies, their pending requests are withdrawn, their socket gets `kicked` and closes
+        with 4403. (They could rejoin with the link while it's valid; regenerate it to stop that.)
+      responses:
+        '200': { description: host view, content: { application/json: { schema: { $ref: '#/components/schemas/JamSnapshot' } } } }
+  /jam/join/{code}:
+    parameters: [{ name: code, in: path, required: true, schema: { type: string } }]
+    get:
+      tags: [jam]
+      security: []
+      summary: |
+        Public. Preview a join link (rate-limited per IP). `signedInAs` = the username when the caller sent a valid
+        session (cookie/bearer), so the guest page can offer "join as yourself".
+      responses:
+        '200':
+          description: preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hostName: { type: string }
+                  guestCount: { type: integer }
+                  linkExpiresAt: { type: string, format: date-time }
+                  signedInAs: { type: [string, 'null'] }
+        '404': { description: unknown or revoked link, or the Jam ended }
+        '410': { description: the link expired }
+        '429': { description: rate limited }
+    post:
+      tags: [jam]
+      security: []
+      summary: |
+        Public. Join with a display name (trimmed, control/format characters removed, max 32; always plain text),
+        or `asMember: true` with a valid session to join as yourself (409 for the host). Returns the guest token
+        (send it as `X-Jam-Token`) and the guest view. Rate-limited per IP (10/min); max 50 guests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 200 }
+                asMember: { type: boolean, default: false }
+      responses:
+        '200':
+          description: joined
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - type: object
+                    required: [token]
+                    properties: { token: { type: string, description: 'jg_…; expires with the Jam' } }
+                  - $ref: '#/components/schemas/JamSnapshot'
+        '400': { description: no usable name }
+        '401': { description: asMember without a session }
+        '403': { description: the Jam is full }
+        '404': { description: unknown or revoked link }
+        '410': { description: the link expired }
+        '429': { description: rate limited }
+  /jam/me:
+    get:
+      tags: [jam]
+      security: [{ jamGuest: [] }]
+      summary: Guest view. 401 once the guest left, was kicked, the token expired or the Jam ended.
+      responses:
+        '200': { description: guest view, content: { application/json: { schema: { $ref: '#/components/schemas/JamSnapshot' } } } }
+        '401': { description: not in a Jam any more }
+    delete:
+      tags: [jam]
+      security: [{ jamGuest: [] }]
+      summary: Leave the Jam (the token dies).
+      responses:
+        '204': { description: left }
+  /jam/search:
+    get:
+      tags: [jam]
+      security: [{ jamGuest: [] }]
+      summary: Search the host's library for tracks (read-only, max 30, 20 searches/min per guest).
+      parameters: [{ name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 100 } }]
+      responses:
+        '200':
+          description: tracks
+          content:
+            application/json:
+              schema: { type: object, properties: { tracks: { type: array, items: { $ref: '#/components/schemas/JamTrack' } } } }
+        '429': { description: rate limited }
+  /jam/requests:
+    post:
+      tags: [jam]
+      security: [{ jamGuest: [] }]
+      summary: |
+        Ask for a song: straight into the host's queue (`queued: true`), or pending when the host approves adds.
+        403 = "play next" not allowed, or you already have `maxPerGuest` songs waiting. 409 = already playing,
+        coming up or requested. 10/min per guest.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackId]
+              properties:
+                trackId: { type: string }
+                playNext: { type: boolean, default: false }
+      responses:
+        '200':
+          description: requested
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  request: { $ref: '#/components/schemas/JamRequest' }
+                  queued: { type: boolean }
+        '403': { description: not allowed }
+        '404': { description: no such track }
+        '409': { description: duplicate }
+        '429': { description: rate limited }
+  /jam/requests/{requestId}:
+    parameters: [{ name: requestId, in: path, required: true, schema: { type: string } }]
+    delete:
+      tags: [jam]
+      security: [{ jamGuest: [] }]
+      summary: Withdraw one of your pending requests.
+      responses:
+        '204': { description: withdrawn }
+        '404': { description: not yours, or not pending }
+  /jam/votes:
+    post:
+      tags: [jam]
+      security: [{ jamGuest: [] }]
+      summary: Vote on a track in the Jam (1 up, -1 down, 0 clear). Shown to everyone; doesn't reorder the queue.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackId, value]
+              properties:
+                trackId: { type: string }
+                value: { type: integer, enum: [-1, 0, 1] }
+      responses:
+        '204': { description: recorded }
+  /jam/reactions:
+    post:
+      tags: [jam]
+      security: [{ jamGuest: [] }]
+      summary: 'Send a reaction to everyone in the Jam (not stored). Allowed: 🔥 ❤️ 😂 👏 🕺 🙌 😮 👎. 10 per 30 s.'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [emoji], properties: { emoji: { type: string } } } } }
+      responses:
+        '204': { description: sent }
+        '422': { description: not an allowed reaction }
+  /jam/art/{albumId}:
+    parameters:
+      - { name: albumId, in: path, required: true, schema: { type: string } }
+      - { name: size, in: query, required: false, schema: { type: integer, minimum: 16, maximum: 1024, default: 256 } }
+      - { name: token, in: query, required: false, schema: { type: string }, description: the guest token, for <img> }
+    get:
+      tags: [jam]
+      security: [{ jamGuest: [] }]
+      summary: Album art for guests (JPEG). Accepts the guest token as `?token=` (redacted from logs).
+      responses:
+        '200': { description: JPEG, content: { image/jpeg: {} } }
+        '404': { description: no art }
+  /jam/ws:
+    get:
+      tags: [jam]
+      security: []
+      summary: |
+        WebSocket (upgrade) with live Jam updates, separate from /connect and scoped to one Jam. Auth:
+        `?token=<guest token>`, or the host's normal session (bearer / `?token=` / cookie) plus `?jam=<jamId>`.
+        Server → client: `snapshot` (a full JamSnapshot for this viewer; on connect and after any change),
+        `playback {nowPlaying: {positionMs, positionAt, playing, speed}, serverTime}` (same track, new position or
+        pause), `reaction {emoji, name}`, `kicked` (then close 4403), `ended` (then close 4410). Close 4401 = bad
+        or expired token. Client → server: `ping` → `pong`. Ignore unknown types.
+      responses:
+        '101': { description: switching protocols }
   /cast/speakers:
     get:
       summary: |
@@ -1812,7 +2129,109 @@ paths:
 components:
   securitySchemes:
     device: { type: http, scheme: bearer }
+    jamGuest: { type: apiKey, in: header, name: X-Jam-Token, description: 'Jam guest token (jg_…) from POST /jam/join/{code}' }
   schemas:
+    JamSettings:
+      type: object
+      required: [approval, allowPlayNext, maxPerGuest]
+      properties:
+        approval: { type: boolean, description: guest adds wait for the host's approval }
+        allowPlayNext: { type: boolean, description: guests may add right after the current song }
+        maxPerGuest: { type: [integer, 'null'], minimum: 1, maximum: 50, description: 'songs waiting per guest (pending + upcoming); null = no cap' }
+    JamSettingsPatch:
+      type: object
+      properties:
+        approval: { type: boolean }
+        allowPlayNext: { type: boolean }
+        maxPerGuest: { type: [integer, 'null'], minimum: 1, maximum: 50 }
+    JamTrack:
+      type: object
+      description: What guests see of a track (no paths, sizes, ratings or other per-user data).
+      required: [id, title, artist, album, albumId, durationS]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        albumId: { type: string }
+        durationS: { type: number }
+    JamAdder:
+      type: object
+      required: [name, isHost]
+      properties:
+        guestId: { type: [string, 'null'] }
+        name: { type: string, description: plain text, never HTML }
+        isHost: { type: boolean }
+    JamVotes:
+      type: object
+      properties:
+        up: { type: integer }
+        down: { type: integer }
+        mine: { type: integer, enum: [-1, 0, 1] }
+    JamEntry:
+      type: object
+      properties:
+        position: { type: integer, description: index in the host queue }
+        track: { $ref: '#/components/schemas/JamTrack' }
+        addedBy: { $ref: '#/components/schemas/JamAdder' }
+        votes: { $ref: '#/components/schemas/JamVotes' }
+    JamNowPlaying:
+      allOf:
+        - $ref: '#/components/schemas/JamEntry'
+        - type: object
+          description: Extrapolate like Connect - positionMs + (serverTime-corrected now - positionAt) * speed while playing.
+          properties:
+            positionMs: { type: integer }
+            positionAt: { type: string, format: date-time }
+            playing: { type: boolean }
+            speed: { type: number }
+    JamRequest:
+      type: object
+      properties:
+        id: { type: string }
+        trackId: { type: string }
+        track: { oneOf: [{ $ref: '#/components/schemas/JamTrack' }, { type: 'null' }] }
+        playNext: { type: boolean }
+        status: { type: string, enum: [pending, queued, rejected, withdrawn, removed] }
+        createdAt: { type: string, format: date-time }
+        by: { oneOf: [{ type: object, properties: { guestId: { type: string }, name: { type: string } } }, { type: 'null' }], description: null = the host }
+    JamSnapshot:
+      type: object
+      description: |
+        Everything a Jam screen shows. Host view adds jam.joinCode/joinUrl/lanJoinUrl/joinExpiresAt/queueId and
+        lists every pending request; a guest sees only their own pending requests plus `me.waiting`/`remaining`.
+      properties:
+        jam:
+          type: object
+          properties:
+            id: { type: string }
+            hostName: { type: string }
+            settings: { $ref: '#/components/schemas/JamSettings' }
+            createdAt: { type: string, format: date-time }
+            expiresAt: { type: string, format: date-time }
+            ended: { type: boolean }
+            joinCode: { type: [string, 'null'], description: host only; null = link closed }
+            joinUrl: { type: [string, 'null'], description: 'host only: public link (tunnel_url/jam/<code>)' }
+            lanJoinUrl: { type: [string, 'null'], description: 'host only: LAN link (self-signed certificate warning on guests'' phones)' }
+            joinExpiresAt: { type: [string, 'null'], format: date-time }
+            queueId: { type: string, description: host only; the queue guests add to }
+        serverTime: { type: string, format: date-time }
+        nowPlaying: { oneOf: [{ $ref: '#/components/schemas/JamNowPlaying' }, { type: 'null' }] }
+        upcoming: { type: array, items: { $ref: '#/components/schemas/JamEntry' }, description: up to 100 after the current song }
+        pending: { type: array, items: { $ref: '#/components/schemas/JamRequest' } }
+        guests:
+          type: array
+          items: { type: object, properties: { id: { type: string }, name: { type: string }, isMember: { type: boolean } } }
+        me:
+          type: object
+          properties:
+            guestId: { type: [string, 'null'] }
+            name: { type: string }
+            isHost: { type: boolean }
+            isMember: { type: boolean, description: a signed-in user of this server (may listen along on their own device) }
+            waiting: { type: integer }
+            remaining: { type: [integer, 'null'] }
+            expiresAt: { type: string, format: date-time }
     AdminUserDetail:
       allOf:
         - $ref: '#/components/schemas/AdminUser'
