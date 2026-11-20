@@ -22,14 +22,10 @@ class MainActivity : FragmentActivity() { // FragmentActivity: the Cast button's
         if (savedInstanceState == null) org.nasmusic.app.ui.LaunchRequests.handle(intent)
     }
 
-    /** A widget or quick-settings tile asked for Now Playing (or an item) while the app was open. */
+    /** A widget/quick-settings tile (Now Playing or an item) or a notification (a route) while the app was open. */
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         org.nasmusic.app.ui.LaunchRequests.handle(intent)
-    }
-
-    override fun onNewIntent(intent: android.content.Intent) {
-        super.onNewIntent(intent)
         intent.getStringExtra(EXTRA_ROUTE)?.let { container.pendingRoute.value = it }
     }
 

@@ -116,6 +116,8 @@ export interface VoiceResult {
   device?: { id: string; name: string };
   item?: { kind: string; id: string | null; title: string };
   queueId?: string;
+}
+
 /** v7 scrobbling (GET /me/scrobble). Tokens are never returned. */
 export type ScrobbleServiceId = 'listenbrainz' | 'lastfm';
 export interface ScrobbleService {
