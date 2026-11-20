@@ -21,7 +21,7 @@ from nasmusic.stream.transcode import OpusCache
 log = logging.getLogger(__name__)
 
 JOB_NAMES = ("scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "lyrics", "discovery", "release_radar",
-             "blends", "cleanup", "backup")
+             "blends", "cleanup", "backup", "autotag")
 # The loudness job runs after every scan; a first pass over a big library takes hours, so each run stops
 # after this long and the next scan (or the nightly chain) carries on.
 LOUDNESS_BUDGET_S = 50 * 60
@@ -126,6 +126,14 @@ class Jobs:
 
         return backups.create(self.cfg, conn, "manual")
 
+    def _autotag(self, conn):
+        """Automatic tag fixing: fingerprints -> AcoustID -> MusicBrainz suggestions (time-boxed, resumable)."""
+        from nasmusic.library import autotag
+
+        res = autotag.run(conn, self.cfg)
+        res.pop("status", None)
+        return res
+
     def _discovery(self, conn):
         return {"newSuggestions": ai_adapter.run_weekly_discovery(conn, ai_config(self.cfg))}
 
@@ -149,6 +157,7 @@ class Jobs:
             "lyrics": self._lyrics,
             "cleanup": self._cleanup,
             "backup": self._backup,
+            "autotag": self._autotag,
         }[name]
 
     # ----- running -----
@@ -222,6 +231,8 @@ class Jobs:
         sched.add_job(self.run, "cron", args=["release_radar", "schedule"], id="release_radar", day_of_week="fri",
                       hour=4, minute=0)
         sched.add_job(self.run, "cron", args=["cleanup", "schedule"], id="cleanup", hour=4, minute=30)
+        # Tag-fixing suggestions: fingerprint/look up what is new, after the night's heavier jobs.
+        sched.add_job(self.run, "cron", args=["autotag", "schedule"], id="autotag", hour=5, minute=0)
         sched.start()
         self.scheduler = sched
         return sched
@@ -234,7 +245,8 @@ class Jobs:
         for job_id, kw in (("nightly", {"hour": 2, "minute": 0}),
                            ("discovery", {"day_of_week": "sun", "hour": 3, "minute": 0}),
                            ("release_radar", {"day_of_week": "fri", "hour": 4, "minute": 0}),
-                           ("cleanup", {"hour": 4, "minute": 30})):
+                           ("cleanup", {"hour": 4, "minute": 30}),
+                           ("autotag", {"hour": 5, "minute": 0})):
             self.scheduler.reschedule_job(job_id, trigger="cron", timezone=tz, **kw)
 
     def next_runs(self, iso_format: bool = False) -> dict[str, str | None]:

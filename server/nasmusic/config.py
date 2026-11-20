@@ -32,6 +32,7 @@ class Config:
     timezone: str = "Europe/London"
     opus_cache_gb: float = 20.0
     lastfm_api_key: str | None = None
+    acoustid_api_key: str | None = None         # automatic tag fixing; free key from https://acoustid.org/new-application
     model_version: str = "effnet-discogs-1"   # audio-analysis model (see nasmusic/ai/README.md)
     scan_interval_minutes: int = 5
     lrclib_enabled: bool = True                 # lyrics fallback from lrclib.net when a file has none
@@ -118,7 +119,7 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
         pth = Path(vals[key]).expanduser()
         vals[key] = pth if pth.is_absolute() else (base / pth).resolve()
     for key in ("tunnel_url", "cf_access_client_id", "cf_access_client_secret", "admin_password_hash",
-                "lastfm_api_key", "lan_public_url", "cast_media_url", "homeassistant_url", "homeassistant_token",
+                "lastfm_api_key", "acoustid_api_key", "lan_public_url", "cast_media_url", "homeassistant_url", "homeassistant_token",
                 "snapcast_host"):
         if vals.get(key) == "":
             vals[key] = None

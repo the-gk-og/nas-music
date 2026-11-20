@@ -1,11 +1,13 @@
--- nas-music shared schema v5 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v6 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
 -- tag_overrides, tag_edits), collaborative playlists (playlist_members, playlist_activity, playlists.rev;
 -- playlist_tracks rebuilt with entry ids and a fractional REAL position), release_radar, blends,
 -- blend_members and blend_tracks (Release Radar, Blend; Wrapped needs no table), and ReplayGain/loudness
--- columns on tracks. Older databases are upgraded by nasmusic.db.migrations.
+-- columns on tracks. v6 adds automatic tag fixing (fingerprints, acoustid_lookups, mb_releases,
+-- autotag_suggestions), MusicBrainz-id override fields in tag_overrides, and hidden duplicates
+-- (duplicate_hidden; tracks.missing = 2). Older databases are upgraded by nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -85,7 +87,9 @@ CREATE TABLE IF NOT EXISTS tracks (
     mtime           REAL NOT NULL,     -- file mtime at last scan, to detect changes
     mbid            TEXT,              -- MusicBrainz recording id
     added_at        TEXT NOT NULL,
-    missing         INTEGER NOT NULL DEFAULT 0,  -- file vanished on last scan (kept for history)
+    -- 0 = present; 1 = file vanished on last scan (kept for history); 2 (v6) = hidden by an admin as a
+    -- duplicate copy (see duplicate_hidden). Everything that filters `missing = 0` skips both.
+    missing         INTEGER NOT NULL DEFAULT 0,
     -- v2 song-info fields, filled by the scanner
     composer        TEXT,
     lyricist        TEXT,
@@ -342,10 +346,13 @@ CREATE INDEX IF NOT EXISTS bug_reports_created ON bug_reports(created_at);
 -- One row per overridden field. `value` is JSON (string, integer or null = "clear this tag").
 -- Fields: title, artist, album_artist, album, track_no, disc_no, year, genre, lyrics (raw LRC/plain text)
 -- and cover (sha256 of an uploaded image stored under data_dir/art/uploads/).
+-- v6: mb_track (recording MBID -> tracks.mbid), mb_releasegroup (-> albums.mbid), mb_artist, mb_albumartist
+-- (artist MBIDs; these change artist ids to 'mb:<mbid>'), written by accepted automatic tag suggestions.
 CREATE TABLE IF NOT EXISTS tag_overrides (
     track_id   TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
     field      TEXT NOT NULL CHECK (field IN ('title','artist','album_artist','album','track_no','disc_no',
-                                              'year','genre','lyrics','cover')),
+                                              'year','genre','lyrics','cover','mb_track','mb_releasegroup',
+                                              'mb_artist','mb_albumartist')),
     value      TEXT NOT NULL,
     updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
     updated_at TEXT NOT NULL,
@@ -512,4 +519,67 @@ CREATE TABLE IF NOT EXISTS blend_tracks (
     reason      TEXT NOT NULL,             -- e.g. "top" | "shared" | "match" (clients word it)
     score       REAL,
     PRIMARY KEY (blend_id, position)
+);
+
+-- ---------- v6: automatic tag fixing (AcoustID + MusicBrainz) and duplicates (server core writes all) ----------
+
+-- Chromaprint fingerprint of the first 2 minutes of each file. Recomputed when tracks.mtime changes.
+CREATE TABLE IF NOT EXISTS fingerprints (
+    track_id     TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    mtime        REAL NOT NULL,            -- tracks.mtime the fingerprint was computed from
+    duration_s   INTEGER,                  -- as reported by fpcalc
+    fingerprint  TEXT,                     -- compressed (AcoustID format); NULL when fpcalc failed
+    raw          BLOB,                     -- little-endian uint32 sub-fingerprints (duplicate finder)
+    error        TEXT,
+    computed_at  TEXT NOT NULL
+);
+
+-- AcoustID lookup per fingerprint (cached; redone only when the fingerprint changes).
+CREATE TABLE IF NOT EXISTS acoustid_lookups (
+    track_id     TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    mtime        REAL NOT NULL,            -- fingerprints.mtime it was looked up for
+    status       TEXT NOT NULL CHECK (status IN ('ok','no_match','error')),
+    acoustid     TEXT,                     -- best AcoustID track id
+    score        REAL,                     -- best AcoustID score 0..1
+    results      TEXT,                     -- JSON: trimmed candidates [{recording, score, releases:[...]}]
+    error        TEXT,
+    looked_up_at TEXT NOT NULL,
+    suggested_at TEXT                      -- when suggestions were last built from it (NULL = to do)
+);
+
+-- Cached MusicBrainz release lookups (JSON as returned by /ws/2/release/<mbid>).
+CREATE TABLE IF NOT EXISTS mb_releases (
+    mbid        TEXT PRIMARY KEY,
+    data        TEXT NOT NULL,
+    fetched_at  TEXT NOT NULL
+);
+
+-- One suggestion per track. `suggested` holds DB field names -> values (title, artist, album_artist, album,
+-- track_no, disc_no, year, genre, mb_track, mb_releasegroup, mb_artist, mb_albumartist); the current values are
+-- read live from tracks, so the diff stays right after manual edits. Accepting writes tag_overrides
+-- (audited in tag_edits, batch_id here); nothing is ever written to the files.
+CREATE TABLE IF NOT EXISTS autotag_suggestions (
+    track_id        TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    group_id        TEXT NOT NULL,         -- album group (the track's album id when matched)
+    release_mbid    TEXT,
+    recording_mbid  TEXT,
+    confidence      REAL NOT NULL,         -- 0..1
+    group_confidence REAL NOT NULL,        -- 0..1, the album group's
+    suggested       TEXT NOT NULL,         -- JSON {db_field: value}
+    cover_url       TEXT,                  -- Cover Art Archive front image of the release, if any
+    detail          TEXT,                  -- JSON: acoustidScore, durationDiffS, releaseTitle, ...
+    status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','rejected')),
+    created_at      TEXT NOT NULL,
+    decided_at      TEXT,
+    decided_by      TEXT REFERENCES users(id) ON DELETE SET NULL,
+    batch_id        TEXT                   -- tag_edits.batch_id of the accept
+);
+CREATE INDEX IF NOT EXISTS autotag_suggestions_group ON autotag_suggestions(status, group_id);
+
+-- Duplicate copies an admin chose to hide (tracks.missing = 2). Files are never deleted; unhide = delete row.
+CREATE TABLE IF NOT EXISTS duplicate_hidden (
+    track_id    TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    kept_id     TEXT REFERENCES tracks(id) ON DELETE SET NULL,
+    hidden_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    hidden_at   TEXT NOT NULL
 );

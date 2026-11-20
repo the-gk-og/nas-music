@@ -354,3 +354,54 @@ def migrate_v4_to_v5(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
         conn.execute("PRAGMA foreign_keys = ON")
     log.warning("schema v4 -> v5 done")
     return True
+
+
+# ---------- v5 -> v6 (automatic tag fixing, duplicates): new tables + tag_overrides rebuilt ----------
+
+V6_TABLES = ("fingerprints", "acoustid_lookups", "mb_releases", "autotag_suggestions", "duplicate_hidden")
+
+
+def _rebuild_tag_overrides(conn: sqlite3.Connection, stmts: list[str]) -> None:
+    """Widen the tag_overrides.field CHECK (MusicBrainz id fields). Rows are copied unchanged."""
+    sql = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tag_overrides'").fetchone()
+    if sql is None or "mb_track" in sql[0]:
+        return
+    conn.execute(_create_table(stmts, "tag_overrides", "tag_overrides__v6"))
+    conn.execute("INSERT INTO tag_overrides__v6 (track_id, field, value, updated_by, updated_at) "
+                 "SELECT track_id, field, value, updated_by, updated_at FROM tag_overrides")
+    conn.execute("DROP TABLE tag_overrides")
+    conn.execute("ALTER TABLE tag_overrides__v6 RENAME TO tag_overrides")
+
+
+def migrate_v5_to_v6(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """New tables and a rebuild of tag_overrides (data kept, one transaction, foreign keys off).
+    Returns True if it migrated."""
+    if current_version(conn) != 5:
+        return False
+    if make_backup:
+        dest = backup(conn, "v5-backup")
+        if dest:
+            log.warning("schema v5 -> v6: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if current_version(conn) != 5:
+                conn.execute("ROLLBACK")
+                return False
+            for t in V6_TABLES:
+                if not _table_exists(conn, t):
+                    conn.execute(_create_table(stmts, t))
+            _rebuild_tag_overrides(conn, stmts)
+            _create_indexes(conn, stmts)
+            conn.execute("DELETE FROM schema_version")
+            conn.execute("INSERT INTO schema_version (version) VALUES (6)")
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+    log.warning("schema v5 -> v6 done")
+    return True
