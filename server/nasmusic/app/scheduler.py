@@ -21,7 +21,7 @@ from nasmusic.stream.transcode import OpusCache
 log = logging.getLogger(__name__)
 
 JOB_NAMES = ("scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "lyrics", "discovery", "release_radar",
-             "blends", "cleanup", "backup", "explicit", "autotag")
+             "blends", "cleanup", "backup", "explicit", "autotag", "smart", "artist_info")
 # The loudness job runs after every scan; a first pass over a big library takes hours, so each run stops
 # after this long and the next scan (or the nightly chain) carries on.
 LOUDNESS_BUDGET_S = 50 * 60
@@ -144,6 +144,21 @@ class Jobs:
         res.pop("status", None)
         return res
 
+    def _smart(self, conn):
+        """Bring every smart playlist's cached list up to date (reads also refresh stale ones)."""
+        from nasmusic.app import smart
+
+        return smart.refresh_all(conn)
+
+    def _artist_info(self, conn):
+        """Artist pages: refresh a few due artists' metadata (MusicBrainz 1 req/s; most-played first)."""
+        from nasmusic.library import artistinfo
+
+        if not self.cfg.artist_info_enabled:
+            return {"skipped": "artist info is turned off"}
+        http = artistinfo.Http(getattr(self, "http_transport", None))
+        return artistinfo.refresh_due(conn, self.cfg.data_dir, http)
+
     def _discovery(self, conn):
         return {"newSuggestions": ai_adapter.run_weekly_discovery(conn, ai_config(self.cfg))}
 
@@ -169,6 +184,8 @@ class Jobs:
             "backup": self._backup,
             "explicit": self._explicit,
             "autotag": self._autotag,
+            "smart": self._smart,
+            "artist_info": self._artist_info,
         }[name]
 
     # ----- running -----
@@ -246,6 +263,9 @@ class Jobs:
         sched.add_job(self.run, "cron", args=["cleanup", "schedule"], id="cleanup", hour=4, minute=30)
         # Tag-fixing suggestions: fingerprint/look up what is new, after the night's heavier jobs.
         sched.add_job(self.run, "cron", args=["autotag", "schedule"], id="autotag", hour=5, minute=0)
+        # Smart playlists move with the date ("not played in a month"): refresh after the nightly jobs.
+        sched.add_job(self.run, "cron", args=["smart", "schedule"], id="smart", hour=5, minute=30)
+        sched.add_job(self.run, "cron", args=["artist_info", "schedule"], id="artist_info", hour=3, minute=30)
         sched.start()
         self.scheduler = sched
         return sched

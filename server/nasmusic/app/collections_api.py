@@ -219,7 +219,8 @@ def _notify(c: AppContext, uid: str, qid: str) -> None:
 
 
 class QueueSource(BaseModel):
-    type: Literal["album", "artist", "playlist", "mix", "radio", "genre", "folder", "smart_list", "search", "other"]
+    type: Literal["album", "artist", "playlist", "mix", "radio", "genre", "folder", "smart_list", "smart_playlist",
+                  "search", "other"]
     id: str | None = Field(default=None, max_length=4096)
 
 

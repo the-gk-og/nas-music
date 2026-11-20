@@ -157,3 +157,17 @@ def likely_next(conn: sqlite3.Connection, cfg: AIConfig, user_id: str) -> dict[s
     except Exception:
         return {}
     return {k: float(v) for k, v in (res or {}).items() if isinstance(k, str)}
+
+
+# ---------- artist pages (v7) ----------
+
+
+def similar_artists(conn: sqlite3.Connection, cfg: AIConfig, artist_id: str, limit: int = 12) -> list[tuple[str, float]]:
+    """[(artist_id, similarity)] from the AI's embeddings; [] when the engine lacks it (never raises)."""
+    fn = getattr(ai, "similar_artists", None)
+    if fn is None:
+        return []
+    try:
+        return [(str(a), float(s)) for a, s in fn(conn, cfg, artist_id, limit) or []]
+    except Exception:
+        return []

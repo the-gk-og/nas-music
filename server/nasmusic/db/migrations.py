@@ -413,3 +413,36 @@ def migrate_v5_to_v6(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
         conn.execute("PRAGMA foreign_keys = ON")
     log.warning("schema v5 -> v6 done")
     return True
+
+
+# ---------- v6 -> v7 (smart playlists, artist-page metadata cache): additive only ----------
+
+V7_TABLES = ("smart_playlists", "smart_playlist_tracks", "artist_info")
+
+
+def migrate_v6_to_v7(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """New tables only. Returns True if it migrated."""
+    if current_version(conn) != 6:
+        return False
+    if make_backup:
+        dest = backup(conn, "v6-backup")
+        if dest:
+            log.warning("schema v6 -> v7: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 6:
+            conn.execute("ROLLBACK")
+            return False
+        for t in V7_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (7)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v6 -> v7 done")
+    return True

@@ -16,7 +16,7 @@ from nasmusic.library import art, queries
 
 HOME_KINDS = ("start_radio", "devices", "recently_played", "continue_listening", "pinned")
 FORYOU_KINDS = ("mixes", "radio", "because_you_played", "release_radar", "suggestions", "to_get", "blends", "wrapped")
-PIN_TYPES = ("album", "artist", "playlist", "mix", "queue", "smart_list", "genre", "folder")
+PIN_TYPES = ("album", "artist", "playlist", "mix", "queue", "smart_list", "smart_playlist", "genre", "folder")
 SMART_TITLES = {"favourites": "Favourites", "recently_added": "Recently added", "recently_played": "Recently played",
                 "most_played": "Most played", "not_played": "Not played"}
 CONTINUE_DAYS = 30
@@ -79,8 +79,12 @@ def _artist_item(conn: sqlite3.Connection, data_dir, artist_id: str, uid: str | 
     if r is None:
         return None
     a = queries.artist_dict(r)
-    rows = conn.execute("SELECT id, art_path FROM albums WHERE artist_id = ? ORDER BY year DESC", (artist_id,))
-    url = next((f"art/{x['id']}" for x in rows if art.has_art(data_dir, x["art_path"], x["id"])), None)
+    from nasmusic.app import artists
+
+    url = artists.photo_url(data_dir, artist_id)
+    if url is None:
+        rows = conn.execute("SELECT id, art_path FROM albums WHERE artist_id = ? ORDER BY year DESC", (artist_id,))
+        url = next((f"art/{x['id']}" for x in rows if art.has_art(data_dir, x["art_path"], x["id"])), None)
     return {"type": "artist", "id": a["id"], "title": a["name"],
             "subtitle": f"{a['albumCount']} album{'s' if a['albumCount'] != 1 else ''}", "artUrl": url, "artist": a}
 
@@ -92,6 +96,18 @@ def _playlist_item(conn: sqlite3.Connection, data_dir, uid: str, pid: str) -> di
     ids = playlists._playlist_ids(conn, pid)
     return {"type": "playlist", "id": pid, "title": p["name"], "subtitle": f"{p['trackCount']} songs",
             "artUrl": _art_for_tracks(conn, data_dir, ids), "playlist": p}
+
+
+def _smart_playlist_item(conn: sqlite3.Connection, data_dir, uid: str, pid: str) -> dict | None:
+    from nasmusic.app import smart
+
+    p = smart.summary_for(conn, uid, pid)
+    if p is None:
+        return None
+    ids = [r[0] for r in conn.execute("SELECT track_id FROM smart_playlist_tracks WHERE smart_playlist_id = ? "
+                                      "ORDER BY position LIMIT 10", (pid,))]
+    return {"type": "smart_playlist", "id": pid, "title": p["name"], "subtitle": f"{p['trackCount']} songs",
+            "artUrl": _art_for_tracks(conn, data_dir, ids), "smartPlaylist": p}
 
 
 def _mix_item(conn: sqlite3.Connection, data_dir, uid: str, mix_id: str) -> dict | None:
@@ -138,6 +154,8 @@ def resolve(conn: sqlite3.Connection, data_dir, uid: str, type_: str, id_: str) 
         return _mix_item(conn, data_dir, uid, id_)
     if type_ == "queue":
         return _queue_item(conn, data_dir, uid, id_)
+    if type_ == "smart_playlist":
+        return _smart_playlist_item(conn, data_dir, uid, id_)
     if type_ == "smart_list":
         return ({"type": "smart_list", "id": id_, "title": SMART_TITLES[id_], "subtitle": None, "artUrl": None}
                 if id_ in SMART_TITLES else None)
@@ -420,6 +438,11 @@ def seed_title(conn: sqlite3.Connection, uid: str, seed: dict) -> str:
         title = r and r[0]
     elif t == "playlist":
         p = playlists.summary_for(conn, uid, i)
+        title = p and p["name"]
+    elif t == "smart_playlist":
+        from nasmusic.app import smart
+
+        p = smart.summary_for(conn, uid, i)  # also refreshes the cached list the AI reads
         title = p and p["name"]
     else:
         title = None

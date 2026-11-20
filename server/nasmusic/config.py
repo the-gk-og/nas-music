@@ -36,6 +36,7 @@ class Config:
     model_version: str = "effnet-discogs-1"   # audio-analysis model (see nasmusic/ai/README.md)
     scan_interval_minutes: int = 5
     lrclib_enabled: bool = True                 # lyrics fallback from lrclib.net when a file has none
+    artist_info_enabled: bool = True            # artist pages: photo/bio/links from MusicBrainz + Wikipedia/Wikidata
     explicit_deezer: bool = True                # explicit-content job asks Deezer (free API) about untagged tracks
     lan_public_url: str | None = None           # public LAN address incl. port, if not https://lan_host:https_port
     # ---- casting to speakers (nasmusic/cast, deploy/README.md "Casting") ----
