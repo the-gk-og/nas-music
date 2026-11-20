@@ -62,6 +62,19 @@ Picard is free and open source. Run it on your PC against the music share:
    then **Save**. Once you trust it, do the rest in batches of 20–50 albums.
 4. Albums Picard can't match: leave them. The server falls back to matching by name.
 
+### Or: let the server suggest tags (no file writes)
+
+The server can identify songs itself and suggest tags that you review in the web admin console
+(**Admin → Tag fixing**). Accepted suggestions are stored on the server as tag overrides; the music share
+stays read-only.
+1. Get a free AcoustID application key: sign in at https://acoustid.org/new-application, register an
+   application (any name, e.g. "nas-music"), copy its **API key**.
+2. Add it to `config.toml` in the data volume: `acoustid_api_key = "<key>"`, then restart the container.
+3. Admin → Tag fixing → **Run now** (it also runs every night at 05:00). Each run works for up to 50
+   minutes and carries on next time: ~1,850 songs take one to two runs. Review albums, accept/reject, or
+   "accept all ≥ 90%". **Admin → Duplicates** uses the same fingerprints to hide extra copies
+   ("Song (2).flac"); nothing is deleted.
+
 ## Getting the server image (Phase 2)
 
 GitHub Actions builds `ghcr.io/the-gk-og/nasmusic:latest` on every push to `main` that changes `server/`.
