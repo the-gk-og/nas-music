@@ -53,6 +53,8 @@ data class ShelfItem(
     val queue: Queue? = null,
     val mix: JsonObject? = null,
     val seed: RadioSeed? = null,
+    /** api 0.7: smart playlist cards (Home pins, Library) */
+    val smartPlaylist: SmartPlaylist? = null,
     val device: ShelfDevice? = null,
     val progress: ShelfProgress? = null,
     val catalog: CatalogItem? = null,

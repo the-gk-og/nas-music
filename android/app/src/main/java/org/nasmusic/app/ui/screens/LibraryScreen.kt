@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Sell
@@ -142,8 +143,18 @@ private fun PlaylistsSection(c: AppContainer, view: String, sort: String) {
     LaunchedEffect(Unit) { lists = runCatching { c.api.playlists() }.getOrDefault(emptyList()) }
     if (view == "list") { PlaylistsScreen(c); return }
     val sorted = lists.orEmpty().let { if (sort == "updated") it.sortedByDescending { p -> p.updatedAt } else it.sortedBy { p -> p.name.lowercase() } }
-    val items = smartLists.map { ShelfItem("smart_list", it.kind, it.title) } + sorted.map { ShelfItem("playlist", it.id, it.name, "${it.trackCount} songs") }
-    GridOrList(items, true, { it.type + it.id }, cell = { ShelfCard(c, it, width = 150.dp) }, row = {})
+    var smart by remember { mutableStateOf<List<org.nasmusic.app.data.api.SmartPlaylist>>(emptyList()) }
+    LaunchedEffect(Unit) { smart = runCatching { c.api.smartPlaylists() }.getOrDefault(emptyList()) }
+    val smartSorted = if (sort == "updated") smart else smart.sortedBy { it.name.lowercase() }
+    val items = smartLists.map { ShelfItem("smart_list", it.kind, it.title) } +
+        smartSorted.map { ShelfItem("smart_playlist", it.id, it.name, "Smart · ${it.trackCount} songs", artUrl = org.nasmusic.app.data.FeedRepository.art(it.tracks.firstOrNull()?.albumId), smartPlaylist = it) } +
+        sorted.map { ShelfItem("playlist", it.id, it.name, "${it.trackCount} songs") }
+    Column {
+        androidx.compose.material3.TextButton(onClick = { ui.go("smart-edit/new") }, modifier = Modifier.padding(start = 8.dp)) {
+            Icon(Icons.Default.AutoAwesome, null); Text("  New smart playlist")
+        }
+        GridOrList(items, true, { it.type + it.id }, cell = { ShelfCard(c, it, width = 150.dp) }, row = {})
+    }
 }
 
 @Composable

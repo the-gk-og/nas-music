@@ -152,6 +152,7 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                 when (p.type) {
                     "album" -> api.album(p.id).tracks
                     "playlist" -> api.playlist(p.id).tracks
+                    "smart_playlist" -> api.smartPlaylist(p.id).tracks
                     else -> null
                 }
             }.getOrNull()?.filterNot { it.missing }
