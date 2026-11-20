@@ -22,6 +22,8 @@
   import ArtistDetail from './screens/ArtistDetail.svelte';
   import TrackListPage from './screens/TrackListPage.svelte';
   import PlaylistDetail from './screens/PlaylistDetail.svelte';
+  import SmartPlaylistDetail from './screens/SmartPlaylistDetail.svelte';
+  import SmartEditor from './screens/SmartEditor.svelte';
   import ToGet from './screens/ToGet.svelte';
   import Settings from './screens/Settings.svelte';
   import Equalizer from './screens/Equalizer.svelte';
@@ -150,6 +152,8 @@
     {:else if n === 'list'}<TrackListPage kind="list" param={p} />
     {:else if n === 'mix'}<TrackListPage kind="mix" param={p} />
     {:else if n === 'playlist'}<PlaylistDetail id={p} />
+    {:else if n === 'smart'}<SmartPlaylistDetail id={p} />
+    {:else if n === 'smart-edit'}<SmartEditor param={p} />
     {:else if n === 'toget'}<ToGet />
     {:else if n === 'release-radar'}<ReleaseRadar />
     {:else if n === 'wrapped'}<Wrapped year={p} />

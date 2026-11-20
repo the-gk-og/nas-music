@@ -1,6 +1,6 @@
 <script lang="ts">
   // Library (§3.3): chips Playlists · Albums · Artists · Genres · Folders · Songs; sort; grid/list per chip.
-  import { ArrowUpDown, Ban, ClockPlus, Flame, Heart, History, Plus, Tag } from '@lucide/svelte';
+  import { ArrowUpDown, Ban, ClockPlus, Flame, Heart, History, Plus, Sparkles, Tag } from '@lucide/svelte';
   import ItemGrid from '../components/ItemGrid.svelte';
   import TopBar from '../components/TopBar.svelte';
   import TrackList from '../components/TrackList.svelte';
@@ -50,7 +50,10 @@
 
   $effect(() => {
     saveJson('nm.libChip', { c: chip });
-    if (chip === 'playlists') void library.refreshPlaylists();
+    if (chip === 'playlists') {
+      void library.refreshPlaylists();
+      void library.refreshSmart();
+    }
     if (chip === 'albums') session.api.albums(sort === 'artist' ? 'name' : (sort as 'name')).then((a) => (albums = a)).catch((e) => ui.toast(e.message));
     if (chip === 'artists' && !artists) session.api.artists().then((a) => (artists = a)).catch((e) => ui.toast(e.message));
     if (chip === 'genres' && !genres) session.api.genres().then((g) => (genres = g.map((x) => (typeof x === 'string' ? { name: x } : x)))).catch((e) => ui.toast(e.message));
@@ -77,7 +80,12 @@
     if (chip === 'playlists') {
       const p = library.playlists.slice();
       if (sort === 'name') p.sort((x, y) => x.name.localeCompare(y.name));
-      return p.map((x) => ({ type: 'playlist', id: x.id, title: x.name, subtitle: `${x.trackCount ?? 0} songs` }));
+      const smart = library.smartPlaylists.slice();
+      if (sort === 'name') smart.sort((x, y) => x.name.localeCompare(y.name));
+      return [
+        ...smart.map((x): ShelfItem => ({ type: 'smart_playlist', id: x.id, title: x.name, subtitle: `Smart · ${x.trackCount} songs`, smartPlaylist: x })),
+        ...p.map((x): ShelfItem => ({ type: 'playlist', id: x.id, title: x.name, subtitle: `${x.trackCount ?? 0} songs` })),
+      ];
     }
     return [];
   });
@@ -126,6 +134,7 @@
       {/each}
       <button class="sm" onclick={() => ui.go('list', 'all')}><Tag size={22} />All songs</button>
       <button class="sm new" onclick={newPlaylist}><Plus size={22} />New playlist</button>
+      <button class="sm new" onclick={() => ui.go('smart-edit', '')}><Sparkles size={22} />New smart playlist</button>
     </div>
     <ItemGrid {items} section="lib.playlists" />
   {:else if chip === 'albums' || chip === 'artists'}

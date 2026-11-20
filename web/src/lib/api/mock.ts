@@ -24,6 +24,8 @@ import type {
   Session,
   Track,
   TrackInfo,
+  SmartDefinition,
+  SmartPlaylist,
 } from '../types';
 import type { MediaResolver } from './client';
 import { artSvg, buildLibrary, mockMixes, mockSuggestions, toneWav } from './mockData';
@@ -76,6 +78,7 @@ export class MockBackend {
   radioSeen = new Map<string, Set<string>>();
   radioSeeds = new Map<string, RadioSeed>();
   radioSteering = new Map<string, RadioStation['steering']>();
+  smart: SmartPlaylist[] = [];
 
   constructor() {
     const t = this.lib.tracks;
@@ -145,6 +148,20 @@ export class MockBackend {
       radio: this.radioSeeds?.get(q.id) ?? null,
       ...(withTracks ? { tracks } : {}),
     };
+  }
+  private smartEval(d: SmartDefinition): string[] {
+    let t = this.lib.tracks.slice();
+    for (const r of d.rules) {
+      if (!('field' in r) || r.op !== 'is') continue;
+      if (r.field === 'genre') t = t.filter((x) => (x.genre ?? '').toLowerCase() === String(r.value).toLowerCase());
+      if (r.field === 'artist') t = t.filter((x) => x.artist.toLowerCase() === String(r.value).toLowerCase());
+    }
+    if (d.limit?.type === 'songs') t = t.slice(0, d.limit.value);
+    return t.map((x) => x.id);
+  }
+  private smartOut(sp: SmartPlaylist): SmartPlaylist {
+    const ids = this.smartEval(sp.definition);
+    return { ...sp, trackCount: ids.length, durationS: ids.length * 200, tracks: this.tracksOf(ids) };
   }
   private plOut(p: MockBackend['playlists'][number], withTracks = true): Playlist {
     const tracks = this.tracksOf(p.trackIds);
@@ -410,6 +427,52 @@ export class MockBackend {
         }
       }
       return { accepted: evs.length, duplicates: 0 };
+    }
+
+    // v7 smart playlists (mock: rules are not evaluated; genre/artist "is" and limits are)
+    if (path === '/smart-playlists/fields') return MOCK_SMART_FIELDS;
+    if (path === '/smart-playlists/preview') {
+      const ids = this.smartEval(body.definition as SmartDefinition);
+      return { trackCount: ids.length, durationS: ids.length * 200, tracks: this.tracksOf(ids.slice(0, Number(body.sample ?? 25))) };
+    }
+    if (path === '/smart-playlists') {
+      if (method === 'POST') {
+        const sp: SmartPlaylist = { id: nid('sp'), name: String(body.name), definition: body.definition as SmartDefinition, preset: (body.preset as string) ?? null, trackCount: 0, durationS: 0, rev: 0, createdAt: iso(), updatedAt: iso() };
+        this.smart.push(sp);
+        return this.smartOut(sp);
+      }
+      return this.smart.map((x) => ({ ...this.smartOut(x), tracks: undefined }));
+    }
+    if ((r = m(/^\/smart-playlists\/([^/]+)(\/refresh)?$/))) {
+      const sp = this.smart.find((x) => x.id === r![1]);
+      if (!sp) throw new HttpError(404, 'no such smart playlist');
+      if (method === 'DELETE') {
+        this.smart = this.smart.filter((x) => x !== sp);
+        return undefined;
+      }
+      if (method === 'PATCH') {
+        if (body.name) sp.name = String(body.name);
+        if (body.definition) sp.definition = body.definition as SmartDefinition;
+      }
+      return this.smartOut(sp);
+    }
+    if ((r = m(/^\/library\/artists\/([^/]+)\/(page|info|tracks)$/))) {
+      const a = L.artists.find((x) => x.id === r![1]);
+      if (!a) throw new HttpError(404, 'not found');
+      const tracks = L.tracks.filter((t) => t.artistId === a.id);
+      if (r[2] === 'tracks') return tracks.map((t) => this.pub(t));
+      const info = { status: 'ok', genres: ['indie', 'folk'], yearsActive: { from: 2009, to: null }, area: 'Somewhere', links: [{ kind: 'musicbrainz', url: 'https://musicbrainz.org/' }],
+        bio: { text: `${a.name} is a mock artist made up for the offline demo.`, source: 'Wikipedia', url: 'https://en.wikipedia.org/', license: 'CC BY-SA 4.0', licenseUrl: 'https://creativecommons.org/licenses/by-sa/4.0/' } };
+      if (r[2] === 'info') return info;
+      const albums = L.albums.filter((x) => x.artistId === a.id);
+      return {
+        id: a.id, name: a.name, mbid: null, artUrl: albums[0] ? `art/${albums[0].id}` : null, photoUrl: null, info,
+        stats: { trackCount: tracks.length, durationS: 0, playCount: 0, albumCount: albums.length, singleCount: 0 },
+        topTracks: tracks.slice(0, 10).map((t) => ({ ...this.pub(t), playCount: this.played.get(t.id)?.count ?? 0 })),
+        albums, singles: [], appearsOn: [],
+        similar: L.artists.filter((x) => x.id !== a.id).slice(0, 6).map((x, i) => ({ ...x, similarity: 0.9 - i * 0.05, artUrl: null })),
+        radioSeed: { type: 'artist', id: a.id, title: a.name },
+      };
     }
 
     // playlists
@@ -1300,3 +1363,21 @@ const MOCK_AUTOEQ = [
     filters: [{ type: 'PK' as const, fc: 200, gainDb: -3.5, q: 0.8 }, { type: 'PK' as const, fc: 3000, gainDb: 3.2, q: 1.5 }],
   },
 ];
+
+const MOCK_SMART_FIELDS = {
+  fields: [
+    { id: 'playCount', label: 'Play count', type: 'number', ops: ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'between'] },
+    { id: 'lastPlayed', label: 'Last played', type: 'date', ops: ['inLast', 'notInLast', 'before', 'after', 'never', 'ever'] },
+    { id: 'favourite', label: 'Favourite', type: 'bool', ops: ['is', 'isNot'] },
+    { id: 'genre', label: 'Genre', type: 'text', ops: ['is', 'isNot', 'contains', 'notContains', 'startsWith'], suggest: 'genres' },
+    { id: 'artist', label: 'Artist', type: 'text', ops: ['is', 'isNot', 'contains', 'notContains', 'startsWith'], suggest: 'artists' },
+    { id: 'energy', label: 'Energy', type: 'percent', ops: ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'between'] },
+    { id: 'mood', label: 'Mood', type: 'enum', ops: ['is', 'isNot'], options: ['happy', 'sad', 'relaxed', 'aggressive', 'party', 'acoustic'] },
+    { id: 'inPlaylist', label: 'In playlist', type: 'playlist', ops: ['is', 'isNot'] },
+  ],
+  sorts: [{ id: 'random', label: 'Random' }, { id: 'most_played', label: 'Most played' }, { id: 'recently_added', label: 'Recently added' }],
+  units: ['days', 'weeks', 'months', 'years'],
+  presets: [
+    { id: 'recently_added', name: 'Recently added', description: 'Added in the last two weeks.', definition: { match: 'all', rules: [{ field: 'lastPlayed', op: 'inLast', value: 2, unit: 'weeks' }], sort: 'recently_added', limit: { type: 'none' } } },
+  ],
+};

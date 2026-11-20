@@ -16,6 +16,8 @@ export function openItem(it: ShelfItem, siblings?: ShelfItem[]) {
       return ui.go(it.type, it.id);
     case 'smart_list':
       return ui.go('list', it.id);
+    case 'smart_playlist':
+      return ui.go('smart', it.id);
     case 'folder':
       return ui.go('folders', it.id);
     case 'radio':
@@ -74,6 +76,10 @@ export async function playItem(it: ShelfItem) {
         if (!t.length) return openItem(it);
         return player.playList(t, 0, `Blend: ${b.name}`, { source: 'mix', addedFrom: 'blend' });
       }
+      case 'smart_playlist': {
+        const p = await session.api.smartPlaylist(it.id);
+        return player.playList(p.tracks ?? [], 0, `Smart playlist: ${p.name}`, { source: 'library', addedFrom: 'smart_playlist' });
+      }
       case 'artist':
         return player.startRadio({ type: 'artist', id: it.id }, `${it.title} radio`);
       default:
@@ -91,10 +97,10 @@ export function togglePin(it: ShelfItem) {
 }
 
 export function radioFor(it: ShelfItem) {
-  if (it.type === 'album' || it.type === 'artist' || it.type === 'playlist' || it.type === 'track')
+  if (it.type === 'album' || it.type === 'artist' || it.type === 'playlist' || it.type === 'smart_playlist' || it.type === 'track')
     void player.startRadio({ type: it.type, id: it.id }, `${it.title} radio`);
 }
 
 export const isPlayable = (it: ShelfItem) =>
-  ['album', 'playlist', 'mix', 'genre', 'artist', 'radio', 'queue', 'track'].includes(it.type) ||
+  ['album', 'playlist', 'smart_playlist', 'mix', 'genre', 'artist', 'radio', 'queue', 'track'].includes(it.type) ||
   (it.type === 'blend' && it.blend?.status === 'joined' && (it.blend.trackCount ?? 0) > 0);

@@ -1,9 +1,9 @@
 // Shared library state for the shell: playlists (sidebar) and pins (Home, "Pin to Home").
 import { session } from './session.svelte';
-import type { PinType, Playlist, ShelfItem } from './types';
+import type { PinType, Playlist, ShelfItem, SmartPlaylist } from './types';
 import { ui } from './ui.svelte';
 
-const PIN_TYPES = new Set<string>(['album', 'artist', 'playlist', 'mix', 'queue', 'smart_list', 'genre', 'folder']);
+const PIN_TYPES = new Set<string>(['album', 'artist', 'playlist', 'mix', 'queue', 'smart_list', 'smart_playlist', 'genre', 'folder']);
 
 export function isPinType(t: string): t is PinType {
   return PIN_TYPES.has(t);
@@ -11,6 +11,8 @@ export function isPinType(t: string): t is PinType {
 
 class LibraryStore {
   playlists = $state<Playlist[]>([]);
+  /** v7 smart playlists (rule-based); [] on servers without them. */
+  smartPlaylists = $state<SmartPlaylist[]>([]);
   pins = $state<ShelfItem[]>([]);
 
   /** Live playlist pushes (Connect `playlist`): screens showing that playlist watch `changed`. */
@@ -37,6 +39,14 @@ class LibraryStore {
       this.playlists = await session.api.playlists();
     } catch {
       /* offline */
+    }
+  }
+
+  async refreshSmart() {
+    try {
+      this.smartPlaylists = await session.api.smartPlaylists();
+    } catch {
+      this.smartPlaylists = [];
     }
   }
 
