@@ -40,6 +40,7 @@
   import Art from './Art.svelte';
   import Avatar from './Avatar.svelte';
   import DevicesList from './DevicesList.svelte';
+  import JamSheet from './JamSheet.svelte';
   import PlaylistShareSheet from './PlaylistShareSheet.svelte';
   import TagEditSheet from './TagEditSheet.svelte';
   import { isPlayable, openItem, playItem, radioFor } from '../lib/items';
@@ -323,6 +324,8 @@
     </div>
     <div class="foot"><span></span><button class="btn text" onclick={() => ui.close()}>Close</button></div>
   </Sheet>
+{:else if d?.kind === 'jam'}
+  <JamSheet />
 {:else if d?.kind === 'itemMenu'}
   {@const it = d.item}
   <Sheet label="Options">

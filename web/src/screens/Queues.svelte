@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowUpDown, ChevronDown, Ellipsis, Play, Save, Timer, X } from '@lucide/svelte';
+  import { ArrowUpDown, ChevronDown, Ellipsis, PartyPopper, Play, Save, Timer, X } from '@lucide/svelte';
   import TrackRow from '../components/TrackRow.svelte';
   import { fmtTime } from '../lib/format';
   import { player } from '../lib/player.svelte';
@@ -139,6 +139,7 @@
         <div><b>{position.split(' / ')[0]}</b> / {position.split(' / ')[1]}</div>
         <div class="time"><Timer size={15} /> {fmtTime(totalDurationS(q?.tracks ?? []))}</div>
       </div>
+      <button class="icon-btn" aria-label="Jam: listen together" title="Jam: let friends add songs" onclick={() => ui.open({ kind: 'jam' })}><PartyPopper size={24} /></button>
       <button class="icon-btn" aria-label="Save as playlist" disabled={!q?.tracks.length} onclick={save}><Save size={26} /></button>
       <div class="rel">
         <button class="icon-btn" aria-label="Queue options" onclick={() => (moreOpen = !moreOpen)}><Ellipsis size={26} /></button>
