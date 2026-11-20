@@ -488,7 +488,8 @@ export class Player {
   }
 
   private djPlan(a: Track, b: Track): DjPlan | null {
-    const key = `${a.id}>${b.id}:${this.listening.djBeats}:${this.listening.allowTempo}:${this.listening.crossfadeS}`;
+    // keyed on the analysis too: a queue refreshed from the server may bring it later
+    const key = `${a.id}>${b.id}:${a.mix?.mixOutS}:${a.mix?.bpm}:${b.mix?.mixInS}:${b.mix?.bpm}:${this.listening.djBeats}:${this.listening.allowTempo}:${this.listening.crossfadeS}`;
     if (!this.djPlans.has(key)) {
       if (this.djPlans.size > 50) this.djPlans.clear();
       this.djPlans.set(key, planTransition(a, b, { beats: this.listening.djBeats, allowTempo: this.listening.allowTempo, fallbackS: djFallbackS(this.listening) }));

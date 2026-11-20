@@ -241,7 +241,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private fun djPlan(s: ListeningSettings, a: TrackFacts, b: TrackFacts): DjPlan? {
-        val key = "${a.id}>${b.id}:${s.djBeats}:${s.allowTempo}:${s.djFallbackS}"
+        val key = "${a.id}>${b.id}:${a.mix?.mixOutS}:${a.mix?.bpm}:${b.mix?.mixInS}:${b.mix?.bpm}:${s.djBeats}:${s.allowTempo}:${s.djFallbackS}"
         if (djPlans.size > 50) djPlans.clear()
         return djPlans.getOrPut(key) { ListeningRules.djPlan(s, a, b) }
     }
