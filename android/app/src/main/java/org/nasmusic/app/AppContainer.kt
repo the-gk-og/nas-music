@@ -67,6 +67,7 @@ class AppContainer(val context: Context) {
     )
 
     val library = LibraryRepository(api, db, ApiFactory.json)
+    val offline = org.nasmusic.app.sync.OfflineRepository(context, db, downloader, settings, scope)
     val lyrics = LyricsRepository(db.lyrics(), { api.lyrics(it) }, ApiFactory.json)
 
     // ---- v2 ----
@@ -80,7 +81,15 @@ class AppContainer(val context: Context) {
         deviceName = { AuthRepository.deviceName() },
         appVersion = BuildConfig.VERSION_NAME,
     )
-    val player = PlayerConnection(context, connect, queueSync, { api }, scope).also { p ->
+    val player = PlayerConnection(
+        context, connect, queueSync, { api }, scope,
+        org.nasmusic.app.playback.OfflineSource(
+            isOffline = { router.route.value == Route.OFFLINE },
+            downloadedIds = { offline.downloadedIds.value },
+            downloadedTracks = { offline.offlineTracks.value },
+            toast = { ui.toast(it) },
+        ),
+    ).also { p ->
         // Binding a MediaController starts the playback service, which then applies the takeover.
         connect.onTakeover = { android.os.Handler(android.os.Looper.getMainLooper()).post { p.connect() } }
     }

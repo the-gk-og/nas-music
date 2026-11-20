@@ -60,5 +60,6 @@ class LibraryRepository(
         private const val KEY_FAVS = "favourites"
         private val codec = Json { ignoreUnknownKeys = true }
         fun encodeTrack(t: Track): String = codec.encodeToString(Track.serializer(), t)
+        fun decodeTrackJson(text: String?): Track? = text?.let { runCatching { codec.decodeFromString(Track.serializer(), it) }.getOrNull() }
     }
 }

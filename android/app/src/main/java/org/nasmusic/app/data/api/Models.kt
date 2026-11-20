@@ -155,6 +155,22 @@ data class ManifestItem(
 @Serializable
 data class SyncManifest(val generatedAt: String, val items: List<ManifestItem>)
 
+/** `GET /sync/smart`: smart-download candidates (favourites, this week's mixes, recent plays, AI picks). */
+@Serializable
+data class SmartCandidates(val generatedAt: String = "", val items: List<SmartCandidateDto> = emptyList())
+
+@Serializable
+data class SmartCandidateDto(
+    val trackId: String,
+    val reasons: List<String> = emptyList(),
+    val score: Double = 0.0,
+    val plays: Int = 0,
+    val lastPlayedAt: String? = null,
+    val durationS: Double? = null,
+    val flacBytes: Long? = null,
+    val track: Track? = null,
+)
+
 @Serializable
 data class EventDto(
     val id: String,

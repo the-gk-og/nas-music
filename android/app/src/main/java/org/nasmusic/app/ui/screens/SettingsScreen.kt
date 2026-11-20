@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
@@ -58,6 +59,7 @@ fun SettingsScreen(c: AppContainer) {
     val downloads by c.library.downloads.collectAsStateWithLifecycle(emptyList())
     val usedMb = downloads.sumOf { it.bytes } / (1024 * 1024)
     var confirmUnpair by remember { mutableStateOf(false) }
+    var confirmSmartOff by remember { mutableStateOf(false) }
 
     val cfg = config ?: return
     var lan by remember(cfg) { mutableStateOf(cfg.lanUrl) }
@@ -111,28 +113,67 @@ fun SettingsScreen(c: AppContainer) {
 
         HorizontalDivider()
         Section("Offline")
+        OutlinedButton(onClick = { ui.go("downloads") }) { Text("Downloads (using %d MB)".format(usedMb)) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Offline favourites")
-                Text("Off: stream everything. On: favourites and today's mixes download overnight on Wi-Fi while charging.", style = MaterialTheme.typography.bodySmall)
+                Text("Smart downloads")
+                Text("Keeps favourites, this week's mixes, recent plays and songs you're likely to want on the phone, " +
+                    "within a storage budget. Updates overnight on Wi-Fi while charging; least likely songs make room first.",
+                    style = MaterialTheme.typography.bodySmall)
             }
-            Switch(settings.offlineFavourites, { on -> scope.launch { c.settings.setOfflineFavourites(on) } })
+            Switch(settings.smartDownloads, { on ->
+                if (on) scope.launch { c.settings.setSmartDownloads(true) }
+                else if (downloads.any { !it.isProtected }) confirmSmartOff = true
+                else scope.launch { c.settings.setSmartDownloads(false) }
+            })
         }
-        Text("Favourites format")
+        if (settings.smartDownloads) {
+            Text("Storage budget")
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                org.nasmusic.app.sync.StorageBudget.CHOICES.forEach { b ->
+                    androidx.compose.material3.FilterChip(settings.smartBudget == b.key, { scope.launch { c.settings.setSmartBudget(b.key) } },
+                        label = { Text(b.label) })
+                }
+            }
+        }
+        Text("Download quality")
         SingleChoiceSegmentedButtonRow {
-            AudioFormat.entries.forEachIndexed { i, f ->
+            val qs = org.nasmusic.app.sync.DownloadQuality.entries
+            qs.forEachIndexed { i, q ->
                 SegmentedButton(
-                    selected = settings.favouritesFormat == f,
-                    onClick = { scope.launch { c.settings.setFavouritesFormat(f) } },
-                    shape = SegmentedButtonDefaults.itemShape(i, AudioFormat.entries.size),
-                ) { Text(if (f == AudioFormat.OPUS) "Opus 160" else "FLAC") }
+                    selected = settings.downloadQuality == q.key,
+                    onClick = { scope.launch { c.settings.setDownloadQuality(q.key) } },
+                    shape = SegmentedButtonDefaults.itemShape(i, qs.size),
+                ) { Text(if (q == org.nasmusic.app.sync.DownloadQuality.FLAC) "FLAC" else q.label) }
             }
         }
-        Text("Storage limit: %.1f GB (using %d MB)".format(limit, usedMb))
-        Slider(
-            value = limit, onValueChange = { limit = it }, valueRange = 1f..64f, steps = 62,
-            onValueChangeFinished = { scope.launch { c.settings.setStorageLimitMb((limit * 1024).toInt()) } },
-        )
+        Text("For smart downloads and songs you download. Changing it re-downloads smart songs at the next sync.",
+            style = MaterialTheme.typography.bodySmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Offline favourites (simple)")
+                Text(if (settings.smartDownloads) "Not used while smart downloads is on (it already includes favourites and today's mixes)."
+                    else "Favourites and today's mixes only, within the limit below.", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(settings.offlineFavourites, { on -> scope.launch { c.settings.setOfflineFavourites(on) } }, enabled = !settings.smartDownloads)
+        }
+        if (!settings.smartDownloads && settings.offlineFavourites) {
+            Text("Favourites format")
+            SingleChoiceSegmentedButtonRow {
+                AudioFormat.entries.forEachIndexed { i, f ->
+                    SegmentedButton(
+                        selected = settings.favouritesFormat == f,
+                        onClick = { scope.launch { c.settings.setFavouritesFormat(f) } },
+                        shape = SegmentedButtonDefaults.itemShape(i, AudioFormat.entries.size),
+                    ) { Text(if (f == AudioFormat.OPUS) "Opus 160" else "FLAC") }
+                }
+            }
+            Text("Storage limit: %.1f GB".format(limit))
+            Slider(
+                value = limit, onValueChange = { limit = it }, valueRange = 1f..64f, steps = 62,
+                onValueChangeFinished = { scope.launch { c.settings.setStorageLimitMb((limit * 1024).toInt()) } },
+            )
+        }
         Text("Night sync starts at %02d:00 (runs on Wi-Fi while charging, for 2 hours)".format(hour.toInt()))
         Slider(
             value = hour, onValueChange = { hour = it }, valueRange = 0f..23f, steps = 22,
@@ -150,7 +191,7 @@ fun SettingsScreen(c: AppContainer) {
             }
             Switch(settings.allowTunnelSync, { on -> scope.launch { c.settings.setAllowTunnelSync(on) } })
         }
-        OutlinedButton(enabled = settings.offlineFavourites, onClick = { SyncScheduler.syncNow(c.context) }) { Text("Sync now") }
+        OutlinedButton(enabled = settings.offlineFavourites || settings.smartDownloads, onClick = { SyncScheduler.syncNow(c.context) }) { Text("Sync now") }
 
         HorizontalDivider()
         Section("Playback")
@@ -175,6 +216,20 @@ fun SettingsScreen(c: AppContainer) {
             OutlinedButton(onClick = { ui.go("account") }) { Text("Account") }
             OutlinedButton(onClick = { confirmUnpair = true }) { Text("Log out") }
         }
+    }
+
+    if (confirmSmartOff) {
+        val auto = downloads.filter { !it.isProtected && it.complete }
+        AlertDialog(
+            onDismissRequest = { confirmSmartOff = false },
+            title = { Text("Turn off smart downloads?") },
+            text = { Text("Remove the ${auto.size} songs it downloaded (%d MB)? Songs you downloaded yourself stay.".format(auto.sumOf { it.bytes } / (1024 * 1024))) },
+            confirmButton = { TextButton(onClick = {
+                confirmSmartOff = false
+                scope.launch { c.settings.setSmartDownloads(false); if (!c.settings.current().offlineFavourites) c.offline.removeAutomatic() }
+            }) { Text("Turn off and remove") } },
+            dismissButton = { TextButton(onClick = { confirmSmartOff = false; scope.launch { c.settings.setSmartDownloads(false) } }) { Text("Turn off, keep songs") } },
+        )
     }
 
     if (confirmUnpair) {

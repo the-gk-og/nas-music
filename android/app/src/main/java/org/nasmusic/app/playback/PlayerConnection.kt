@@ -68,6 +68,7 @@ class PlayerConnection(
     private val queues: QueueSync,
     private val api: () -> NasMusicApi,
     private val scope: CoroutineScope,
+    private val offline: OfflineSource = OfflineSource.NONE,
 ) {
     private var controller: MediaController? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -230,6 +231,25 @@ class PlayerConnection(
         searchQuery: String? = null,
     ) {
         if (tracks.isEmpty()) return
+        // Offline: play just the downloaded songs of the list, without an error per missing one.
+        if (!connect.isRemote && ext == null && offline.isOffline()) {
+            val (kept, at) = OfflinePlayback.playable(tracks, startIndex, offline.downloadedIds())
+                ?: run { offline.toast("You're offline and none of these songs are downloaded"); return }
+            if (kept.size < tracks.size) offline.toast("Offline: playing the ${kept.size} downloaded songs")
+            return playResolved(kept, at, source, queueName, mixId, reasons?.let { r -> kept.map { k -> r.getOrNull(tracks.indexOf(k)) } }, searchQuery)
+        }
+        playResolved(tracks, startIndex, source, queueName, mixId, reasons, searchQuery)
+    }
+
+    private fun playResolved(
+        tracks: List<Track>,
+        startIndex: Int,
+        source: PlaySource,
+        queueName: String,
+        mixId: String?,
+        reasons: List<String?>?,
+        searchQuery: String?,
+    ) {
         val start = startIndex.coerceIn(0, tracks.size - 1)
         if (connect.isRemote) {
             connect.command(
@@ -271,10 +291,21 @@ class PlayerConnection(
 
     /** Start a radio (docs/v3-ux.md §5) and play it here, or on the active device when remote. */
     suspend fun startRadio(seed: org.nasmusic.app.data.api.RadioSeed): Boolean {
-        val q = runCatching { api().startRadio(org.nasmusic.app.data.api.RadioRequest(seed)) }.getOrNull() ?: return false
+        val q = (if (offline.isOffline() && !connect.isRemote) null else runCatching { api().startRadio(org.nasmusic.app.data.api.RadioRequest(seed)) }.getOrNull())
+            ?: return startOfflineRadio(seed)
         queues.markRadio(q.id)
         queues.refresh()
         playQueue(q, 0)
+        return true
+    }
+
+    /** No server (offline, or it failed while offline): a radio made from downloaded songs. */
+    private fun startOfflineRadio(seed: org.nasmusic.app.data.api.RadioSeed): Boolean {
+        if (!offline.isOffline() || connect.isRemote) return false
+        val tracks = OfflinePlayback.radio(seed, offline.downloadedTracks())
+        if (tracks.isEmpty()) { offline.toast("You're offline and nothing is downloaded yet"); return false }
+        offline.toast("Offline radio from your downloads")
+        playResolved(tracks, 0, PlaySource.MIX, "Offline radio", null, null, null)
         return true
     }
 

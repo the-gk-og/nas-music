@@ -19,6 +19,7 @@ from nasmusic.library import art, lrclib, lyrics, overrides, queries
 from nasmusic.stream import clamp_bitrate, media_type
 from nasmusic.stream.transcode import TranscodeError
 from nasmusic.sync import manifest as build_manifest
+from nasmusic.sync import smart_candidates
 
 log = logging.getLogger(__name__)
 
@@ -300,6 +301,31 @@ def delete_lyrics(track_id: str, me: Device = Depends(device), conn: Conn = Depe
 def sync_manifest(favouritesFormat: Literal["opus", "flac"] = "opus", me: Device = Depends(device),
                   conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
     return build_manifest(conn, me.user_id, favouritesFormat, opus=c.opus)
+
+
+@router.get("/sync/smart")
+def sync_smart(limit: int = Query(1500, ge=1, le=5000), me: Device = Depends(device),
+               conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    """Smart-download candidates: favourites, this week's mixes, recent plays, Release Radar albums in the
+    library, "because you played" and the recommender's likely picks, each with the AI's likelihood."""
+    aicfg = ai_config(c.cfg)
+    likely = ai_adapter.likely_next(conn, aicfg, me.user_id)
+    try:
+        foryou = [t for s in ai_adapter.because_you_played(conn, aicfg, me.user_id, 3) for t in s["track_ids"]]
+    except Exception:
+        log.exception("smart downloads: because_you_played failed")
+        foryou = []
+    try:
+        radar = [a["albumId"] for a in (ai_adapter.release_radar(conn, aicfg, me.user_id) or {}).get("recentlyAdded", [])
+                 if isinstance(a, dict) and a.get("albumId")]
+    except Exception:
+        log.exception("smart downloads: release radar failed")
+        radar = []
+    out = smart_candidates(conn, me.user_id, likely, foryou, radar, limit=limit)
+    tracks = queries.tracks_by_ids(conn, me.user_id, [i["trackId"] for i in out["items"]])
+    for it in out["items"]:
+        it["track"] = tracks.get(it["trackId"])
+    return out
 
 
 @router.post("/events")

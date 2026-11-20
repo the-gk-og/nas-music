@@ -1,5 +1,6 @@
 package org.nasmusic.app.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -35,7 +36,41 @@ data class DownloadEntity(
     /** Track metadata JSON so the offline library can be shown without the server. */
     val trackJson: String? = null,
     val updatedAtMs: Long = System.currentTimeMillis(),
-)
+    // ---- v4: smart downloads ----
+    /** Who manages the file when it isn't protected: "sync" (offline favourites manifest) or "smart". */
+    @ColumnInfo(defaultValue = "sync") val origin: String = "sync",
+    /** The user downloaded this track themself: never evicted. */
+    @ColumnInfo(defaultValue = "0") val manual: Boolean = false,
+    /** Keys of collections kept offline that contain it ("playlist:<id>", "album:<id>"), comma-separated. */
+    @ColumnInfo(defaultValue = "") val pins: String = "",
+    /** Opus bitrate of the file; 0 for FLAC or older downloads (which used 160). */
+    @ColumnInfo(defaultValue = "0") val kbps: Int = 0,
+    /** Smart downloads: why it was picked (comma-separated) and its priority, for the Downloads screen. */
+    @ColumnInfo(defaultValue = "") val reasons: String = "",
+    @ColumnInfo(defaultValue = "0") val priority: Double = 0.0,
+) {
+    val pinKeys: List<String> get() = pins.split(',').filter { it.isNotBlank() }
+    /** Manual downloads and tracks of kept collections are never evicted. */
+    val isProtected: Boolean get() = manual || pinKeys.isNotEmpty()
+    val qualityKey: String get() = if (format == "flac") "flac" else "opus${if (kbps > 0) kbps else 160}"
+}
+
+/** A playlist or album the user keeps offline ("Download" on its page). Its tracks are protected. */
+@Entity(tableName = "offline_pins")
+data class OfflinePinEntity(
+    /** "playlist:<id>" or "album:<id>" */
+    @PrimaryKey val key: String,
+    val type: String,
+    val id: String,
+    val title: String,
+    /** Track ids from the last successful refresh, comma-separated. */
+    val trackIds: String = "",
+    val addedAtMs: Long = System.currentTimeMillis(),
+    val refreshedAtMs: Long = 0,
+) {
+    val ids: List<String> get() = trackIds.split(',').filter { it.isNotBlank() }
+    companion object { fun key(type: String, id: String) = "$type:$id" }
+}
 
 /** Cached lyrics. [status] is "found" (with [json]) or "none" (server said 404, don't keep asking). */
 @Entity(tableName = "lyrics")

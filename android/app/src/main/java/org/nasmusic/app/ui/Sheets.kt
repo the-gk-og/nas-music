@@ -27,6 +27,8 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Close
@@ -101,6 +103,14 @@ fun GlobalSheets(c: AppContainer) {
     ui.bugReport?.let { afterCrash -> BugReportDialog(c, afterCrash) { ui.bugReport = null } }
 }
 
+/** What to say after a download tap: it only starts at once on the home network (or the tunnel when allowed). */
+internal fun downloadToast(c: AppContainer, alreadyHeld: Boolean = false): String {
+    if (alreadyHeld) return "Kept offline"
+    val route = c.router.route.value
+    val allowed = org.nasmusic.app.net.RouteSelector.syncAllowed(route, c.settings.settings.value.allowTunnelSync)
+    return if (allowed) "Downloading" else "Will download when you're on your home network"
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SongMenuSheet(c: AppContainer, target: SongMenuTarget, onDismiss: () -> Unit) {
@@ -127,6 +137,17 @@ private fun SongMenuSheet(c: AppContainer, target: SongMenuTarget, onDismiss: ()
             MenuItem(Icons.AutoMirrored.Filled.PlaylistPlay, "Play next") { close { c.player.playNext(listOf(t)); ui.toast = "Playing next" } }
             MenuItem(Icons.AutoMirrored.Filled.QueueMusic, "Add to a queue") { close { ui.addToQueue = listOf(t) } }
             MenuItem(Icons.AutoMirrored.Filled.PlaylistAdd, "Add to playlists") { close { ui.addToPlaylist = listOf(t) } }
+            val dl by c.offline.downloads.collectAsStateWithLifecycle(emptyList())
+            val row = dl.firstOrNull { it.trackId == t.id }
+            if (row?.manual == true) {
+                MenuItem(Icons.Default.DownloadDone, if (row.complete) "Remove download" else "Cancel download") {
+                    close { scope.launch { c.offline.removeManual(t.id); ui.toast = "Download removed" } }
+                }
+            } else if (!t.missing) {
+                MenuItem(Icons.Default.Download, if (row?.complete == true) "Keep downloaded" else "Download") {
+                    close { scope.launch { c.offline.downloadTracks(listOf(t)); ui.toast = downloadToast(c, row?.complete == true) } }
+                }
+            }
             HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
             if (t.albumId.isNotBlank()) MenuItem(Icons.Default.Album, "Go to album") { close { ui.go("album/${t.albumId}") } }
             if (t.artistId.isNotBlank()) MenuItem(Icons.Default.Person, "Go to artist") { close { ui.go("artist/${t.artistId}") } }

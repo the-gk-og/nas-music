@@ -19,12 +19,20 @@ import org.nasmusic.app.net.RoutedCallFactory
  */
 class Downloader(private val callFactory: Call.Factory, private val dir: File) {
 
-    fun fileFor(trackId: String, format: AudioFormat): File =
-        File(dir, "${safe(trackId)}.${if (format == AudioFormat.FLAC) "flac" else "opus"}")
+    /**
+     * `<id>.flac`, or `<id>.opus` / `<id>.<kbps>.opus` for Opus. The bitrate is in the name when [kbpsInName]
+     * so a partial file of one bitrate is never resumed at another (smart downloads switch quality).
+     */
+    fun fileFor(trackId: String, format: AudioFormat, kbps: Int = 0, kbpsInName: Boolean = false): File =
+        File(dir, safe(trackId) + when {
+            format == AudioFormat.FLAC -> ".flac"
+            kbpsInName && kbps > 0 -> ".$kbps.opus"
+            else -> ".opus"
+        })
 
-    suspend fun download(trackId: String, format: AudioFormat, opusKbps: Int): File = withContext(Dispatchers.IO) {
+    suspend fun download(trackId: String, format: AudioFormat, opusKbps: Int, kbpsInName: Boolean = false): File = withContext(Dispatchers.IO) {
         dir.mkdirs()
-        val target = fileFor(trackId, format)
+        val target = fileFor(trackId, format, opusKbps, kbpsInName)
         val part = File(target.path + ".part")
         val url = RoutedCallFactory.virtual("stream/$trackId").toHttpUrl().newBuilder()
             .addQueryParameter("format", format.wire)
@@ -56,16 +64,20 @@ class Downloader(private val callFactory: Call.Factory, private val dir: File) {
         target
     }
 
-    fun partialBytes(trackId: String, format: AudioFormat): Long =
-        File(fileFor(trackId, format).path + ".part").takeIf { it.exists() }?.length() ?: 0L
+    fun partialBytes(trackId: String, format: AudioFormat, kbps: Int = 0, kbpsInName: Boolean = false): Long =
+        File(fileFor(trackId, format, kbps, kbpsInName).path + ".part").takeIf { it.exists() }?.length() ?: 0L
 
+    /** Every file and partial for this track, in any format or bitrate. */
     fun deleteAll(trackId: String) {
-        for (f in AudioFormat.entries) {
-            val t = fileFor(trackId, f)
-            t.delete()
-            File(t.path + ".part").delete()
-        }
+        val prefix = safe(trackId) + "."
+        dir.listFiles { f -> f.name.startsWith(prefix) && f.name.removePrefix(prefix).let(::isOurSuffix) }?.forEach { it.delete() }
     }
+
+    /** Free bytes on the volume holding the music folder. */
+    fun freeBytes(): Long = (if (dir.exists()) dir else dir.parentFile ?: dir).usableSpace
+
+    // "flac", "opus", "160.opus", each optionally + ".part" — so "a.b" never deletes "a.b.c.opus"'s neighbours.
+    private fun isOurSuffix(rest: String): Boolean = rest.removeSuffix(".part").let { it == "flac" || it == "opus" || Regex("\\d+\\.opus").matches(it) }
 
     private fun safe(id: String) = id.replace(Regex("[^A-Za-z0-9._-]"), "_")
 }

@@ -121,12 +121,20 @@ fun HomeScreen(c: AppContainer) {
     var feed by remember { mutableStateOf<ShelfFeed?>(null) }
     var failed by remember { mutableStateOf(false) }
     var reload by remember { mutableStateOf(0) }
-    LaunchedEffect(reload) { feed = runCatching { c.feeds.home() }.onFailure { failed = true }.getOrNull() }
+    val route by c.router.route.collectAsStateWithLifecycle()
+    val offline = route == org.nasmusic.app.net.Route.OFFLINE
+    // Reload when the connection comes back; while offline, don't even try (no error state, just downloads).
+    LaunchedEffect(reload, offline) {
+        if (offline) return@LaunchedEffect
+        failed = false
+        feed = runCatching { c.feeds.home() }.onFailure { failed = true }.getOrNull()
+    }
     // Start radio and devices are drawn locally (devices are live over Connect); the rest by kind.
     val byKind = feed?.shelves.orEmpty().filter { it.kind != "start_radio" && it.kind != "devices" }.associateBy { it.kind }
 
     LazyColumn(Modifier.fillMaxSize()) {
         item { TopBar(c, "${greeting()}${cfg?.username?.let { ", $it" } ?: ""}") }
+        if (offline || (failed && feed == null)) offlineHomeItems(c)
         settings.homeShelves.filterNot { it.startsWith("-") }.forEach { id ->
             when (id) {
                 "start_radio" -> item(key = id) {
@@ -166,8 +174,7 @@ fun HomeScreen(c: AppContainer) {
         // Shelves the server adds that the app doesn't know yet still show, after the known ones.
         feed?.shelves.orEmpty().filter { s -> settings.homeShelves.none { it.removePrefix("-") == s.kind } && s.items.isNotEmpty() && s.kind in KNOWN_KINDS }
             .forEachIndexed { i, s -> item(key = "x:$i:${s.id}") { HomeShelf(c, s) { reload++ } } }
-        if (feed == null && !failed) item { Box(Modifier.height(200.dp)) { Loading() } }
-        if (failed) item { Message("Couldn't reach the server. Your queues and downloaded favourites still work.") }
+        if (feed == null && !failed && !offline) item { Box(Modifier.height(200.dp)) { Loading() } }
         item { Spacer(Modifier.height(24.dp)) }
     }
 }

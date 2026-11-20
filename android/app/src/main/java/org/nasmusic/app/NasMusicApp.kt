@@ -26,9 +26,12 @@ class NasMusicApp : Application(), SingletonImageLoader.Factory {
         org.nasmusic.app.cast.NativeCast.init(container)   // Google Cast (full flavour); no-op in foss
         container.startServerInfoRefresh()
         container.startAppearancePush()
-        // Streaming is the default; the nightly download only exists while "Offline favourites" is on.
+        // Streaming is the default; the nightly sync only exists while offline favourites, smart downloads
+        // or a playlist/album kept offline needs it.
         container.scope.launch {
-            container.settings.settings.map { it.offlineFavourites to it.syncHour }.distinctUntilChanged().collect { (on, hour) ->
+            kotlinx.coroutines.flow.combine(container.settings.settings, container.offline.pins) { s, pins ->
+                (s.offlineFavourites || s.smartDownloads || pins.isNotEmpty()) to s.syncHour
+            }.distinctUntilChanged().collect { (on, hour) ->
                 if (on) SyncScheduler.scheduleNight(this@NasMusicApp, hour) else SyncScheduler.cancelNight(this@NasMusicApp)
             }
         }

@@ -304,6 +304,7 @@ fun PlaylistScreen(c: AppContainer, id: String) {
                     DropdownMenuItem({ Text(if (isOwner) "Share / members" else "Members & activity") }, { menu = false; membersOpen = true })
                     if (isOwner) DropdownMenuItem({ Text("Rename") }, { menu = false; newName = pl.name; renaming = true })
                     DropdownMenuItem({ Text("Pin to Home") }, { menu = false; scope.launch { runCatching { c.api.pin(org.nasmusic.app.data.api.NewPin("playlist", id)) }; ui.toast = "Pinned to Home" } })
+                    KeepOfflineItem(c, "playlist", id, pl.name, pl.tracks) { menu = false }
                     if (isOwner) DropdownMenuItem({ Text("Delete playlist") }, {
                         menu = false
                         scope.launch { runCatching { c.api.deletePlaylist(id) }; ui.nav.popBackStack() }

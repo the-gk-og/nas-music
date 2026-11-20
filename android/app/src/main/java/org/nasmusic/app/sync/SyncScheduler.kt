@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
 object SyncScheduler {
     const val NIGHT = "night-sync"
     const val NOW = "sync-now"
+    const val PROTECTED = "download-now"
 
     /**
      * Daily sync aligned to [hour]:00, only on an unmetered network while charging. The worker
@@ -51,6 +52,20 @@ object SyncScheduler {
             .addTag(NOW)
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(NOW, ExistingWorkPolicy.KEEP, req)
+    }
+
+    /**
+     * Manual downloads / kept collections: fetch them as soon as there's a connection the route rules
+     * allow (home network, or the tunnel if tunnel sync is on). Not on the home network yet → retried.
+     */
+    fun downloadProtectedNow(context: Context) {
+        val req = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setInputData(workDataOf(SyncWorker.KEY_PROTECTED_ONLY to true))
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setBackoffCriteria(androidx.work.BackoffPolicy.LINEAR, 15, TimeUnit.MINUTES)
+            .addTag(PROTECTED)
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(PROTECTED, ExistingWorkPolicy.APPEND_OR_REPLACE, req)
     }
 
     fun delayUntil(now: LocalDateTime, hour: Int): Duration {

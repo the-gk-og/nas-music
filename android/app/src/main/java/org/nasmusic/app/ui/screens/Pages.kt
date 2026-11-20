@@ -186,6 +186,7 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
                 DropdownMenuItem({ Text("Edit album tags") }, { close(); ui.tagEdit = org.nasmusic.app.ui.TagEditTarget(a.tracks.map { it.id }, a.title, album = true) })
             }
             DropdownMenuItem({ Text("Pin to Home") }, { close(); scope.launch { runCatching { c.api.pin(org.nasmusic.app.data.api.NewPin("album", a.id)) }; ui.toast = "Pinned to Home" } })
+            KeepOfflineItem(c, "album", a.id, a.title, a.tracks, close)
         }
     }
     LazyColumn(Modifier.fillMaxSize(), state = list) {
@@ -246,3 +247,16 @@ fun ArtistScreen(c: AppContainer, artistId: String) {
     }
 }
 
+/** "Download" / "Remove download" for a whole album or playlist (kept offline, follows later changes). */
+@Composable
+internal fun KeepOfflineItem(c: AppContainer, type: String, id: String, title: String, tracks: List<org.nasmusic.app.data.api.Track>, close: () -> Unit) {
+    val ui = LocalUi.current
+    val scope = rememberCoroutineScope()
+    val pinned by c.offline.isPinned(type, id).collectAsStateWithLifecycle(false)
+    if (pinned) DropdownMenuItem({ Text("Remove download") }, {
+        close(); scope.launch { c.offline.unpin(org.nasmusic.app.data.db.OfflinePinEntity.key(type, id)); ui.toast = "Download removed" }
+    })
+    else DropdownMenuItem({ Text("Download") }, {
+        close(); scope.launch { c.offline.pin(type, id, title, tracks); ui.toast = org.nasmusic.app.ui.downloadToast(c) }
+    })
+}

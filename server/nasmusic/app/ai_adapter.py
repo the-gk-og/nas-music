@@ -119,3 +119,18 @@ def build_blend(conn: sqlite3.Connection, cfg: AIConfig, blend_id: str) -> int:
 
 def run_blends(conn: sqlite3.Connection, cfg: AIConfig) -> dict[str, int]:
     return dict(_call("run_blends", conn, cfg) or {})
+
+
+# ---------- smart downloads ----------
+
+
+def likely_next(conn: sqlite3.Connection, cfg: AIConfig, user_id: str) -> dict[str, float]:
+    """{track_id: likelihood 0..1} for smart downloads; {} while the engine lacks it (never raises)."""
+    fn = getattr(ai, "likely_next", None)
+    if fn is None:
+        return {}
+    try:
+        res = fn(conn, cfg, user_id)
+    except Exception:
+        return {}
+    return {k: float(v) for k, v in (res or {}).items() if isinstance(k, str)}

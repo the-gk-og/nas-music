@@ -62,7 +62,7 @@ import org.nasmusic.app.ui.Message
 import org.nasmusic.app.ui.ShelfCard
 import org.nasmusic.app.ui.SongList
 
-private val CHIPS = listOf("playlists" to "Playlists", "albums" to "Albums", "artists" to "Artists", "genres" to "Genres", "folders" to "Folders", "songs" to "Songs")
+private val CHIPS = listOf("downloaded" to "Downloaded", "playlists" to "Playlists", "albums" to "Albums", "artists" to "Artists", "genres" to "Genres", "folders" to "Folders", "songs" to "Songs")
 
 private val SORTS = mapOf(
     "albums" to listOf("name" to "Title", "year" to "Year", "added" to "Recently added"),
@@ -77,7 +77,8 @@ private val SORTS = mapOf(
 fun LibraryScreen(c: AppContainer) {
     val scope = rememberCoroutineScope()
     val settings by c.settings.settings.collectAsStateWithLifecycle()
-    var chip by rememberSaveable { mutableStateOf("playlists") }
+    // Offline, the server sections can't load: open on what's downloaded.
+    var chip by rememberSaveable { mutableStateOf(if (c.router.route.value == org.nasmusic.app.net.Route.OFFLINE) "downloaded" else "playlists") }
     var sort by rememberSaveable(chip) { mutableStateOf(SORTS[chip]?.first()?.first ?: "") }
     var sortMenu by remember { mutableStateOf(false) }
     val view = settings.viewFor(chip)
@@ -94,12 +95,13 @@ fun LibraryScreen(c: AppContainer) {
                     sorts.forEach { (k, label) -> DropdownMenuItem({ Text(if (k == sort) "✓ $label" else label) }, { sort = k; sortMenu = false }) }
                 }
             } }
-            if (chip != "folders" && chip != "songs") IconButton(onClick = {
+            if (chip != "folders" && chip != "songs" && chip != "downloaded") IconButton(onClick = {
                 scope.launch { c.settings.setLibraryView(chip, if (view == "grid") "list" else "grid") }
             }) { Icon(if (view == "grid") Icons.AutoMirrored.Filled.List else Icons.Default.GridView, if (view == "grid") "List view" else "Grid view") }
         }
         Box(Modifier.weight(1f)) {
             when (chip) {
+                "downloaded" -> DownloadedSection(c)
                 "playlists" -> PlaylistsSection(c, view, sort)
                 "albums" -> AlbumsSection(c, view, sort)
                 "artists" -> ArtistsSection(c, view, sort)
