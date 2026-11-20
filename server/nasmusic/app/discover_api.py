@@ -242,6 +242,7 @@ class RadioContext(BaseModel):
 class RadioBody(BaseModel):
     seed: Seed
     context: RadioContext | None = None
+    automix: bool = False  # v7: order the batch for DJ flow (tempo, key, energy)
 
 
 def _radio_errors(fn, *a):
@@ -262,7 +263,7 @@ def start_radio(body: RadioBody, me: Device = Depends(device), conn: Conn = Depe
                 c: AppContext = Depends(ctx)):
     playing = (c.hub.snapshot(me.user_id) or {}).get("queueId") if c.hub else None
     q = _radio_errors(discover.start_radio, conn, c.cfg, me.user_id, body.seed.model_dump(), playing,
-                      body.context.model_dump(exclude_none=True) if body.context else None, me.kind)
+                      body.context.model_dump(exclude_none=True) if body.context else None, me.kind, body.automix)
     if c.hub:
         c.hub.notify_queue(me.user_id, q["id"])
     return q
@@ -270,12 +271,14 @@ def start_radio(body: RadioBody, me: Device = Depends(device), conn: Conn = Depe
 
 class MoreBody(BaseModel):
     count: int = Field(default=25, ge=1, le=100)
+    automix: bool = False  # v7: order the new batch for DJ flow, continuing from the queue's last track
 
 
 @router.post("/radio/{queue_id}/more")
 def more_radio(queue_id: str, body: MoreBody | None = None, me: Device = Depends(device), conn: Conn = Depends(db),
                c: AppContext = Depends(ctx)):
-    q = _radio_errors(discover.more_radio, conn, c.cfg, me.user_id, queue_id, (body or MoreBody()).count)
+    b = body or MoreBody()
+    q = _radio_errors(discover.more_radio, conn, c.cfg, me.user_id, queue_id, b.count, b.automix)
     if c.hub:
         c.hub.notify_queue(me.user_id, queue_id)
     return q

@@ -18,10 +18,15 @@ from nasmusic.library import art, loudness
 
 TRACK_COLS = """t.id, t.title, t.artist_id, ar.name AS artist, t.album_id, al.title AS album, t.track_no, t.disc_no,
        t.year, t.genre, t.duration_s, t.flac_bytes, t.missing, ut.starred_at, ut.rating,
-       t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, fx.status AS explicit_status"""
+       t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, fx.status AS explicit_status,
+       dj.bpm AS dj_bpm, dj.beat_s AS dj_beat_s, dj.downbeat_s AS dj_downbeat_s, dj.beats_per_bar AS dj_beats_per_bar,
+       dj.grid_stable AS dj_grid_stable, dj.key AS dj_key, dj.camelot AS dj_camelot, dj.mix_in_s AS dj_mix_in_s,
+       dj.mix_out_s AS dj_mix_out_s, dj.intro_end_s AS dj_intro_end_s, dj.outro_start_s AS dj_outro_start_s,
+       dj.last_beat_s AS dj_last_beat_s, dj.energy AS dj_energy"""
 TRACK_FROM = """FROM tracks t JOIN artists ar ON ar.id = t.artist_id JOIN albums al ON al.id = t.album_id
 LEFT JOIN user_tracks ut ON ut.track_id = t.id AND ut.user_id = ?
-LEFT JOIN track_explicit fx ON fx.track_id = t.id"""
+LEFT JOIN track_explicit fx ON fx.track_id = t.id
+LEFT JOIN track_dj dj ON dj.track_id = t.id AND dj.status = 'done'"""
 TRACK_SELECT = f"SELECT {TRACK_COLS}\n{TRACK_FROM}\n"
 
 
@@ -72,7 +77,27 @@ def track_dict(r: sqlite3.Row) -> dict:
     rg = loudness.replay_gain(r)
     if rg is not None:
         d["replayGain"] = rg
+    mix = track_mix(r)
+    if mix is not None:
+        d["mix"] = mix
     return d
+
+
+_MIX_FIELDS = (("bpm", "bpm"), ("beatS", "beat_s"), ("downbeatS", "downbeat_s"), ("beatsPerBar", "beats_per_bar"),
+               ("key", "key"), ("camelot", "camelot"), ("mixInS", "mix_in_s"), ("mixOutS", "mix_out_s"),
+               ("introEndS", "intro_end_s"), ("outroStartS", "outro_start_s"), ("lastBeatS", "last_beat_s"),
+               ("energy", "energy"))
+
+
+def track_mix(r: sqlite3.Row) -> dict | None:
+    """v7 Track.mix (openapi TrackMix) from the dj_* columns of TRACK_SELECT (track_dj, written by the AI's
+    automix job). None until the track is analysed, or for queries that don't select them."""
+    keys = r.keys()
+    if "dj_mix_out_s" not in keys or (r["dj_bpm"] is None and r["dj_mix_out_s"] is None):
+        return None
+    out = {k: r["dj_" + c] for k, c in _MIX_FIELDS if r["dj_" + c] is not None}
+    out["gridStable"] = bool(r["dj_grid_stable"])
+    return out
 
 
 def album_dict(r: sqlite3.Row, data_dir: Path) -> dict:

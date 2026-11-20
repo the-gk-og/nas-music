@@ -157,3 +157,18 @@ def likely_next(conn: sqlite3.Connection, cfg: AIConfig, user_id: str) -> dict[s
     except Exception:
         return {}
     return {k: float(v) for k, v in (res or {}).items() if isinstance(k, str)}
+
+
+# ---------- v7: DJ automix ----------
+
+def automix_analyse_pending(conn: sqlite3.Connection, cfg: AIConfig, time_budget_s: float) -> dict:
+    return ai.automix_analyse_pending(conn, cfg, time_budget_s)
+
+
+def automix_order(conn: sqlite3.Connection, cfg: AIConfig, track_ids: list[str], window: int = 6,
+                  keep_first: bool = True, arc: bool = True) -> tuple[list[str], list[dict]]:
+    return ai.automix_order(conn, cfg, track_ids, window=window, keep_first=keep_first, arc=arc)
+
+
+def track_mix_detail(conn: sqlite3.Connection, cfg: AIConfig, track_id: str) -> dict | None:
+    return ai.track_mix_detail(conn, cfg, track_id)

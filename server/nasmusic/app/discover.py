@@ -429,7 +429,7 @@ def seed_title(conn: sqlite3.Connection, uid: str, seed: dict) -> str:
 
 
 def start_radio(conn: sqlite3.Connection, cfg: Config, uid: str, seed: dict, protect: str | None,
-                context: dict | None = None, device_kind: str | None = None) -> dict:
+                context: dict | None = None, device_kind: str | None = None, automix: bool = False) -> dict:
     title = seed_title(conn, uid, seed)  # validates the seed (404) and gives the seed a display title
     ai_seed = {k: v for k, v in seed.items() if k in ("type", "id", "text", "constraints") and v is not None}
     seed = {"type": seed["type"], "id": seed.get("id") if seed["type"] not in ("moment", "vibe") else None,
@@ -439,6 +439,10 @@ def start_radio(conn: sqlite3.Connection, cfg: Config, uid: str, seed: dict, pro
     ids = family.filter_ids(conn, uid, ids)  # family mode: never radio an explicit track
     if not ids:
         raise NotFound("nothing to play for this radio yet")
+    if automix:
+        from nasmusic.app.automix_api import order_for_queue
+
+        ids = order_for_queue(conn, cfg, ids, keep_first=True)  # the seed's first pick stays first
     row = conn.execute("SELECT title FROM radio_sessions WHERE id = ?", (radio_id,)).fetchone()
     name = (row[0] if row and row[0] else ("Random radio" if seed["type"] == "random" else f"{title} radio"))
     seed.update(_station_seed_fields(conn, cfg, uid, radio_id))
@@ -517,7 +521,7 @@ def parse_vibe(conn: sqlite3.Connection, cfg: Config, uid: str, text: str) -> di
     return ai_adapter.radio_parse_vibe(conn, ai_config(cfg), uid, text)
 
 
-def more_radio(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str, n: int) -> dict:
+def more_radio(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str, n: int, automix: bool = False) -> dict:
     try:
         row = coll.queue_row(conn, uid, qid)
     except coll.NotFound as e:
@@ -532,4 +536,8 @@ def more_radio(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str, n: int
     fresh = family.filter_ids(conn, uid, fresh)
     if not fresh:  # the library ran out: the queue stays as it is
         return coll.get_queue(conn, uid, qid)
+    if automix and have:
+        from nasmusic.app.automix_api import order_for_queue
+
+        fresh = order_for_queue(conn, cfg, [have[-1], *fresh], keep_first=True)[1:]
     return coll.edit_queue(conn, uid, qid, add=fresh, position="end")

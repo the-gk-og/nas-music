@@ -21,7 +21,7 @@ from nasmusic.stream.transcode import OpusCache
 log = logging.getLogger(__name__)
 
 JOB_NAMES = ("scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "lyrics", "discovery", "release_radar",
-             "blends", "cleanup", "backup", "explicit", "autotag")
+             "blends", "cleanup", "backup", "explicit", "autotag", "automix")
 # The loudness job runs after every scan; a first pass over a big library takes hours, so each run stops
 # after this long and the next scan (or the nightly chain) carries on.
 LOUDNESS_BUDGET_S = 50 * 60
@@ -29,6 +29,8 @@ HISTORY = 20
 LYRICS_PER_RUN = 200
 # The explicit-content job (file tags, Deezer, lyrics word list) is resumable: each run stops after this.
 EXPLICIT_BUDGET_S = 20 * 60
+# DJ automix analysis (beat grid, key, mix points): resumable, one low-priority worker; each run stops after this.
+AUTOMIX_BUDGET_S = 45 * 60
 
 
 class Jobs:
@@ -59,6 +61,9 @@ class Jobs:
         from nasmusic.library import loudness
 
         return loudness.run(conn, self.cfg.library_root, time_budget_s=LOUDNESS_BUDGET_S)
+
+    def _automix(self, conn):
+        return ai_adapter.automix_analyse_pending(conn, ai_config(self.cfg), AUTOMIX_BUDGET_S)
 
     def _explicit(self, conn):
         from nasmusic.library import explicit
@@ -169,6 +174,7 @@ class Jobs:
             "backup": self._backup,
             "explicit": self._explicit,
             "autotag": self._autotag,
+            "automix": self._automix,
         }[name]
 
     # ----- running -----
@@ -209,12 +215,15 @@ class Jobs:
             self.trigger("analyse", "chained")
             self.trigger("loudness", "chained")
             self.trigger("explicit", "chained")
+        if name == "analyse" and rec["ok"]:
+            self.trigger("automix", "chained")  # after the embeddings, so the two analysers don't compete
         if name == "nightly" and rec["ok"]:
             self.trigger("pretranscode", "chained")
             self.trigger("lyrics", "chained")
             self.trigger("blends", "chained")
             self.trigger("loudness", "chained")
             self.trigger("explicit", "chained")
+            self.trigger("automix", "chained")
         return rec
 
     def trigger(self, name: str, how: str = "manual") -> bool:

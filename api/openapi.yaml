@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,6 +10,12 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    0.7.0 (schema v7): DJ automix. A background job (`automix`, chained after `analyse` and nightly) measures
+    each track's beat grid, Camelot key, mix-in/mix-out points and energy; Track gains `mix` (TrackMix) once
+    analysed. POST /automix/order reorders a list for smooth flow (tempo incl. half/double time, key, energy
+    arc) without moving any track more than `window` places; POST /radio and /radio/{queueId}/more take
+    `automix: true` to order radio batches the same way. GET /tracks/{trackId}/mix adds the energy curve.
+    Clients do the transitions themselves (see TrackMix); casting to speakers uses normal gapless/crossfade.
     0.6.0 (schema v6): explicit-content flags and family mode. Track gains `explicit`
     (explicit|probable|clean|unknown; show an "E" badge for explicit) and, in queues/playlists only,
     `familyHidden`; Album gains `explicit` (contains explicit tracks). With family mode on, the server hides
@@ -274,6 +280,57 @@ paths:
                 properties:
                   reason: { type: string }
                   similarTo: { type: array, items: { $ref: '#/components/schemas/Track' }, description: up to 3 tracks it sounds like }
+  /tracks/{trackId}/mix:
+    get:
+      summary: 0.7 DJ automix analysis of a track, with the energy curve (the compact part is Track.mix).
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: analysis (status failed = the analyser couldn't read it; retried after 14 days or a file change)
+          content: { application/json: { schema: { $ref: '#/components/schemas/TrackMixDetail' } } }
+        '404': { description: no such track, or not analysed yet }
+  /automix/order:
+    post:
+      summary: |
+        0.7 Reorder tracks for DJ flow: tempo (within ±8 %, or half/double time), harmonic key (Camelot), energy
+        jumps, and for finite lists (`arc`) an energy arc that builds to ~70 % and eases off. Keeps the list's
+        intent: no track moves more than `window` places and with `keepFirst` the first stays first (pass the
+        now-playing track first and the upcoming ones after it). Tracks not analysed yet keep their places as far
+        as possible. Same multiset of ids back. Clients use it for "Automix" on mixes and playlists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackIds]
+              properties:
+                trackIds: { type: array, items: { type: string }, maxItems: 1000 }
+                keepFirst: { type: boolean, default: true }
+                window: { type: integer, default: 6, minimum: 1, maximum: 50 }
+                arc: { type: boolean, default: true }
+      responses:
+        '200':
+          description: the order, and what each transition can be
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [trackIds, transitions]
+                properties:
+                  trackIds: { type: array, items: { type: string } }
+                  transitions:
+                    type: array
+                    items:
+                      type: object
+                      required: [fromId, toId, beatmatch]
+                      properties:
+                        fromId: { type: string }
+                        toId: { type: string }
+                        tempoRatio: { type: [number, 'null'], description: 'playback rate for toId so its beats match fromId (× tempoMultiplier)' }
+                        tempoMultiplier: { type: [number, 'null'], enum: [1, 2, 0.5, null], description: '2 = toId runs at half the tempo (its beats are every other beat)' }
+                        keyDistance: { type: [integer, 'null'], description: 'Camelot steps: 0 same key, 1 adjacent/relative, 2 energy boost, ...' }
+                        beatmatch: { type: boolean, description: 'both grids stable and |tempoRatio-1| <= 0.08' }
   /tracks/{trackId}/lyrics:
     get:
       summary: |
@@ -1653,6 +1710,7 @@ paths:
               properties:
                 seed: { $ref: '#/components/schemas/RadioSeed' }
                 context: { $ref: '#/components/schemas/RadioContext' }
+                automix: { type: boolean, default: false, description: '0.7: order the tracks for DJ flow (the first pick stays first)' }
       responses:
         '200':
           description: the new radio queue
@@ -1664,7 +1722,13 @@ paths:
     post:
       parameters: [ { name: queueId, in: path, required: true, schema: { type: string } } ]
       requestBody:
-        content: { application/json: { schema: { type: object, properties: { count: { type: integer, default: 25, minimum: 1, maximum: 100 } } } } }
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                count: { type: integer, default: 25, minimum: 1, maximum: 100 }
+                automix: { type: boolean, default: false, description: "0.7: order the new batch for DJ flow, continuing from the queue's last track" }
       responses:
         '200':
           description: the queue with new tracks appended (no repeats; unchanged once the library runs out)
@@ -2298,7 +2362,7 @@ paths:
     post:
       summary: Admin only. Start a job now (background). `backup` makes a manual database backup.
       parameters:
-        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, discovery, release_radar, blends, lyrics, cleanup, backup, explicit, autotag] } }
+        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, discovery, release_radar, blends, lyrics, cleanup, backup, explicit, autotag, automix] } }
       responses:
         '200':
           description: the job's status (state running, or idle if it already finished)
@@ -3682,6 +3746,8 @@ components:
         explicit:
           $ref: '#/components/schemas/ExplicitStatus'
         familyHidden: { type: boolean, description: 'v6, queues/playlists only (true): hidden by the caller''s family mode; skip it' }
+        mix:
+          $ref: '#/components/schemas/TrackMix'
     ExplicitStatus:
       type: string
       enum: [explicit, probable, clean, unknown]
@@ -3759,6 +3825,46 @@ components:
                   fc: { type: number, description: Hz }
                   gainDb: { type: number }
                   q: { type: number }
+    TrackMix:
+      type: object
+      description: |
+        0.7 DJ automix analysis (absent until the `automix` job has analysed the track). Times are seconds into the
+        file. The beat grid is constant-tempo: beat k is at beatS + k*60/bpm and bars start at downbeatS + n*bar.
+        Only beat-match when `gridStable` (else the tempo drifts: use a normal crossfade).
+        Client transition recipe (web/src/lib/automix.ts, android .../playback/Automix.kt): start at the outgoing
+        track's mixOutS (moved earlier so the transition ends by lastBeatS), start the incoming track at its mixInS,
+        play it at rate outgoing.bpm/(incoming.bpm × m), m ∈ {1, 2, ½}, only within ±8 % (pitch preserved), keep
+        downbeats aligned, swap the bass at the midpoint and crossfade over 8–32 beats; then ease the rate back to 1.
+      required: [gridStable]
+      properties:
+        bpm: { type: number }
+        beatS: { type: number, description: first grid beat >= 0 }
+        downbeatS: { type: number, description: first bar start (beat 1) >= 0 }
+        beatsPerBar: { type: integer, description: 4 (time signature detection is not attempted) }
+        gridStable: { type: boolean }
+        key: { type: string, description: "e.g. 'A minor'" }
+        camelot: { type: string, description: "e.g. '8A'" }
+        mixInS: { type: number, description: where an incoming transition starts this track (a downbeat, after leading silence) }
+        mixOutS: { type: number, description: where an outgoing transition should start (a downbeat at the outro) }
+        introEndS: { type: number }
+        outroStartS: { type: number }
+        lastBeatS: { type: number, description: end of the music, before trailing silence }
+        energy: { type: number, minimum: 0, maximum: 1 }
+    TrackMixDetail:
+      type: object
+      required: [trackId, status]
+      properties:
+        trackId: { type: string }
+        status: { type: string, enum: [done, failed] }
+        version: { type: string, description: "dj-essentia-1 (Essentia RhythmExtractor2013 + KeyExtractor) or dj-basic-1 (numpy fallback)" }
+        error: { type: [string, 'null'] }
+        analysedAt: { type: string, format: date-time }
+        bpmConfidence: { type: [number, 'null'], description: share of beats on the fitted grid }
+        keyStrength: { type: [number, 'null'] }
+        energyCurve: { type: array, items: { type: number }, description: '0..1 per curveStepS (a bar when the grid is stable)' }
+        curveStepS: { type: [number, 'null'] }
+        durationS: { type: [number, 'null'] }
+        mix: { $ref: '#/components/schemas/TrackMix' }
     ReplayGain:
       type: object
       description: |
