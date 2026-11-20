@@ -69,6 +69,8 @@ sealed interface ConnectMessage {
     data class PlaylistChanged(val playlistId: String, val rev: Int?, val deleted: Boolean) : ConnectMessage
     /** api 0.6: the user's family mode changed (another device or an admin). */
     data class FamilyChanged(val family: org.nasmusic.app.data.api.FamilyMode) : ConnectMessage
+    /** api 0.7: a new notification for this user (e.g. new music added). */
+    data class Notification(val notification: org.nasmusic.app.data.api.AppNotification) : ConnectMessage
     data object Pong : ConnectMessage
     /** `source` "speaker": a speaker problem worth showing (others are protocol noise). */
     data class Error(val detail: String, val source: String? = null) : ConnectMessage
@@ -108,6 +110,9 @@ object ConnectProtocol {
                     o["deleted"]?.jsonPrimitive?.contentOrNull == "true",
                 )
             } ?: ConnectMessage.Unknown(type)
+            "notification" -> o["notification"]?.let { n ->
+                runCatching { json.decodeFromJsonElement(org.nasmusic.app.data.api.AppNotification.serializer(), n) }.getOrNull()
+            }?.let { ConnectMessage.Notification(it) } ?: ConnectMessage.Unknown(type)
             "pong" -> ConnectMessage.Pong
             "error" -> ConnectMessage.Error(o["detail"]?.jsonPrimitive?.contentOrNull.orEmpty(), o["source"]?.jsonPrimitive?.contentOrNull)
             else -> ConnectMessage.Unknown(type)
