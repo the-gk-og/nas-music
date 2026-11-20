@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">nas-music</string>
+    <string name="share_upload_label">Upload to nas-music</string>
 </resources>

@@ -22,6 +22,10 @@ music.whoactuallyneeds.men {
 			disable_http_challenge
 		}
 	}
+	# Uploads arrive in resumable chunks of 4 MiB (server max 16 MiB per request); cap them explicitly.
+	request_body /api/v1/uploads/* {
+		max_size 32MB
+	}
 	reverse_proxy nasmusic:8080 {
 		# stream audio and the Connect WebSocket without buffering
 		flush_interval -1

@@ -22,6 +22,7 @@
 #   admin_password_hash = "<output of: nasmusic hash-password>"
 #   timezone = "Europe/London"
 #   opus_cache_gb = 10
+#   upload_root = "/uploads"
 #   EOF
 # then restart the container. Music path, LAN IP and tunnel URL above are examples; change them.
 
@@ -42,6 +43,9 @@ services:
       NASMUSIC_CONFIG: /data/config.toml
     volumes:
       - /mnt/NAS/Shared/music:/music:ro
+      # Uploads (deploy/README.md "Uploads"): a SEPARATE writable folder, owner 568, group 3000, mode 2775.
+      # Create it on the NAS first, then set upload_root = "/uploads" in /data/config.toml.
+      - /mnt/NAS/Shared/music-uploads:/uploads
       - nasmusic-data:/data
 
   # Public HTTPS via the friend's relay (deploy/relay). Caddy gets the Let's Encrypt certificate.

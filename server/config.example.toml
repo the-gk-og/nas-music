@@ -36,6 +36,12 @@ opus_cache_gb = 20                 # LRU limit for transcoded Opus files
 #                                  # register an application (any name/version) and paste its API key here.
 # scan_interval_minutes = 5
 
+# ---- Uploads (deploy/README.md "Uploads") ----
+# A SEPARATE writable folder (never inside library_root, which stays read-only). Unset = uploading is off.
+# upload_root = "/uploads"
+# upload_max_file_mb = 2048        # largest single file
+# upload_quota_gb = 50             # default per-user quota; 0 = unlimited (admins can change it per user)
+
 # ---- Casting to speakers (deploy/README.md "Casting to speakers") ----
 # cast_enabled = true
 # cast_port = 8090                 # plain HTTP, serves ONLY signed /api/v1/cast/media|art URLs; publish on the LAN

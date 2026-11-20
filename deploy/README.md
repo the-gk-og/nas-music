@@ -110,6 +110,40 @@ installed app.
 
 To install, allow "Install unknown apps" for your browser or file manager on the phone.
 
+## Uploads (songs from the web player, desktop app and phone)
+
+People an admin allows can upload songs; they appear in the library within seconds and then go through
+analysis, loudness, explicit and AcoustID jobs like every other track. The music library stays **read-only**:
+uploads live in a separate, writable folder that the server indexes as a second library root.
+
+1. **Create the folder** on the NAS (once), owned by the app user and the music group, group-writable:
+   `/mnt/NAS/Shared/music-uploads`, owner `568` (apps), group `3000`, mode `2775` (setgid so new folders keep
+   group 3000). In TrueNAS: Datasets → add a dataset (or a folder in the Shared dataset) and give user `apps`
+   (568) **modify** in its ACL.
+2. **Mount it read-write** into the container next to the read-only library (`deploy/dockhand/compose.yaml`
+   already has it): `- /mnt/NAS/Shared/music-uploads:/uploads` (no `:ro`). The container runs as `568:568`
+   with `group_add: ["3000"]`, so the group gets write access too.
+3. **Config** (`/data/config.toml`), then restart the container:
+   ```toml
+   upload_root = "/uploads"         # writable; must not be inside library_root
+   # upload_max_file_mb = 2048      # largest single file
+   # upload_quota_gb = 50           # default per-user quota (0 = unlimited); admins change it per user
+   ```
+4. **Who may upload**: Admin → Uploads. By default only admins can; tick "May upload" per user and set a
+   quota if you like. Each upload can be "Everyone" (normal library track) or "Only me".
+
+Files are stored as `<username>/<Artist>/<Album>/<NN Title>.<ext>` (from their tags, else
+`<username>/Unsorted/<file name>`), kept in their original format (FLAC, MP3, M4A/AAC, Ogg/Opus, WAV); the
+content is checked, not just the name. Unfinished uploads sit in `/uploads/.incoming` and are dropped after a
+week without progress. The uploader or an admin can delete an upload; that only ever touches files under
+`/uploads`. Snapshot/back up the uploads dataset like the music: it is the only copy of those files.
+
+**Body size through the relay.** Clients send uploads in 4 MiB chunks (the server accepts at most 16 MiB per
+request) and resume after a dropped connection, so slow relays and big FLACs are fine. Caddy has no request
+body limit by default; `deploy/relay/Caddyfile` sets an explicit 32 MB cap on `/api/v1/uploads/*` (copy the
+updated Caddyfile to `/data/relay/Caddyfile` and restart the caddy container). The Cloudflare tunnel's 100 MB
+limit is also well above a chunk.
+
 ## Casting to speakers
 
 The server can play on Chromecast / Google Cast speakers, DLNA (UPnP AV) renderers, Home Assistant

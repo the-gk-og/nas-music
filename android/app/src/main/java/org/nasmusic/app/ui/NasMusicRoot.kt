@@ -252,6 +252,7 @@ private fun NavGraphBuilder.routes(c: AppContainer, motion: MotionLevel) {
     composable("admin") { AdminScreen(c) }
     composable("data") { DataSettingsScreen(c) }
     composable("downloads") { DownloadsScreen(c) }
+    composable("uploads") { org.nasmusic.app.ui.screens.UploadScreen(c) }
 }
 
 private fun NavHostController.goTab(route: String) = navigate(route) {
