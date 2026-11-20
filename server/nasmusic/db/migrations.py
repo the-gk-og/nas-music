@@ -415,13 +415,13 @@ def migrate_v5_to_v6(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
     return True
 
 
-# ---------- v6 -> v7 (voice control) ----------
+# ---------- v6 -> v7 (combined: see V7_TABLES and schema.sql header) ----------
 
-V7_TABLES = ("voice_tokens", "voice_devices")
+V7_TABLES = ("voice_tokens", "voice_devices", "upload_access", "uploads", "upload_sessions")
 
 
 def migrate_v6_to_v7(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
-    """Two new tables (voice control); additive. Returns True if it migrated."""
+    """New tables for the v7 features (additive). Returns True if it migrated."""
     if current_version(conn) != 6:
         return False
     if make_backup:

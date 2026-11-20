@@ -160,6 +160,8 @@ def tracks_by_ids(conn: sqlite3.Connection, uid: str, ids: list[str], include_mi
         q = TRACK_SELECT + f" WHERE t.id IN ({','.join('?' * len(chunk))})"
         if not include_missing:
             q += " AND t.missing = 0"
+        if p.private_others:  # other people's "only me" uploads are never shown, not even flagged
+            q += " AND " + family.private_condition(p, "t")
         for r in conn.execute(q, (uid, *chunk)):
             d = track_dict(r)
             if p.hides(d["explicit"]):

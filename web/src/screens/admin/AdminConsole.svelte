@@ -1,6 +1,6 @@
 <script lang="ts">
   // Admin console: desktop-first (section list on the left), chips on phones.
-  import { Activity, ArrowLeft, Baby, Bug, Copy, DatabaseBackup, HeartPulse, Library, ScrollText, Settings, Tags, Users, WandSparkles } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Baby, Bug, Copy, DatabaseBackup, HeartPulse, Library, ScrollText, Settings, Tags, Upload, Users, WandSparkles } from '@lucide/svelte';
   import { appearance } from '../../lib/appearance.svelte';
   import { session } from '../../lib/session.svelte';
   import { ui } from '../../lib/ui.svelte';
@@ -15,6 +15,7 @@
   import Reports from './Reports.svelte';
   import ServerSettings from './ServerSettings.svelte';
   import TagsAdmin from './TagsAdmin.svelte';
+  import UploadsAdmin from './UploadsAdmin.svelte';
   import UsersSection from './Users.svelte';
 
   const SECTIONS = [
@@ -22,6 +23,7 @@
     { id: 'users', label: 'Users & invites', icon: Users },
     { id: 'library', label: 'Library', icon: Library },
     { id: 'tags', label: 'Tags', icon: Tags },
+    { id: 'uploads', label: 'Uploads', icon: Upload },
     { id: 'family', label: 'Family & explicit', icon: Baby },
     { id: 'autotag', label: 'Tag fixing', icon: WandSparkles },
     { id: 'duplicates', label: 'Duplicates', icon: Copy },
@@ -59,6 +61,7 @@
       {:else if section === 'users'}<UsersSection />
       {:else if section === 'library'}<LibraryAdmin />
       {:else if section === 'tags'}<TagsAdmin />
+      {:else if section === 'uploads'}<UploadsAdmin />
       {:else if section === 'family'}<FamilyAdmin />
       {:else if section === 'autotag'}<AutotagAdmin />
       {:else if section === 'duplicates'}<DuplicatesAdmin />

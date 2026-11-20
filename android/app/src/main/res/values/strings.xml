@@ -4,4 +4,5 @@
     <string name="widget_description">What\'s playing, with controls. Resize for more.</string>
     <string name="tile_playback">nas-music</string>
     <string name="tile_family">Family mode</string>
+    <string name="share_upload_label">Upload to nas-music</string>
 </resources>

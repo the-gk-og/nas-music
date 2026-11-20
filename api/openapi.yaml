@@ -39,6 +39,12 @@ info:
     per user, created/revoked under /me/voice/tokens); voice tokens work nowhere else and device tokens don't
     work there. /me/voice/devices lists the user's Connect devices and speakers with the aliases ("bedroom",
     "Stacey's room") and default flag voice uses to pick where to play.
+    0.7.0 (schema v7): uploading songs (/uploads*, /admin/uploads, /admin/users/{id}/uploads). Resumable
+    chunk + offset protocol: POST /uploads, then PATCH /uploads/{id} with raw bytes and `Upload-Offset`
+    (a mismatch answers 409 with the server's `offset`; GET /uploads/{id} also tells it), chunks of at most
+    `maxChunkBytes` (send `chunkBytes`, 4 MiB). The last chunk's reply has status done and the stored `upload`;
+    the track appears in the library seconds later (UploadedFile.indexed). Uploads with visibility `private`
+    are visible only to the uploader (hidden from everyone else everywhere, /stream 404). Job `upload_scan`.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
     Times are ISO-8601 UTC strings. IDs are opaque strings.
 servers:
@@ -2433,7 +2439,7 @@ paths:
     post:
       summary: Admin only. Start a job now (background). `backup` makes a manual database backup.
       parameters:
-        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, discovery, release_radar, blends, lyrics, cleanup, backup, explicit, autotag] } }
+        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, discovery, release_radar, blends, lyrics, cleanup, backup, explicit, autotag, upload_scan] } }
       responses:
         '200':
           description: the job's status (state running, or idle if it already finished)
@@ -2636,6 +2642,147 @@ paths:
         '404': { description: not found }
     delete:
       responses: { '204': { description: deleted }, '404': { description: not found } }
+  /uploads:
+    get:
+      summary: |
+        v7. Whether the caller may upload, quota and usage, their uploaded files and unfinished/recent upload
+        sessions. `?all=true` (admins) lists everyone's files.
+      parameters:
+        - { name: all, in: query, schema: { type: boolean, default: false } }
+      responses:
+        '200':
+          description: uploads overview
+          content: { application/json: { schema: { $ref: '#/components/schemas/UploadOverview' } } }
+    post:
+      summary: |
+        v7. Start a resumable upload. Allowed: FLAC, MP3, M4A/AAC, Ogg (Vorbis/Opus), WAV (kept as uploaded).
+        The content is sniffed (first chunk and again at the end) and must be audio. Stored as
+        <upload_root>/<username>/<Artist>/<Album>/<NN Title>.<ext> from its tags, else
+        <username>/Unsorted/<original name>.<ext>.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [filename, bytes]
+              properties:
+                filename: { type: string, maxLength: 512 }
+                bytes: { type: integer, minimum: 1, description: total file size }
+                visibility: { $ref: '#/components/schemas/UploadVisibility' }
+      responses:
+        '201':
+          description: session created (offset 0)
+          content: { application/json: { schema: { $ref: '#/components/schemas/UploadSession' } } }
+        '403': { description: not allowed to upload (admins decide per user; default admins only) }
+        '413': { description: file larger than the limit, or quota exceeded }
+        '415': { description: file type not allowed }
+        '429': { description: too many unfinished uploads }
+        '503': { description: uploads are not set up on this server }
+  /uploads/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      summary: v7. Session state; `offset` (also the `Upload-Offset` header) is where to resume.
+      responses:
+        '200':
+          description: session
+          content: { application/json: { schema: { $ref: '#/components/schemas/UploadSession' } } }
+        '404': { description: no such upload (or not yours) }
+    patch:
+      summary: |
+        v7. Append raw bytes at `Upload-Offset` (header, or `?offset=`). Body = the chunk
+        (application/offset+octet-stream or application/octet-stream), at most 16 MiB.
+      parameters:
+        - { name: Upload-Offset, in: header, schema: { type: integer, minimum: 0 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+      requestBody:
+        required: true
+        content:
+          application/offset+octet-stream: { schema: { type: string, format: binary } }
+          application/octet-stream: { schema: { type: string, format: binary } }
+      responses:
+        '200':
+          description: accepted; status done (with `upload`) after the last byte
+          content: { application/json: { schema: { $ref: '#/components/schemas/UploadSession' } } }
+        '404': { description: no such upload }
+        '409':
+          description: offset mismatch or the upload is no longer in progress; resume from `offset`
+          content:
+            application/json:
+              schema: { type: object, required: [detail, offset], properties: { detail: { type: string }, offset: { type: integer } } }
+        '413': { description: chunk too large, or more bytes than announced }
+        '415': { description: not an audio file (the session is failed and its data deleted) }
+        '422': { description: Upload-Offset missing, or an unsafe file name }
+    delete:
+      summary: v7. Cancel an unfinished upload (its partial data is deleted).
+      responses: { '204': { description: cancelled }, '404': { description: no such upload } }
+  /uploads/files/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    patch:
+      summary: v7. Change who sees an uploaded track (uploader or admin).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [visibility]
+              properties: { visibility: { $ref: '#/components/schemas/UploadVisibility' } }
+      responses:
+        '200':
+          description: updated
+          content: { application/json: { schema: { $ref: '#/components/schemas/UploadedFile' } } }
+        '404': { description: no such upload (or not yours) }
+    delete:
+      summary: |
+        v7. Delete an uploaded file (uploader or admin). Only ever removes a file under the upload folder;
+        the main library is read-only and cannot be touched. The track disappears at once.
+      responses:
+        '200':
+          description: deleted
+          content:
+            application/json:
+              schema: { type: object, properties: { deleted: { type: string }, trackId: { type: string } } }
+        '404': { description: no such upload (or not yours) }
+  /admin/uploads:
+    get:
+      summary: Admin only (v7). Per-user upload permission, quota and usage.
+      responses:
+        '200':
+          description: overview
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, users]
+                properties:
+                  enabled: { type: boolean, description: upload_root is configured }
+                  defaultQuotaBytes: { type: [integer, 'null'], description: null = unlimited }
+                  maxFileBytes: { type: integer }
+                  users: { type: array, items: { $ref: '#/components/schemas/AdminUploadUser' } }
+  /admin/users/{id}/uploads:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    put:
+      summary: |
+        Admin only (v7). Who may upload and how much. `canUpload: null` = default (admins only);
+        `quotaBytes: null` = the server default, 0 = unlimited. Fields left out are kept.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                canUpload: { type: [boolean, 'null'] }
+                quotaBytes: { type: [integer, 'null'], minimum: 0 }
+      responses:
+        '200':
+          description: the user's upload settings
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminUploadUser' } } }
+        '404': { description: no such user }
 components:
   securitySchemes:
     device: { type: http, scheme: bearer }
@@ -2681,6 +2828,70 @@ components:
         online: { type: boolean }
         aliases: { type: array, items: { type: string } }
         isDefault: { type: boolean }
+    UploadVisibility:
+      type: string
+      enum: [everyone, private]
+      default: everyone
+      description: v7. private = only the uploader sees the track
+    UploadOverview:
+      type: object
+      required: [canUpload, enabled, usedBytes, maxFileBytes, chunkBytes, maxChunkBytes, formats, files, sessions]
+      properties:
+        canUpload: { type: boolean }
+        enabled: { type: boolean, description: the server has an upload folder }
+        quotaBytes: { type: [integer, 'null'], description: null = unlimited }
+        usedBytes: { type: integer, description: finished uploads plus space reserved by unfinished ones }
+        maxFileBytes: { type: integer }
+        chunkBytes: { type: integer, description: recommended chunk size }
+        maxChunkBytes: { type: integer }
+        formats: { type: array, items: { type: string, enum: [flac, mp3, m4a, aac, ogg, opus, wav] } }
+        files: { type: array, items: { $ref: '#/components/schemas/UploadedFile' } }
+        sessions: { type: array, items: { $ref: '#/components/schemas/UploadSession' } }
+    UploadSession:
+      type: object
+      required: [id, filename, bytes, offset, visibility, status]
+      properties:
+        id: { type: string }
+        filename: { type: string }
+        bytes: { type: integer }
+        offset: { type: integer, description: bytes the server has }
+        visibility: { $ref: '#/components/schemas/UploadVisibility' }
+        status: { type: string, enum: [uploading, done, failed] }
+        error: { type: [string, 'null'] }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+        upload: { oneOf: [ { $ref: '#/components/schemas/UploadedFile' }, { type: 'null' } ] }
+    UploadedFile:
+      type: object
+      required: [id, path, trackId, bytes, format, visibility, indexed]
+      properties:
+        id: { type: string }
+        userId: { type: [string, 'null'] }
+        username: { type: [string, 'null'] }
+        path: { type: string, description: relative to the upload folder }
+        trackId: { type: string, description: the library track (once indexed) }
+        bytes: { type: integer }
+        originalName: { type: string }
+        format: { type: string, enum: [flac, mp3, m4a, aac, ogg, opus, wav] }
+        visibility: { $ref: '#/components/schemas/UploadVisibility' }
+        createdAt: { type: string }
+        indexed: { type: boolean, description: the track is in the library }
+        title: { type: [string, 'null'] }
+        artist: { type: [string, 'null'] }
+        album: { type: [string, 'null'] }
+        durationS: { type: [number, 'null'] }
+    AdminUploadUser:
+      type: object
+      required: [userId, username, canUpload, usedBytes, files]
+      properties:
+        userId: { type: string }
+        username: { type: string }
+        isAdmin: { type: boolean }
+        canUpload: { type: boolean }
+        explicit: { type: boolean, description: an admin set canUpload (else the default) }
+        quotaBytes: { type: [integer, 'null'], description: null = unlimited }
+        usedBytes: { type: integer }
+        files: { type: integer }
     JamSettings:
       type: object
       required: [approval, allowPlayNext, maxPerGuest]

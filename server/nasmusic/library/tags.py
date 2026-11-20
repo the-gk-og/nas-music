@@ -11,7 +11,7 @@ from mutagen.flac import FLAC, Picture
 from mutagen.id3 import ID3
 from mutagen.mp4 import MP4
 
-AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".mp4", ".aac", ".ogg", ".oga", ".opus"}
+AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".mp4", ".aac", ".ogg", ".oga", ".opus", ".wav"}
 
 
 @dataclass
@@ -207,7 +207,7 @@ def _replaygain(t: TrackTags, f, tags) -> None:
 
 
 _CODECS = {"FLAC": "FLAC", "MP3": "MP3", "OggVorbis": "Vorbis", "OggOpus": "Opus", "OggFLAC": "FLAC",
-           "AAC": "AAC", "WavPack": "WavPack", "MonkeysAudio": "APE"}
+           "AAC": "AAC", "WavPack": "WavPack", "MonkeysAudio": "APE", "WAVE": "WAV"}
 
 
 def _audio_info(t: TrackTags, f) -> None:

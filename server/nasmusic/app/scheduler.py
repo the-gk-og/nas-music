@@ -21,7 +21,7 @@ from nasmusic.stream.transcode import OpusCache
 log = logging.getLogger(__name__)
 
 JOB_NAMES = ("scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "lyrics", "discovery", "release_radar",
-             "blends", "cleanup", "backup", "explicit", "autotag")
+             "blends", "cleanup", "backup", "explicit", "autotag", "upload_scan")
 # The loudness job runs after every scan; a first pass over a big library takes hours, so each run stops
 # after this long and the next scan (or the nightly chain) carries on.
 LOUDNESS_BUDGET_S = 50 * 60
@@ -39,6 +39,9 @@ class Jobs:
         self.lrclib = None   # nasmusic.library.lrclib.Lrclib for the prefetch job (set by build_context)
         self._locks = {n: threading.Lock() for n in JOB_NAMES}
         self._locks["full_scan"] = self._locks["scan"]  # never scan twice at once
+        # upload_scan has its own lock (the scanner serialises the actual walk); a request that arrives while
+        # one is running makes it go round once more, so no finished upload waits for the 5-minute scan.
+        self._upload_scan_again = threading.Event()
         self.scheduler = None
 
     # ----- job bodies -----
@@ -51,6 +54,19 @@ class Jobs:
         res = scanner.scan(self.cfg, conn, full=full).as_dict()
         res["togetGot"] = toget.match_owned(conn)  # wanted albums/songs that the library now has
         return res
+
+    def _upload_scan(self, conn):
+        """Index just upload_root (seconds), right after an upload finishes or is deleted."""
+        from nasmusic.library import scanner
+
+        self._upload_scan_again.clear()
+        if self.cfg.upload_root is None:
+            return {"skipped": "upload_root is not configured"}
+        return scanner.scan(self.cfg, conn, uploads_only=True).as_dict()
+
+    def request_upload_scan(self) -> None:
+        self._upload_scan_again.set()
+        self.trigger("upload_scan", "upload")
 
     def _analyse(self, conn):
         return {"analysed": ai_adapter.analyse_pending(conn, ai_config(self.cfg))}
@@ -127,9 +143,13 @@ class Jobs:
 
         from nasmusic.core import iso
 
+        from nasmusic.library import uploads
+
         cutoff = iso(datetime.now(UTC) - timedelta(days=30))
-        return {"bugReportsDeleted": conn.execute("DELETE FROM bug_reports WHERE created_at < ?",
-                                                  (cutoff,)).rowcount}
+        out = {"bugReportsDeleted": conn.execute("DELETE FROM bug_reports WHERE created_at < ?", (cutoff,)).rowcount}
+        if self.cfg.upload_root is not None:
+            out.update(uploads.cleanup(conn, self.cfg))
+        return out
 
     def _backup(self, conn):
         from nasmusic.app import backups
@@ -169,6 +189,7 @@ class Jobs:
             "backup": self._backup,
             "explicit": self._explicit,
             "autotag": self._autotag,
+            "upload_scan": self._upload_scan,
         }[name]
 
     # ----- running -----
@@ -209,6 +230,13 @@ class Jobs:
             self.trigger("analyse", "chained")
             self.trigger("loudness", "chained")
             self.trigger("explicit", "chained")
+        if name == "upload_scan":
+            if self._upload_scan_again.is_set():
+                self.trigger("upload_scan", "chained")
+            elif rec["ok"] and (rec.get("result") or {}).get("added"):
+                # New uploads go through the same jobs as any other track (AcoustID only does new ones).
+                for job in ("analyse", "loudness", "explicit", "autotag"):
+                    self.trigger(job, "chained")
         if name == "nightly" and rec["ok"]:
             self.trigger("pretranscode", "chained")
             self.trigger("lyrics", "chained")

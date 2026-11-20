@@ -54,6 +54,7 @@ class AppContainer(val context: Context) {
     val api = ApiFactory.create(callFactory)
     val discovery = ApiFactory.discovery(callFactory)
     val jam = ApiFactory.jam(callFactory)
+    val uploads = org.nasmusic.app.upload.UploadsApi.create(callFactory)
 
     val pairing = PairingRepository(secureStore, baseClient)
     val musicDir: File = File(context.filesDir, "music")

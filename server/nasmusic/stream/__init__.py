@@ -12,6 +12,7 @@ MEDIA_TYPES = {
     ".ogg": "audio/ogg",
     ".oga": "audio/ogg",
     ".opus": "audio/ogg",
+    ".wav": "audio/wav",
 }
 
 MIN_BITRATE, MAX_BITRATE = 24, 256

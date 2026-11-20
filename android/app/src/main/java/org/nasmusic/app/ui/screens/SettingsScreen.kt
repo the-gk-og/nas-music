@@ -114,6 +114,7 @@ fun SettingsScreen(c: AppContainer) {
         HorizontalDivider()
         Section("Offline")
         OutlinedButton(onClick = { ui.go("downloads") }) { Text("Downloads (using %d MB)".format(usedMb)) }
+        OutlinedButton(onClick = { ui.go("uploads") }) { Text("Upload music to the server") }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Smart downloads")

@@ -10,7 +10,9 @@
 -- autotag_suggestions), MusicBrainz-id override fields in tag_overrides, and hidden duplicates
 -- (duplicate_hidden; tracks.missing = 2), Jam (jams, jam_guests, jam_requests, jam_votes), and AI radio
 -- (radio_sessions.station_key/params, radio_stations, radio_feedback). v7 adds voice control (voice_tokens,
--- voice_devices). Older databases are upgraded by nasmusic.db.migrations.
+-- voice_devices). Older databases are upgraded by nasmusic.db.migrations. Also v7 adds uploads (upload_access,
+-- uploads, upload_sessions): files people upload live under config upload_root (a second, writable library
+-- root; tracks.path '@uploads/<path>').
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -729,3 +731,46 @@ CREATE TABLE IF NOT EXISTS jam_votes (
     value     INTEGER NOT NULL CHECK (value IN (-1, 1)),
     PRIMARY KEY (jam_id, guest_id, track_id)
 );
+
+-- ---------- v7: uploads (server core; nasmusic/library/uploads.py) ----------
+-- Who may upload and how much. No row = defaults: admins may upload, others may not; quota from config.
+CREATE TABLE IF NOT EXISTS upload_access (
+    user_id     TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    allowed     INTEGER,                -- NULL = default (admins only)
+    quota_bytes INTEGER,                -- NULL = config upload_quota_gb; 0 = unlimited
+    updated_at  TEXT NOT NULL
+);
+
+-- One row per uploaded file under upload_root. The track row (tracks.path = '@uploads/' || path,
+-- tracks.id = sha1 of that) appears after the next scan; deleting an upload removes the file.
+-- visibility 'private' = only the uploader sees the track (nasmusic.db.family applies it everywhere).
+CREATE TABLE IF NOT EXISTS uploads (
+    id            TEXT PRIMARY KEY,
+    user_id       TEXT REFERENCES users(id) ON DELETE SET NULL,
+    path          TEXT NOT NULL UNIQUE,  -- relative to upload_root: <username>/<Artist>/<Album>/<NN Title>.<ext>
+    track_id      TEXT NOT NULL,
+    bytes         INTEGER NOT NULL,
+    original_name TEXT NOT NULL,
+    format        TEXT NOT NULL,         -- flac | mp3 | m4a | ogg | opus | wav (sniffed, not the file name)
+    visibility    TEXT NOT NULL DEFAULT 'everyone' CHECK (visibility IN ('everyone', 'private')),
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS uploads_user ON uploads(user_id);
+CREATE INDEX IF NOT EXISTS uploads_track ON uploads(track_id);
+CREATE INDEX IF NOT EXISTS uploads_visibility ON uploads(visibility, user_id);
+
+-- Resumable (chunk + offset) uploads in progress; bytes go to upload_root/.incoming/<id>.part.
+CREATE TABLE IF NOT EXISTS upload_sessions (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    filename    TEXT NOT NULL,
+    bytes       INTEGER NOT NULL,
+    received    INTEGER NOT NULL DEFAULT 0,
+    visibility  TEXT NOT NULL DEFAULT 'everyone' CHECK (visibility IN ('everyone', 'private')),
+    status      TEXT NOT NULL DEFAULT 'uploading' CHECK (status IN ('uploading', 'done', 'failed')),
+    error       TEXT,
+    upload_id   TEXT,                    -- uploads.id once done
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS upload_sessions_user ON upload_sessions(user_id, status);

@@ -27,6 +27,7 @@
     Sparkles,
     Speaker,
     Tags,
+    Upload,
     User,
     X,
   } from '@lucide/svelte';
@@ -381,6 +382,7 @@
       <button onclick={() => goto('equalizer', '')}><SlidersVertical />Equalizer</button>
       <button onclick={() => ui.open({ kind: 'devices' })}><Speaker />Devices</button>
       <button onclick={() => goto('toget', '')}><ListEnd />To get</button>
+      <button onclick={() => goto('uploads', '')}><Upload />Upload music</button>
       <button onclick={() => goto('account', '')}><UserRound />Account</button>
       <button onclick={() => void family.toggle()} aria-pressed={family.mode.enabled}>{#if family.mode.locked}<Lock />{:else}<Baby />{/if}Family mode: {family.mode.enabled ? 'on' : 'off'}</button>
       {#if session.isAdmin}<button onclick={() => goto('admin', '')}><Shield />Admin</button>{/if}
