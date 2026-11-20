@@ -132,6 +132,10 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
     if (sleepOpen) SleepTimerDialog(c) { sleepOpen = false }
     var seeking by remember { mutableStateOf<Float?>(null) }
     val tint = rememberDominantColor(MediaItems.artUrl(track.albumId, 128))
+    // AI radio: steering for whatever radio is playing (here or on the active device).
+    val currentQueue by c.queueSync.currentId.collectAsStateWithLifecycle()
+    val knownQueues by c.queueSync.queues.collectAsStateWithLifecycle()
+    val radioQueue = remember(currentQueue, knownQueues, s.remote) { c.player.radioQueueId() }
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Dark, heavily blurred cover behind everything (blur needs Android 12+; older phones get
@@ -229,6 +233,7 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                     Icon(Icons.Default.Shuffle, "Shuffle", tint = if (s.shuffle) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            if (radioQueue != null) RadioSteerBar(c, radioQueue)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(formatDuration(s.positionMs / 1000.0), style = MaterialTheme.typography.bodySmall)
                 Slider(

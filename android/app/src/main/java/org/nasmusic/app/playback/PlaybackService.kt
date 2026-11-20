@@ -122,7 +122,7 @@ class PlaybackService : MediaLibraryService() {
                 .setAudioAttributes(attributes, /* handleAudioFocus = */ false)
                 .build()
         }
-        library = AutoLibrary { c.api }
+        library = AutoLibrary({ c.api }) { AiRadio.context(this) }
 
         tracker = FeedbackTracker(player, c.events, c.contextCollector).also { it.attach() }
         player.addListener(object : Player.Listener {

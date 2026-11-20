@@ -4,23 +4,30 @@ import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import org.nasmusic.app.data.api.NasMusicApi
+import org.nasmusic.app.data.api.RadioContext
 import org.nasmusic.app.data.api.RadioRequest
 import org.nasmusic.app.data.api.RadioSeed
 import org.nasmusic.app.data.api.Track
+import org.nasmusic.app.data.api.VibeParseRequest
 
 /**
  * Browse tree for Android Auto (and any other MediaBrowser client), built only from AndroidX Media3:
  *
- *   root ─ Home (today's mixes) ─ mix:<id> ─ tracks
+ *   root ─ Play something for now (radio:moment, the AI smart shuffle; playable)
+ *        ├ Home (today's mixes) ─ mix:<id> ─ tracks
  *        ├ Playlists ─ playlist:<id> ─ tracks
  *        ├ Albums ─ album:<id> ─ tracks
  *        ├ Artists ─ artist:<id> ─ album:<id> ─ tracks
- *        └ Radio ─ radio:random, radio:favourites… (playable)
+ *        └ Radio ─ radio:moment, radio:random (playable)
  *
  * Playable track entries have the id `play|<context>|<trackId>` so that tapping one plays the whole
  * context (album, playlist, mix, search results) from that track; [expand] turns it back into tracks.
  */
-class AutoLibrary(private val api: () -> NasMusicApi) {
+class AutoLibrary(
+    private val api: () -> NasMusicApi,
+    /** Smart-shuffle hints (local time, car mode, output). */
+    private val hints: () -> RadioContext? = { null },
+) {
     data class Expanded(val tracks: List<Track>, val startIndex: Int, val queueName: String, val source: PlaySource,
                         val mixId: String? = null, val radioQueueId: String? = null)
 
@@ -32,6 +39,7 @@ class AutoLibrary(private val api: () -> NasMusicApi) {
         val a = api()
         return when {
             parentId == ROOT -> listOf(
+                playable("radio:moment", "Play something for now", MediaMetadata.MEDIA_TYPE_RADIO_STATION),
                 folder(HOME, "Home", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
                 folder(PLAYLISTS, "Playlists", MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
                 folder(ALBUMS, "Albums", MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
@@ -81,11 +89,14 @@ class AutoLibrary(private val api: () -> NasMusicApi) {
 
     /** "Play <query>" by voice: an artist → artist radio, an album → the album, else matching songs. */
     suspend fun voice(query: String): Expanded? {
-        if (query.isBlank()) return radio("random")
-        val r = runCatching { api().search(query, 20) }.getOrNull() ?: return null
         val q = norm(query)
+        if (query.isBlank() || q in SOMETHING) return radio("moment")
+        val r = runCatching { api().search(query, 20) }.getOrNull() ?: return null
         r.artists.firstOrNull { norm(it.name) == q }?.let { return radio("artist:${it.id}", "${it.name} radio") }
         r.albums.firstOrNull { norm(it.title) == q || norm("${it.title} ${it.artist}") == q }?.let { return contextTracks("album:${it.id}") }
+        // "Play something chill", "play gym music, no slow songs": a describe-a-vibe station, unless a song is
+        // called exactly that.
+        if (r.tracks.none { norm(it.title) == q }) vibe(query)?.let { return it }
         if (r.tracks.isNotEmpty()) return Expanded(r.tracks, 0, "Search: $query", PlaySource.SEARCH)
         r.albums.firstOrNull()?.let { return contextTracks("album:${it.id}") }
         r.artists.firstOrNull()?.let { return radio("artist:${it.id}", "${it.name} radio") }
@@ -105,8 +116,19 @@ class AutoLibrary(private val api: () -> NasMusicApi) {
 
     private suspend fun radio(seed: String, title: String? = null): Expanded? {
         val (type, id) = seed.split(':', limit = 2).let { it[0] to it.getOrNull(1) }
-        val q = runCatching { api().startRadio(RadioRequest(RadioSeed(type, id))) }.getOrNull() ?: return null
+        val ctx = if (type == "moment") hints() else null
+        val q = runCatching { api().startRadio(RadioRequest(RadioSeed(type, id), ctx)) }.getOrNull() ?: return null
         return Expanded(q.tracks, 0, title ?: q.name, PlaySource.MIX, radioQueueId = q.id)
+    }
+
+    /** Describe-a-vibe from a voice query; null when nothing in it was understood as a vibe. */
+    private suspend fun vibe(query: String): Expanded? {
+        val text = query.trim().removePrefix("something").trim()
+        val parsed = runCatching { api().parseVibe(VibeParseRequest(text)) }.getOrNull() ?: return null
+        if (parsed.constraints.none { it.kind != "genre" && it.kind != "like" }) return null
+        val q = runCatching { api().startRadio(RadioRequest(RadioSeed("vibe", text = text, constraints = parsed.constraints))) }
+            .getOrNull() ?: return null
+        return Expanded(q.tracks, 0, q.name, PlaySource.MIX, radioQueueId = q.id)
     }
 
     private fun trackItem(ctx: String, t: Track): MediaItem {
@@ -132,7 +154,9 @@ class AutoLibrary(private val api: () -> NasMusicApi) {
         const val ALBUMS = "albums"
         const val ARTISTS = "artists"
         const val RADIO = "radio"
-        val RADIOS = listOf("radio:random" to "Your radio")
+        val RADIOS = listOf("radio:moment" to "Play something for now", "radio:random" to "Your radio")
+        /** Voice queries that mean "just play something" → the smart shuffle. */
+        val SOMETHING = setOf("something", "some music", "music", "anything", "something for now", "something good")
 
         fun playId(ctx: String, trackId: String) = "play|$ctx|$trackId"
 

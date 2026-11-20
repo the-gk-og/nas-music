@@ -18,6 +18,8 @@ class UiController(val nav: NavHostController) {
     /** Bumped after a tag edit so open screens reload. */
     var tagsRev by mutableStateOf(0)
     var devicesOpen by mutableStateOf(false)
+    /** AI radio: the describe-a-vibe dialog. */
+    var vibeOpen by mutableStateOf(false)
     var speedOpen by mutableStateOf(false)
     var abOpen by mutableStateOf(false)
     /** Queue popup on Now Playing. */

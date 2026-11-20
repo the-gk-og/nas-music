@@ -330,6 +330,43 @@ CREATE INDEX IF NOT EXISTS radio_sessions_user ON radio_sessions(user_id, update
 Sessions not touched for 30 days are deleted when a new radio starts. `DELETE /me/data?signal=all`
 should delete the user's `radio_sessions` too (they hold listening history).
 
+## AI radio (schema v6): smart shuffle, describe-a-vibe, steering
+
+```
+radio_start(conn, cfg, user_id, {"type": "moment"}, context={localHour?, weekday?, deviceKind?, output?, motion?, workout?},
+            device_kind="android")                               # "Play something for now"
+radio_start(conn, cfg, user_id, {"type": "vibe", "text"?: str, "constraints"?: [chip]})
+radio_parse_vibe(conn, cfg, user_id, text) -> {text, title, constraints: [chip]}
+radio_steer(conn, cfg, user_id, radio_id, action, track_id=None, scope="track", ref_id=None, context=None) -> station
+radio_refill(conn, cfg, user_id, radio_id, drop_ids, keep_ids, n) -> [track ids]
+radio_station(conn, cfg, user_id, radio_id) -> {radioId, kind, title, stationKey, explanation, text, constraints,
+                                                 context, steering, steeringSummary}
+```
+
+* **Smart shuffle** (`moment.py`): `0.5·tanh(contextual taste z/2)` (the recommender's score for this hour / weekday
+  with a context key: drive in the car, workout when running, late_night / morning / evening) `+ 0.25·closeness to
+  the time profile` (plays within ±2 h on the same kind of day, 60-day half-life) `+ 0.3·closeness to the last
+  hour's played-through tracks` `− skipped sound / artists` (last hour strongly, last day lightly) `− 0.3·|energy −
+  target|` (target from momentum, profile and device: car livelier, late night calmer, running high). Nothing heard in
+  the last 4 h, −0.35 for the last 2 days, every ~5th slot a rediscovery (never / not-for-120-days, close to the
+  taste centres). The explanation names the day part, device and the style ("upbeat indie rock") of what drove it.
+  Station key `moment:<device>`, so steering is remembered separately in the car, on the speaker, etc.
+* **Describe-a-vibe** (`vibe.py`): a lexicon (≈250 phrases, longest first, negation by no/not/without/less…) plus the
+  library's own vocabulary (artist names → "like X", genre tag words) maps text to chips: energy (library
+  percentile), tempo, danceability, year, vocals (`voice:instrumental`), mood (Essentia mood / Jamendo theme tags),
+  genre (include / exclude), familiarity, like-artist. Range / vocals / year / excluded-genre chips filter; moods,
+  genres, familiarity and likeness score. Filters loosen step by step (never an explicit "no X") when fewer than
+  2×batch tracks are left unplayed, so narrow vibes stay endless; the explanation says what was loosened and which
+  chips the analysis can't judge (basic-1 has no mood/voice tags). No language model: microseconds per parse.
+* **Variety** (moment and vibe): sampled from the best few (softmax), no artist within 4 (moment) / 3 (vibe) tracks
+  across batch boundaries, no same album back to back, ≤ 2 (3) per artist per batch, no repeats per session.
+* **Steering** (`steering.py`): per (user, station) in `radio_stations.steering`, applied on every pick
+  (`radio_more`, and `radio_refill` which the server uses to swap the queued tracks straight after a steer):
+  more/less like a track (embedding closeness) or artist, energy −3…+3, variety −2 (familiar) … +2 (varied: more
+  noise, wider artist spacing, looser seed), never-here (banned on this station only). Every more/less/never is
+  logged in `radio_feedback`; `collect_signals` adds it to the taste weight (+1.0 / −0.8 / −1.0, decayed) and as
+  labelled rows for LightGBM.
+
 ## Discovery (weekly)
 
 1. **Seeds.** Your top `ai.discovery.seed_artists` artists by positive feedback and plays (or by
