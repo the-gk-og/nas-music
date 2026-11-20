@@ -68,11 +68,34 @@ def _ids(res) -> list[str]:
     return [t for t in (res or []) if isinstance(t, str)]
 
 
-def radio_start(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, seed: dict) -> tuple[str, list[str]]:
+def radio_start(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, seed: dict, context: dict | None = None,
+                device_kind: str | None = None) -> tuple[str, list[str]]:
     """(radio_id, ~25 track ids). The radio's display name is radio_sessions.title. Raises NotImplementedError
     without the v3 engine, KeyError for unknown/unanalysed seeds or users, ValueError for a malformed seed."""
-    radio_id, ids = _call("radio_start", conn, cfg, user_id, {k: v for k, v in seed.items() if k in ("type", "id")})
+    clean = {k: v for k, v in seed.items() if k in ("type", "id", "text", "constraints")}
+    if seed.get("type") in ("moment", "vibe"):
+        radio_id, ids = _call("radio_start", conn, cfg, user_id, clean, context=context, device_kind=device_kind)
+    else:
+        radio_id, ids = _call("radio_start", conn, cfg, user_id, {k: v for k, v in clean.items() if k in ("type", "id")})
     return radio_id, _ids(ids)
+
+
+def radio_steer(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, radio_id: str, action: str,
+                track_id: str | None, scope: str, ref_id: str | None, context: dict | None) -> dict:
+    return dict(_call("radio_steer", conn, cfg, user_id, radio_id, action, track_id, scope, ref_id, context))
+
+
+def radio_refill(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, radio_id: str, drop: list[str],
+                 keep: list[str], n: int) -> list[str]:
+    return _ids(_call("radio_refill", conn, cfg, user_id, radio_id, drop, keep, n))
+
+
+def radio_station(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, radio_id: str) -> dict:
+    return dict(_call("radio_station", conn, cfg, user_id, radio_id))
+
+
+def radio_parse_vibe(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, text: str) -> dict:
+    return dict(_call("radio_parse_vibe", conn, cfg, user_id, text))
 
 
 def radio_more(conn: sqlite3.Connection, cfg: AIConfig, user_id: str, radio_id: str, exclude: list[str],

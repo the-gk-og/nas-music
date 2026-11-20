@@ -291,7 +291,8 @@ class PlayerConnection(
 
     /** Start a radio (docs/v3-ux.md §5) and play it here, or on the active device when remote. */
     suspend fun startRadio(seed: org.nasmusic.app.data.api.RadioSeed): Boolean {
-        val q = (if (offline.isOffline() && !connect.isRemote) null else runCatching { api().startRadio(org.nasmusic.app.data.api.RadioRequest(seed)) }.getOrNull())
+        val hints = if (seed.type == "moment") AiRadio.context(context) else null
+        val q = (if (offline.isOffline() && !connect.isRemote) null else runCatching { api().startRadio(org.nasmusic.app.data.api.RadioRequest(seed, hints)) }.getOrNull())
             ?: return startOfflineRadio(seed)
         queues.markRadio(q.id)
         queues.refresh()
@@ -307,6 +308,48 @@ class PlayerConnection(
         offline.toast("Offline radio from your downloads")
         playResolved(tracks, 0, PlaySource.MIX, "Offline radio", null, null, null)
         return true
+    }
+
+    /** The radio queue that's playing (here, or on the active device when remote), if any. */
+    fun radioQueueId(): String? {
+        val id = if (connect.isRemote) connect.state.value?.queueId else queues.currentId.value
+        return id?.takeIf { queues.isRadio(it) }
+    }
+
+    suspend fun radioStation(queueId: String): org.nasmusic.app.data.api.RadioStation? =
+        runCatching { api().radioStation(queueId) }.getOrNull()
+
+    /**
+     * Steer the playing radio (AI radio, api 0.6). The server swaps the queue's tracks after the current and next
+     * one; here we mirror that on the local player straight away (a remote active device gets the queue change
+     * over Connect). Returns the station, or null if it failed.
+     */
+    suspend fun steerRadio(action: String, scope: String = "track", refId: String? = null): org.nasmusic.app.data.api.RadioStation? {
+        val qid = radioQueueId() ?: return null
+        val now = state.value
+        val trackId = now.item?.mediaId?.takeIf { it.isNotEmpty() }
+        if (action in AiRadio.NEEDS_TRACK && trackId == null) return null
+        val res = runCatching {
+            api().steerRadio(qid, org.nasmusic.app.data.api.SteerRequest(
+                action = action, scope = scope, refId = refId,
+                trackId = if (action in AiRadio.NEEDS_TRACK) trackId else null,
+                currentIndex = now.index,
+            ))
+        }.getOrNull() ?: return null
+        if (!connect.isRemote && queues.currentId.value == qid) {
+            withController { c ->
+                val localIds = items(c).map { it.mediaId }
+                val idx = c.currentMediaItemIndex
+                val add = AiRadio.upcomingAfterSteer(localIds, res.queue.tracks, idx)
+                val from = idx + 2
+                if (from < c.mediaItemCount) c.removeMediaItems(from, c.mediaItemCount)
+                if (add.isNotEmpty()) c.addMediaItems(add.map { MediaItems.fromTrack(it, PlaySource.MIX) })
+                if (action == AiRadio.NEVER_HERE && c.currentMediaItem?.mediaId == trackId && c.hasNextMediaItem()) c.seekToNextMediaItem()
+            }
+        } else if (action == AiRadio.NEVER_HERE && connect.isRemote) {
+            next()
+        }
+        return res.station
     }
 
     fun playNext(tracks: List<Track>) = enqueue(tracks, next = true)

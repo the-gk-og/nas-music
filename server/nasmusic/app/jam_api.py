@@ -324,7 +324,7 @@ def guest_leave(v: jam.Viewer = Depends(guest), conn: Conn = Depends(db), c: App
 def guest_search(q: str = Query(..., min_length=1, max_length=100), v: jam.Viewer = Depends(guest),
                  conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
     _limit(c, "search", v.guest["id"])
-    return {"tracks": jam.search(conn, q)}
+    return {"tracks": jam.search(conn, q, v.jam["host_user_id"])}
 
 
 class GuestAdd(BaseModel):

@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from nasmusic.app import collections as coll
+from nasmusic.db import family
 from nasmusic.library import queries
 
 JAM_HOURS = 12                      # hard lifetime of a Jam; every guest token dies with it
@@ -336,6 +337,9 @@ def request_add(conn: sqlite3.Connection, v: Viewer, track_id: str, play_next: b
     s = settings_of(jam)
     if not isinstance(track_id, str) or not _track_exists(conn, track_id):
         raise NotFound("no such track")
+    # The host's family mode applies to what guests can add (hidden songs look like they don't exist).
+    if not family.allowed(conn, jam["host_user_id"], track_id):
+        raise NotFound("no such track")
     if play_next and not v.is_host and not s["allowPlayNext"]:
         raise Forbidden("the host hasn't allowed 'play next'")
     qid = queue_id(conn, jam, (state or {}).get("queueId"))
@@ -473,8 +477,9 @@ def track_lite(t: dict) -> dict:
             "albumId": t["albumId"], "durationS": t["durationS"]}
 
 
-def search(conn: sqlite3.Connection, q: str) -> list[dict]:
-    """Tracks only (what a guest can add), every word matching title, artist or album. Read-only."""
+def search(conn: sqlite3.Connection, q: str, host_user_id: str | None = None) -> list[dict]:
+    """Tracks only (what a guest can add), every word matching title, artist or album. Read-only. Tracks the
+    host's family mode hides are left out."""
     words = [w for w in q[:100].split() if w][:6]
     if not words:
         return []
@@ -483,7 +488,7 @@ def search(conn: sqlite3.Connection, q: str) -> list[dict]:
         like = "%" + w.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         parts.append("(t.title LIKE ? ESCAPE '\\' OR ar.name LIKE ? ESCAPE '\\' OR al.title LIKE ? ESCAPE '\\')")
         params += [like] * 3
-    rows = conn.execute(queries.TRACK_SELECT + " WHERE t.missing = 0 AND " + " AND ".join(parts) +
+    rows = conn.execute(queries.TRACK_SELECT + " WHERE t.missing = 0 AND " + " AND ".join(parts) + family.where(conn, host_user_id, "t") +
                         " ORDER BY t.title COLLATE NOCASE LIMIT ?", ("", *params, SEARCH_LIMIT))
     return [track_lite(queries.track_dict(r)) for r in rows]
 

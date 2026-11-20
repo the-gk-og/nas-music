@@ -318,6 +318,16 @@ interface NasMusicApi {
     /** Returns the whole queue with the new tracks appended. */
     @POST("radio/{queueId}/more")
     suspend fun radioMore(@Path("queueId") queueId: String): kotlinx.serialization.json.JsonObject
+
+    // ---- AI radio (api 0.6): describe-a-vibe, station, steering ----
+    @POST("radio/vibe/parse")
+    suspend fun parseVibe(@Body body: VibeParseRequest): VibeParse
+
+    @GET("radio/{queueId}/station")
+    suspend fun radioStation(@Path("queueId") queueId: String): RadioStation
+
+    @POST("radio/{queueId}/steer")
+    suspend fun steerRadio(@Path("queueId") queueId: String, @Body body: SteerRequest): SteerResponse
 }
 
 interface DiscoveryApi {

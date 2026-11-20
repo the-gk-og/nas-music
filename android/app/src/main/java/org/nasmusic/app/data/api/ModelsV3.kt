@@ -69,15 +69,94 @@ data class ShelfItem(
 
 @Serializable
 data class RadioSeed(
-    /** random | track | artist | album | playlist */
+    /** random | track | artist | album | playlist | moment (smart shuffle) | vibe (describe-a-vibe) */
     val type: String,
     val id: String? = null,
     /** Set by the server in responses. */
     val title: String? = null,
+    /** vibe: what the user typed or said. */
+    val text: String? = null,
+    /** vibe: interpreted chips (from /radio/vibe/parse), possibly with some removed. */
+    val constraints: List<VibeConstraint>? = null,
+    /** Responses: why these picks ("Because it's Friday evening and you've been playing upbeat pop."). */
+    val explanation: String? = null,
+    /** Responses: short steering summary ("more energy, less like Coldplay"). */
+    val steering: String? = null,
+)
+
+/** Smart-shuffle hints (AI radio, api 0.6); all optional. */
+@Serializable
+data class RadioContext(
+    val localHour: Int? = null,
+    /** ISO, 1 = Monday */
+    val weekday: Int? = null,
+    /** phone | car | speaker | desktop | watch | web | tv */
+    val deviceKind: String? = null,
+    val output: String? = null,
 )
 
 @Serializable
-data class RadioRequest(val seed: RadioSeed)
+data class RadioRequest(val seed: RadioSeed, val context: RadioContext? = null)
+
+/** One interpreted describe-a-vibe chip. The app shows [label] and lets the user drop chips; the server interprets the rest. */
+@Serializable
+data class VibeConstraint(
+    val id: String,
+    val kind: String,
+    val label: String,
+    val min: Double? = null,
+    val max: Double? = null,
+    val value: String? = null,
+    val weight: Double? = null,
+    val exclude: Boolean? = null,
+    val name: String? = null,
+)
+
+@Serializable
+data class VibeParseRequest(val text: String)
+
+@Serializable
+data class VibeParse(val text: String = "", val title: String = "", val constraints: List<VibeConstraint> = emptyList())
+
+@Serializable
+data class RadioSteerRef(val type: String, val id: String, val name: String? = null)
+
+@Serializable
+data class RadioSteering(
+    val energy: Int = 0,
+    val variety: Int = 0,
+    val moreLike: List<RadioSteerRef> = emptyList(),
+    val lessLike: List<RadioSteerRef> = emptyList(),
+    val never: List<RadioSteerRef> = emptyList(),
+)
+
+@Serializable
+data class RadioStation(
+    val queueId: String? = null,
+    val radioId: String = "",
+    val kind: String = "",
+    val title: String = "",
+    val stationKey: String = "",
+    val explanation: String? = null,
+    val text: String? = null,
+    val constraints: List<VibeConstraint>? = null,
+    val steeringSummary: String? = null,
+    val steering: RadioSteering = RadioSteering(),
+)
+
+/** action: more_like | less_like | more_energy | calmer | more_variety | more_familiar | never_here | remove | reset */
+@Serializable
+data class SteerRequest(
+    val action: String,
+    val trackId: String? = null,
+    val scope: String = "track",
+    val refId: String? = null,
+    val currentIndex: Int? = null,
+    val refresh: Boolean = true,
+)
+
+@Serializable
+data class SteerResponse(val station: RadioStation, val queue: Queue)
 
 /** Music from the online catalogue (Deezer + MusicBrainz, proxied). `id` is opaque ("dz:album:302127"). */
 @Serializable

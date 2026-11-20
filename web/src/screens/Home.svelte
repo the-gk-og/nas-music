@@ -1,6 +1,6 @@
 <script lang="ts">
   // Home (§3.1): greeting + avatar, then Start radio, Your devices, Recently played, Continue listening, Pinned.
-  import { Laptop, Monitor, Radio, Smartphone, Speaker } from '@lucide/svelte';
+  import { Laptop, Monitor, Radio, Smartphone, Sparkles, Speaker, WandSparkles } from '@lucide/svelte';
   import Avatar from '../components/Avatar.svelte';
   import Card from '../components/Card.svelte';
   import QuickTile from '../components/QuickTile.svelte';
@@ -65,9 +65,17 @@
 
   {#each shelves as s (s.id)}
     {#if s.kind === 'start_radio'}
-      {@const it = s.items[0]}
-      <div class="pad">
-        <button class="radio-btn" onclick={() => player.startRadio(it ? parseRadioId(it.id, it.seed) : { type: 'random' }, 'a random radio')}>
+      {@const rnd = s.items.find((x) => x.id === 'random')}
+      <div class="pad radios">
+        <button class="radio-btn" onclick={() => player.startRadio({ type: 'moment' }, 'a smart shuffle for now')}>
+          <span class="ico"><Sparkles size={30} /></span>
+          <span><b>Play something for now</b><br /><span class="muted">Smart shuffle for this moment</span></span>
+        </button>
+        <button class="radio-btn" onclick={() => ui.open({ kind: 'vibe' })}>
+          <span class="ico"><WandSparkles size={30} /></span>
+          <span><b>Describe a vibe</b><br /><span class="muted">“chill rainy evening”, “gym, no slow songs”</span></span>
+        </button>
+        <button class="radio-btn" onclick={() => player.startRadio(rnd ? parseRadioId(rnd.id, rnd.seed) : { type: 'random' }, 'a random radio')}>
           <span class="ico"><Radio size={30} /></span>
           <span><b>Start a random radio</b><br /><span class="muted">Endless music picked from your taste</span></span>
         </button>
@@ -121,6 +129,11 @@
   .h {
     margin: 22px var(--gutter) 10px;
     font-size: 1.45rem;
+  }
+  .radios {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
   }
   .radio-btn {
     display: flex;

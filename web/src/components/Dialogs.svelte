@@ -46,6 +46,7 @@
   import JamSheet from './JamSheet.svelte';
   import PlaylistShareSheet from './PlaylistShareSheet.svelte';
   import TagEditSheet from './TagEditSheet.svelte';
+  import VibeSheet from './VibeSheet.svelte';
   import { isPlayable, openItem, playItem, radioFor } from '../lib/items';
   import { isPinType, library } from '../lib/library.svelte';
   import { samples } from '../lib/samples.svelte';
@@ -399,6 +400,8 @@
       </div>
     </form>
   </Sheet>
+{:else if d?.kind === 'vibe'}
+  <VibeSheet />
 {:else if d?.kind === 'confirm'}
   <Sheet label={d.title}>
     <div class="pad">

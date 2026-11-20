@@ -1,5 +1,5 @@
 // Pure helpers for the v3 redesign (docs/v3-ux.md): screen forms, motion, shelves, radio, gestures.
-import type { RadioSeed, Shelf } from './types';
+import type { DeviceKind, RadioContext, RadioSeed, Shelf, VibeConstraint } from './types';
 
 // ---- screen forms (§6) ----
 export type Form = 'phone' | 'tablet' | 'desktop';
@@ -86,6 +86,7 @@ export function needsTopUp(len: number, index: number, threshold = RADIO_TOPUP_A
 export function parseRadioId(id: string, seed?: RadioSeed | null): RadioSeed {
   if (seed?.type) return seed;
   const i = id.indexOf(':');
+  if (id === 'moment') return { type: 'moment' };
   if (id === 'random' || i < 0) return { type: 'random' };
   const type = id.slice(0, i);
   if (type === 'track' || type === 'artist' || type === 'album' || type === 'playlist') return { type, id: id.slice(i + 1) };
@@ -155,3 +156,28 @@ export function matchKey(artist: string, title: string): string {
       .trim();
   return `${norm(artist)}|${norm(title)}`;
 }
+
+// ---- AI radio (v6) ----
+
+/** Smart-shuffle hints from this device: local hour, ISO weekday, device kind. */
+export function radioContext(now: Date, kind: DeviceKind | string): RadioContext {
+  const wd = now.getDay(); // 0 = Sunday
+  return { localHour: now.getHours(), weekday: wd === 0 ? 7 : wd, deviceKind: kind === 'desktop' ? 'desktop' : 'web' };
+}
+
+/**
+ * After a steer the server keeps the queue up to the current track and the next one and replaces the rest.
+ * Mirror that locally: keep ours up to index + 1, then take the server's tracks after that point.
+ */
+export function replaceUpcoming<T extends { id: string }>(local: T[], server: T[], index: number): T[] {
+  const keep = local.slice(0, Math.max(0, index + 2));
+  const kept = new Set(keep.map((t) => t.id));
+  return [...keep, ...server.slice(keep.length).filter((t) => !kept.has(t.id))];
+}
+
+/** Drop one interpreted vibe chip. */
+export function withoutChip(chips: VibeConstraint[], id: string): VibeConstraint[] {
+  return chips.filter((c) => c.id !== id);
+}
+
+export const VIBE_EXAMPLES = ['chill rainy evening', 'gym, no slow songs', 'focus, no lyrics', '2000s throwbacks'];

@@ -1494,7 +1494,7 @@ paths:
     get:
       summary: |
         Home (docs/v3-ux.md §3.1): typed shelves in the user's order (settings `home.shelves`, hidden ones in
-        `home.hidden`). Empty shelves are omitted, except `start_radio`, which always has one item.
+        `home.hidden`). Empty shelves are omitted, except `start_radio`, which always has its buttons (v6: smart shuffle first, then random radio).
         Shelf kinds here: start_radio, devices, recently_played, continue_listening, pinned.
       responses:
         '200':
@@ -1638,14 +1638,26 @@ paths:
         the AI ("Song X radio", "Your Indie Rock radio"; radio != null on the queue). Starting the same radio
         again replaces that queue. Ask for more with POST /radio/{queueId}/more when ~5 remain.
         Queue changes are pushed over Connect as usual.
+        AI radio (schema v6): seed.type=moment is the smart shuffle ("Play something for now"; queue name
+        "Smart shuffle"), chosen for this moment from time of day, day of week, device, the last hour's plays and
+        skips and freshness; send `context` hints (all optional). seed.type=vibe is describe-a-vibe: send `text`
+        and/or `constraints` (chips from POST /radio/vibe/parse, possibly with some removed). Every radio is
+        steerable (POST /radio/{queueId}/steer). The queue's `radio` carries the station's explanation.
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [seed], properties: { seed: { $ref: '#/components/schemas/RadioSeed' } } } } }
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seed]
+              properties:
+                seed: { $ref: '#/components/schemas/RadioSeed' }
+                context: { $ref: '#/components/schemas/RadioContext' }
       responses:
         '200':
           description: the new radio queue
           content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
-        '400': { description: malformed seed }
+        '400': { description: malformed seed (e.g. a vibe with neither text nor constraints) }
         '404': { description: seed item not found, or nothing analysed to build a radio from }
         '503': { description: AI engine without radio support yet }
   /radio/{queueId}/more:
@@ -1659,6 +1671,78 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/QueueDetail' } } }
         '404': { description: not a radio queue of yours }
         '503': { description: AI engine without radio support yet }
+  /radio/vibe/parse:
+    post:
+      summary: |
+        Describe-a-vibe: interpret free text ("chill rainy evening", "gym, no slow songs", "focus, no lyrics",
+        "2000s throwbacks", "like <artist in your library>") as constraint chips on the analysed feature space.
+        CPU-cheap lexicon + library vocabulary; nothing is stored. Show the chips, let the user remove some
+        (or edit the text and parse again), then POST /radio with seed {type: vibe, text, constraints}.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [text], properties: { text: { type: string, maxLength: 200 } } } } }
+      responses:
+        '200':
+          description: the interpretation
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [text, title, constraints]
+                properties:
+                  text: { type: string }
+                  title: { type: string }
+                  constraints: { type: array, items: { $ref: '#/components/schemas/VibeConstraint' } }
+        '503': { description: AI engine without AI radio yet }
+  /radio/{queueId}/station:
+    get:
+      summary: The station behind a radio queue (any seed type) with its explanation and remembered steering.
+      parameters: [ { name: queueId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: station
+          content: { application/json: { schema: { $ref: '#/components/schemas/RadioStation' } } }
+        '404': { description: not a radio queue of yours }
+        '503': { description: AI engine without AI radio yet }
+  /radio/{queueId}/steer:
+    post:
+      summary: |
+        Steer a radio: more / less like this (track or artist), more energy / calmer, more variety / more
+        familiar, never play this here (on this station only), remove one entry, reset. Remembered per station
+        (the same seed, vibe chips, or smart shuffle on this kind of device) and applied to every later fetch.
+        More/less/never also train the recommender. With refresh (default) the queue's tracks after the current
+        and next one are replaced by fresh steered picks, so the change is heard right away; the queue is pushed
+        over Connect. Clients playing locally should swap their own upcoming items for the returned queue's.
+      parameters: [ { name: queueId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [more_like, less_like, more_energy, calmer, more_variety, more_familiar, never_here, remove, reset] }
+                trackId: { type: [string, 'null'], description: 'required for more_like, less_like, never_here (the track playing / tapped)' }
+                scope: { type: string, enum: [track, artist], default: track, description: 'for more_like / less_like / never_here / remove' }
+                refId: { type: [string, 'null'], description: 'remove: the track or artist id of the entry to undo' }
+                currentIndex: { type: [integer, 'null'], minimum: 0, description: "the player's real index (default: the queue's saved one)" }
+                refresh: { type: boolean, default: true }
+                context: { $ref: '#/components/schemas/EventContext' }
+      responses:
+        '200':
+          description: the station and the (possibly refreshed) queue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [station, queue]
+                properties:
+                  station: { $ref: '#/components/schemas/RadioStation' }
+                  queue: { $ref: '#/components/schemas/QueueDetail' }
+        '400': { description: action needs a trackId / refId }
+        '404': { description: not a radio queue of yours, or unknown track }
+        '503': { description: AI engine without AI radio yet }
   /release-radar:
     get:
       summary: |
@@ -2958,9 +3042,68 @@ components:
       type: object
       required: [type]
       properties:
-        type: { type: string, enum: [random, track, artist, album, playlist] }
-        id: { type: [string, 'null'], description: required unless type=random }
+        type: { type: string, enum: [random, track, artist, album, playlist, moment, vibe] }
+        id: { type: [string, 'null'], description: required unless type=random / moment / vibe }
         title: { type: [string, 'null'], description: set by the server in responses }
+        text: { type: [string, 'null'], maxLength: 200, description: 'vibe: what the user typed or said' }
+        constraints: { type: [array, 'null'], items: { $ref: '#/components/schemas/VibeConstraint' }, description: 'vibe: chips (from /radio/vibe/parse); the server re-validates them' }
+        explanation: { type: [string, 'null'], description: 'responses: why these picks ("Because it''s Friday evening and you''ve been playing upbeat pop.")' }
+        steering: { type: [string, 'null'], description: 'responses: short steering summary, e.g. "more energy, less like Coldplay"' }
+    RadioContext:
+      type: object
+      description: Smart-shuffle hints; all optional. Missing hour / weekday come from the server clock in the user's timezone, the device from the registered device kind.
+      properties:
+        localHour: { type: [integer, 'null'], minimum: 0, maximum: 23 }
+        weekday: { type: [integer, 'null'], minimum: 1, maximum: 7, description: ISO, 1 = Monday }
+        deviceKind: { type: [string, 'null'], enum: [phone, car, speaker, desktop, watch, web, tv, null] }
+        output: { type: [string, 'null'], description: 'as EventContext.output (car / cast / bluetooth:<name> ...)' }
+        motion: { type: [string, 'null'] }
+        workout: { type: [string, 'null'] }
+    VibeConstraint:
+      type: object
+      description: One interpreted chip. Clients show `label` and may remove chips; they need not understand the rest.
+      required: [id, kind, label]
+      properties:
+        id: { type: string, description: stable for the same meaning }
+        kind: { type: string, enum: [energy, tempo, danceability, year, vocals, mood, genre, familiarity, like] }
+        label: { type: string, example: High energy }
+        min: { type: number }
+        max: { type: number }
+        value: { type: string, description: 'vocals: instrumental | vocal; mood: canonical mood; genre: words; familiarity: familiar | discover; like: artist id' }
+        weight: { type: number, description: 'mood: 1 or -1 ("not sad")' }
+        exclude: { type: boolean, description: 'genre: "no metal"' }
+        name: { type: string, description: 'like: artist name' }
+    RadioSteerRef:
+      type: object
+      required: [type, id]
+      properties:
+        type: { type: string, enum: [track, artist] }
+        id: { type: string }
+        name: { type: [string, 'null'] }
+    RadioStation:
+      type: object
+      required: [radioId, kind, title, stationKey, steering]
+      properties:
+        queueId: { type: string }
+        radioId: { type: string }
+        kind: { type: string, enum: [random, track, artist, album, playlist, moment, vibe] }
+        seedId: { type: [string, 'null'] }
+        title: { type: string }
+        stationKey: { type: string, description: "what steering is remembered under: 'moment:car', 'vibe:…', 'artist:<id>', 'random'" }
+        explanation: { type: [string, 'null'] }
+        text: { type: [string, 'null'] }
+        constraints: { type: [array, 'null'], items: { $ref: '#/components/schemas/VibeConstraint' } }
+        context: { type: [object, 'null'], description: 'moment: {localHour, weekday, deviceKind, motion, workout} it was chosen for' }
+        steeringSummary: { type: [string, 'null'] }
+        steering:
+          type: object
+          required: [energy, variety, moreLike, lessLike, never]
+          properties:
+            energy: { type: integer, minimum: -3, maximum: 3 }
+            variety: { type: integer, minimum: -2, maximum: 2, description: '+ more variety, - more familiar' }
+            moreLike: { type: array, items: { $ref: '#/components/schemas/RadioSteerRef' } }
+            lessLike: { type: array, items: { $ref: '#/components/schemas/RadioSteerRef' } }
+            never: { type: array, items: { $ref: '#/components/schemas/RadioSteerRef' } }
     SearchResults:
       type: object
       required: [query, top, tracks, albums, artists, playlists, queues, catalog]

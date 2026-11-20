@@ -8,12 +8,14 @@
 -- columns on tracks. v6 adds explicit-content flags (track_explicit, tag_overrides field 'explicit'),
 -- family mode (family_mode), automatic tag fixing (fingerprints, acoustid_lookups, mb_releases,
 -- autotag_suggestions), MusicBrainz-id override fields in tag_overrides, and hidden duplicates
--- (duplicate_hidden; tracks.missing = 2), and Jam (jams, jam_guests, jam_requests, jam_votes). Older
--- databases are upgraded by nasmusic.db.migrations.
+-- (duplicate_hidden; tracks.missing = 2), Jam (jams, jam_guests, jam_requests, jam_votes), and AI radio
+-- (radio_sessions.station_key/params, radio_stations, radio_feedback). Older databases are upgraded by
+-- nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
---   is also written by server core when a user answers), release_radar, blend_tracks (+ blends.match/built_at).
+--   is also written by server core when a user answers), release_radar, blend_tracks (+ blends.match/built_at),
+--   radio_sessions, radio_stations, radio_feedback.
 -- Server core writes blends / blend_members (membership and consent); the AI only reads them.
 -- Timestamps are ISO-8601 UTC text. IDs are text (stable hashes or uuid4 hex).
 
@@ -427,9 +429,37 @@ CREATE TABLE IF NOT EXISTS radio_sessions (
     anchors    TEXT NOT NULL,
     served     TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    station_key TEXT,                  -- v6: radio_stations.station_key ('moment:car', 'vibe:…', 'artist:<id>', 'random')
+    params     TEXT                    -- v6: JSON {explanation, text, constraints, context} for moment / vibe radios
 );
 CREATE INDEX IF NOT EXISTS radio_sessions_user ON radio_sessions(user_id, updated_at);
+
+-- v6 AI radio. A station is "the same radio" across sessions: the smart shuffle per device kind
+-- ('moment:<device>'), a vibe ('vibe:<sorted chip ids>') or a seed ('<type>:<id>', 'random'). Its steering
+-- (JSON {energy, variety, moreLike[], lessLike[], never[]}) applies to every pick and is remembered.
+CREATE TABLE IF NOT EXISTS radio_stations (
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    station_key TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    steering    TEXT NOT NULL DEFAULT '{}',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, station_key)
+);
+
+-- v6: every more/less-like-this and never-here steer, for the recommender (explicit feedback on track_id).
+CREATE TABLE IF NOT EXISTS radio_feedback (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    station_key TEXT NOT NULL,
+    track_id    TEXT NOT NULL,
+    action      TEXT NOT NULL,           -- more_like | less_like | never_here
+    scope       TEXT NOT NULL DEFAULT 'track',  -- track | artist
+    at          TEXT NOT NULL,
+    context     TEXT                     -- JSON EventContext of the steer, if the client sent one
+);
+CREATE INDEX IF NOT EXISTS radio_feedback_user ON radio_feedback(user_id, at);
 
 CREATE TABLE IF NOT EXISTS features (          -- global: audio analysis is shared
     track_id      TEXT NOT NULL REFERENCES tracks(id),

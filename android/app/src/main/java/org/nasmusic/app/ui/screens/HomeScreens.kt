@@ -145,14 +145,7 @@ fun HomeScreen(c: AppContainer) {
         if (offline || (failed && feed == null)) offlineHomeItems(c)
         settings.homeShelves.filterNot { it.startsWith("-") }.forEach { id ->
             when (id) {
-                "start_radio" -> item(key = id) {
-                    Button(
-                        onClick = { scope.launch { if (c.player.startRadio(RadioSeed("random"))) ui.go("now") else ui.toast = "Couldn't start the radio" } },
-                        modifier = Modifier.fillMaxWidth().padding(16.dp).height(64.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    ) { Icon(Icons.Default.Radio, null); Spacer(Modifier.width(12.dp)); Text("Start a random radio", style = MaterialTheme.typography.titleMedium) }
-                }
+                "start_radio" -> item(key = id) { StartRadioButtons(c) }
                 "devices" -> {
                     val others = devices.filter { it.online && it.id != me }
                     if (others.isNotEmpty()) item(key = id) {

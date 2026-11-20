@@ -97,6 +97,7 @@ fun GlobalSheets(c: AppContainer) {
     ui.addToQueue?.let { AddToQueueDialog(c, it.map { t -> t.id }) { ui.addToQueue = null } }
     ui.tagEdit?.let { TagEditDialog(c, it) { ui.tagEdit = null; ui.tagsRev++ } }
     if (ui.devicesOpen) DevicesSheet(c) { ui.devicesOpen = false }
+    if (ui.vibeOpen) org.nasmusic.app.ui.screens.VibeDialog(c) { ui.vibeOpen = false }
     if (ui.speedOpen) SpeedPitchDialog(c) { ui.speedOpen = false }
     if (ui.abOpen) AbRepeatDialog(c) { ui.abOpen = false }
     if (ui.queueSheet) QueueSheet(c) { ui.queueSheet = false }

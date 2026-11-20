@@ -27,6 +27,10 @@ class NotFound(Exception):
     pass
 
 
+class BadSeed(ValueError):
+    pass
+
+
 def shelf(id_: str, kind: str, title: str, items: list[dict], layout: str = "row",
           subtitle: str | None = None) -> dict:
     return {"id": id_, "kind": kind, "title": title, "subtitle": subtitle, "layout": layout, "items": items}
@@ -290,7 +294,10 @@ def home(conn: sqlite3.Connection, cfg: Config, uid: str, me_device: str | None,
     playing_queue = ((hub.snapshot(uid) or {}).get("queueId") if hub else None)
     shelves = [
         shelf("start_radio", "start_radio", "Start radio",
-              [{"type": "radio", "id": "random", "title": "Start a random radio", "subtitle": "Picked from your taste",
+              [{"type": "radio", "id": "moment", "title": "Play something for now",
+                "subtitle": "Smart shuffle for this moment", "artUrl": None,
+                "seed": {"type": "moment", "id": None, "title": "Smart shuffle"}},
+               {"type": "radio", "id": "random", "title": "Start a random radio", "subtitle": "Picked from your taste",
                 "artUrl": None, "seed": {"type": "random", "id": None, "title": "Random"}}], layout="button"),
         shelf("devices", "devices", "Your devices", _devices_shelf(conn, uid, me_device, hub)),
         shelf("recently_played", "recently_played", "Recently played", _recently_played(conn, data_dir, uid),
@@ -393,6 +400,13 @@ def seed_title(conn: sqlite3.Connection, uid: str, seed: dict) -> str:
     t, i = seed.get("type"), seed.get("id")
     if t == "random":
         return "Random"
+    if t == "moment":
+        return "Smart shuffle"
+    if t == "vibe":
+        text = (seed.get("text") or "").strip()
+        if not text and not seed.get("constraints"):
+            raise BadSeed("describe a vibe")
+        return text or "Vibe"
     if not i:
         raise NotFound("seed id required")
     if t == "track":
@@ -414,18 +428,93 @@ def seed_title(conn: sqlite3.Connection, uid: str, seed: dict) -> str:
     return title
 
 
-def start_radio(conn: sqlite3.Connection, cfg: Config, uid: str, seed: dict, protect: str | None) -> dict:
+def start_radio(conn: sqlite3.Connection, cfg: Config, uid: str, seed: dict, protect: str | None,
+                context: dict | None = None, device_kind: str | None = None) -> dict:
     title = seed_title(conn, uid, seed)  # validates the seed (404) and gives the seed a display title
-    seed = {"type": seed["type"], "id": seed.get("id"), "title": title}
-    radio_id, ids = ai_adapter.radio_start(conn, ai_config(cfg), uid, seed)
+    ai_seed = {k: v for k, v in seed.items() if k in ("type", "id", "text", "constraints") and v is not None}
+    seed = {"type": seed["type"], "id": seed.get("id") if seed["type"] not in ("moment", "vibe") else None,
+            "title": title}
+    radio_id, ids = ai_adapter.radio_start(conn, ai_config(cfg), uid, ai_seed, context, device_kind)
     ids = [i for i in dict.fromkeys(ids) if queries.track_file(conn, i) is not None]
     ids = family.filter_ids(conn, uid, ids)  # family mode: never radio an explicit track
     if not ids:
         raise NotFound("nothing to play for this radio yet")
     row = conn.execute("SELECT title FROM radio_sessions WHERE id = ?", (radio_id,)).fetchone()
     name = (row[0] if row and row[0] else ("Random radio" if seed["type"] == "random" else f"{title} radio"))
+    seed.update(_station_seed_fields(conn, cfg, uid, radio_id))
     return coll.create_queue(conn, uid, name, ids, 0, protect=protect, replace_same_name=True,
                              source=("radio", seed.get("id")), radio_seed=seed, radio_id=radio_id)
+
+
+def _station_seed_fields(conn: sqlite3.Connection, cfg: Config, uid: str, radio_id: str) -> dict:
+    """What the queue's `radio` object carries about the station (so every client sees it with the queue):
+    explanation, steering summary, the vibe's text and chips. {} on an engine without AI radio."""
+    try:
+        st = ai_adapter.radio_station(conn, ai_config(cfg), uid, radio_id)
+    except (NotImplementedError, KeyError):
+        return {}
+    out = {"explanation": st.get("explanation"), "steering": st.get("steeringSummary")}
+    if st.get("kind") == "vibe":
+        out["text"] = st.get("text")
+        out["constraints"] = st.get("constraints")
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def _refresh_seed(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str, radio_id: str, seed_json: str) -> None:
+    import json
+
+    try:
+        seed = json.loads(seed_json) if seed_json else {}
+    except ValueError:
+        seed = {}
+    fields = _station_seed_fields(conn, cfg, uid, radio_id)
+    new = {k: v for k, v in seed.items() if k not in ("explanation", "steering")} | fields
+    if new == seed:
+        return
+    seed = new
+    conn.execute("UPDATE queues SET radio_seed = ? WHERE id = ? AND user_id = ?", (json.dumps(seed), qid, uid))
+
+
+def _radio_queue(conn: sqlite3.Connection, uid: str, qid: str):
+    try:
+        row = coll.queue_row(conn, uid, qid)
+    except coll.NotFound as e:
+        raise NotFound("no such queue") from e
+    if not row["radio_seed"] or not row["radio_id"]:
+        raise NotFound("not a radio queue")
+    return row
+
+
+def radio_station(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str) -> dict:
+    row = _radio_queue(conn, uid, qid)
+    return {"queueId": qid, **ai_adapter.radio_station(conn, ai_config(cfg), uid, row["radio_id"])}
+
+
+def steer_radio(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str, body: dict) -> dict:
+    """Apply a steer and, unless refresh is false, swap the queue's upcoming tracks (after the current one and
+    the next, which a player may already have buffered) for fresh, steered picks. Returns {station, queue}."""
+    row = _radio_queue(conn, uid, qid)
+    aic = ai_config(cfg)
+    ai_adapter.radio_steer(conn, aic, uid, row["radio_id"], body["action"], body.get("trackId"),
+                           body.get("scope") or "track", body.get("refId"), body.get("context"))
+    have = coll.queue_track_ids(conn, uid, qid)
+    cur = body.get("currentIndex")
+    cur = row["current_index"] if cur is None else int(cur)
+    cur = max(0, min(cur, max(len(have) - 1, 0)))
+    if body.get("refresh", True) and body["action"] not in ("remove",) and have:
+        keep = have[:cur + 2]
+        drop = have[cur + 2:]
+        fresh = ai_adapter.radio_refill(conn, aic, uid, row["radio_id"], drop, keep, max(len(drop), 15))
+        fresh = [i for i in dict.fromkeys(fresh) if i not in set(keep) and queries.track_file(conn, i) is not None]
+        if fresh or drop:
+            coll.replace_queue_tracks(conn, uid, qid, keep + fresh, current_index=cur)
+    row = coll.queue_row(conn, uid, qid)
+    _refresh_seed(conn, cfg, uid, qid, row["radio_id"], row["radio_seed"])
+    return {"station": radio_station(conn, cfg, uid, qid), "queue": coll.get_queue(conn, uid, qid)}
+
+
+def parse_vibe(conn: sqlite3.Connection, cfg: Config, uid: str, text: str) -> dict:
+    return ai_adapter.radio_parse_vibe(conn, ai_config(cfg), uid, text)
 
 
 def more_radio(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str, n: int) -> dict:
@@ -437,6 +526,8 @@ def more_radio(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str, n: int
         raise NotFound("not a radio queue")
     have = coll.queue_track_ids(conn, uid, qid)
     new = ai_adapter.radio_more(conn, ai_config(cfg), uid, row["radio_id"], have, n)
+    if new:
+        _refresh_seed(conn, cfg, uid, qid, row["radio_id"], row["radio_seed"])
     fresh = [i for i in dict.fromkeys(new) if i not in set(have) and queries.track_file(conn, i) is not None]
     fresh = family.filter_ids(conn, uid, fresh)
     if not fresh:  # the library ran out: the queue stays as it is

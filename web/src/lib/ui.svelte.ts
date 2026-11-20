@@ -76,6 +76,7 @@ export type Dialog =
   | { kind: 'playlistShare'; playlistId: string }
   | { kind: 'itemMenu'; item: import('./types').ShelfItem }
   | { kind: 'profile' }
+  | { kind: 'vibe' }
   | { kind: 'catalog'; item: import('./types').CatalogItem }
   | { kind: 'prompt'; title: string; label: string; value: string; ok: string; resolve: (v: string | null) => void }
   | { kind: 'confirm'; title: string; message: string; ok: string; resolve: (v: boolean) => void };

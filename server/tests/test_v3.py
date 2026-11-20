@@ -284,8 +284,9 @@ def test_home_shelves(client, conn, app):
     h = client.get(f"{API}/home").json()
     assert [s["kind"] for s in h["shelves"]] == ["start_radio"]  # empty shelves hidden
     start = h["shelves"][0]
-    assert start["layout"] == "button" and start["items"][0]["seed"] == {"type": "random", "id": None,
-                                                                         "title": "Random"}
+    assert start["layout"] == "button" and start["items"][0]["seed"] == {"type": "moment", "id": None,
+                                                                         "title": "Smart shuffle"}
+    assert start["items"][1]["seed"] == {"type": "random", "id": None, "title": "Random"}
     conn.execute("INSERT INTO mixes (id, user_id, kind, title, for_date, created_at) "
                  "VALUES ('m1', ?, 'daily', 'Daily Mix', 'd', '2026-11-19T02:00:00Z')", (client.user_id,))
     conn.execute("INSERT INTO mix_tracks VALUES ('m1', 0, ?, 1, 'r')", (ids["Opening"],))
@@ -406,7 +407,8 @@ def test_radio_with_engine(client, conn, monkeypatch, bob):
         seen["start"] = (user_id, seed)
         if seed["type"] == "album" and seed.get("id") == "malformed":
             raise ValueError("bad seed")
-        conn_.execute("INSERT INTO radio_sessions VALUES ('r1', ?, ?, ?, 'Second radio', '[]', '[]', 'x', 'x')",
+        conn_.execute("INSERT INTO radio_sessions (id, user_id, seed_type, seed_id, title, anchors, served, "
+                      "created_at, updated_at) VALUES ('r1', ?, ?, ?, 'Second radio', '[]', '[]', 'x', 'x')",
                       (user_id, seed["type"], seed.get("id")))
         return "r1", ids[:3]
 
@@ -511,3 +513,46 @@ def test_isolation_of_v3_state(client, bob, conn, up):
 def test_user_client_helper_still_works(app, conn):
     with user_client(app, conn, "zed", admin=False) as c:
         assert c.get(f"{API}/home").status_code == 200
+
+
+# ---------- AI radio (v6): smart shuffle, describe-a-vibe, steering ----------
+
+
+def test_ai_radio_end_to_end(client, conn, app):
+    assert app.state.ctx.jobs.run("analyse")["result"]["analysed"] >= 5
+    r = client.post(f"{API}/radio", json={"seed": {"type": "moment"},
+                                          "context": {"deviceKind": "car", "localHour": 18, "weekday": 5}})
+    assert r.status_code == 200, r.text
+    q = r.json()
+    assert q["name"] == "Smart shuffle" and q["radio"]["type"] == "moment"
+    assert "Friday evening" in q["radio"]["explanation"] and "car" in q["radio"]["explanation"]
+    st = client.get(f"{API}/radio/{q['id']}/station").json()
+    assert st["queueId"] == q["id"] and st["stationKey"] == "moment:car" and st["steering"]["energy"] == 0
+    # steer: remembered, explanation updated, upcoming tracks after current + next replaced (no repeats)
+    cur = q["tracks"][0]["id"]
+    r = client.post(f"{API}/radio/{q['id']}/steer", json={"action": "more_energy", "currentIndex": 0})
+    assert r.status_code == 200, r.text
+    res = r.json()
+    assert res["station"]["steering"]["energy"] == 1 and "more energy" in res["station"]["steeringSummary"]
+    tracks = [t["id"] for t in res["queue"]["tracks"]]
+    assert tracks[0] == cur and len(set(tracks)) == len(tracks)
+    assert res["queue"]["radio"]["steering"] == "more energy"
+    r = client.post(f"{API}/radio/{q['id']}/steer", json={"action": "less_like", "trackId": cur, "scope": "artist"})
+    assert r.status_code == 200 and r.json()["station"]["steering"]["lessLike"][0]["type"] == "artist"
+    assert conn.execute("SELECT COUNT(*) FROM radio_feedback WHERE user_id = ?", (client.user_id,)).fetchone()[0] == 1
+    assert client.post(f"{API}/radio/{q['id']}/steer", json={"action": "more_like"}).status_code == 400
+    assert client.post(f"{API}/radio/{q['id']}/steer", json={"action": "fly"}).status_code == 422
+    # describe-a-vibe: parse -> edit chips -> start
+    p = client.post(f"{API}/radio/vibe/parse", json={"text": "chill rainy evening, no lyrics"}).json()
+    assert {c["kind"] for c in p["constraints"]} >= {"energy", "mood", "vocals"}
+    chips = [c for c in p["constraints"] if c["kind"] != "vocals"]   # basic-1 has no voice tags anyway
+    r = client.post(f"{API}/radio", json={"seed": {"type": "vibe", "text": p["text"], "constraints": chips}})
+    assert r.status_code == 200, r.text
+    v = r.json()
+    assert v["radio"]["type"] == "vibe" and v["radio"]["text"] == "chill rainy evening, no lyrics"
+    assert [c["id"] for c in v["radio"]["constraints"]] == [c["id"] for c in chips]
+    assert client.post(f"{API}/radio", json={"seed": {"type": "vibe"}}).status_code == 400
+    # data erase covers steering
+    client.delete(f"{API}/me/data", params={"signal": "all", "confirm": "true"})
+    for t in ("radio_feedback", "radio_stations"):
+        assert conn.execute(f"SELECT COUNT(*) FROM {t} WHERE user_id = ?", (client.user_id,)).fetchone()[0] == 0

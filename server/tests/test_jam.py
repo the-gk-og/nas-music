@@ -392,3 +392,16 @@ def test_websocket_live_updates_and_reactions(tc, host, ids):
         with tc.websocket_connect(f"{API}/jam/ws?jam={jam['id']}") as ws:
             ws.receive_json()
     assert e.value.code == 4401
+
+
+def test_host_family_mode_applies_to_guests(tc, host, ids, conn):
+    """With the host's family mode on, guests can't find or add explicit songs."""
+    conn.execute("INSERT INTO track_explicit (track_id, status, source, updated_at) VALUES (?, 'explicit', 'admin', "
+                 "'2026-01-01T00:00:00Z')", (ids["Song 1"],))
+    assert tc.put(f"{API}/me/family", json={"enabled": True}, headers=host).status_code == 200
+    jam = start(tc, host)["jam"]
+    g, _ = join(tc, jam["joinCode"])
+    found = {t["title"] for t in tc.get(f"{API}/jam/search", params={"q": "Song"}, headers=g).json()["tracks"]}
+    assert "Song 1" not in found and "Song 2" in found
+    assert add(tc, g, ids["Song 1"]).status_code == 404
+    assert add(tc, g, ids["Song 2"]).status_code == 200

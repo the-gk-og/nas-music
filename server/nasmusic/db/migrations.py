@@ -356,11 +356,12 @@ def migrate_v4_to_v5(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
     return True
 
 
-# ---------- v5 -> v6 (explicit flags, family mode, automatic tag fixing, duplicates, Jam) ----------
+# ---------- v5 -> v6 (explicit flags, family mode, automatic tag fixing, duplicates, Jam, AI radio) ----------
 
 V6_TABLES = ("track_explicit", "family_mode",
              "fingerprints", "acoustid_lookups", "mb_releases", "autotag_suggestions", "duplicate_hidden",
-             "jams", "jam_guests", "jam_requests", "jam_votes")
+             "jams", "jam_guests", "jam_requests", "jam_votes",
+             "radio_stations", "radio_feedback")
 
 
 def _rebuild_tag_overrides(conn: sqlite3.Connection, stmts: list[str]) -> None:
@@ -377,7 +378,7 @@ def _rebuild_tag_overrides(conn: sqlite3.Connection, stmts: list[str]) -> None:
 
 def migrate_v5_to_v6(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
     """New tables and a rebuild of tag_overrides (data kept, one transaction, foreign keys off). The explicit
-    job fills track_explicit afterwards. Returns True if it migrated."""
+    job fills track_explicit afterwards. AI radio adds two nullable radio_sessions columns. Returns True if it migrated."""
     if current_version(conn) != 5:
         return False
     if make_backup:
@@ -392,6 +393,11 @@ def migrate_v5_to_v6(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
             if current_version(conn) != 5:
                 conn.execute("ROLLBACK")
                 return False
+            if _table_exists(conn, "radio_sessions"):
+                have = _columns(conn, "radio_sessions")
+                for col in ("station_key", "params"):
+                    if col not in have:
+                        conn.execute(f"ALTER TABLE radio_sessions ADD COLUMN {col} TEXT")
             for t in V6_TABLES:
                 if not _table_exists(conn, t):
                     conn.execute(_create_table(stmts, t))

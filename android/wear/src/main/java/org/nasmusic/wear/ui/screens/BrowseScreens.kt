@@ -91,7 +91,11 @@ fun FeedScreen(c: WearContainer, open: (kind: String, id: String) -> Unit, nowPl
                             "track" -> it.track?.let { t -> c.player.playTracks(listOf(t), 0, t.title); nowPlaying() }
                             "radio" -> scope.launch {
                                 val seed = it.seed ?: return@launch
-                                runCatching { c.api.startRadio(RadioRequest(seed)) }.onSuccess { q ->
+                                // AI radio: the smart shuffle ("Play something for now") is told it's on a watch.
+                                val hints = if (seed.type == "moment") java.time.LocalDateTime.now().let { now ->
+                                    org.nasmusic.app.data.api.RadioContext(now.hour, now.dayOfWeek.value, "watch")
+                                } else null
+                                runCatching { c.api.startRadio(RadioRequest(seed, hints)) }.onSuccess { q ->
                                     c.player.playTracks(q.tracks, 0, q.name); nowPlaying()
                                 }.onFailure { c.ui.toast("Couldn't start radio") }
                             }
