@@ -405,7 +405,9 @@ def build_album(conn: sqlite3.Connection, album_id: str, *, transport: httpx.Bas
             try:
                 mb = mb_release(conn, rid, transport, min_interval_s)
             except musicbrainz.LookupError_ as e:
-                raise Stop(str(e)) from e
+                if "error 404" not in str(e):
+                    raise Stop(str(e)) from e
+                mb = None   # release merged/deleted on MusicBrainz: fall back to recording-only suggestions
         group_id = f"{album_id}~{rid or 'none'}"
         confs, rows_out = [], []
         for tid in tids:

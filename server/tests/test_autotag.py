@@ -449,3 +449,22 @@ def test_decided_suggestions_survive_a_rebuild(client, suggested, conn, kcfg, fa
                         (ids["Song 1"],)).fetchone()[0] == "rejected"
     r = client.post("/api/v1/admin/autotag/rematch", json={"trackIds": [ids["Song 2"]]})
     assert r.json() == {"queued": 1}
+
+
+def test_deleted_release_falls_back_to_recording(scanned, conn, kcfg):
+    base = Fake()
+
+    def handler(req):
+        if req.url.host == "musicbrainz.org":
+            return httpx.Response(404, json={"error": "Not Found"})
+        return base(req)
+
+    res = autotag.run(conn, kcfg, transport=httpx.MockTransport(handler), compute=fake_compute,
+                      limiter=acoustid.RateLimiter(0), mb_interval_s=0)
+    assert "stopped" not in res["suggestions"]
+    tid = track_ids(conn)["Song 2"]
+    s = conn.execute("SELECT * FROM autotag_suggestions WHERE track_id = ?", (tid,)).fetchone()
+    sug = json.loads(s["suggested"])
+    assert s["release_mbid"] is None and sug == {"title": "Song Two", "artist": "Artist One", "mb_track": R2,
+                                                  "mb_artist": AR1}
+    assert s["confidence"] < 0.95 * 0.95   # no release: lower
