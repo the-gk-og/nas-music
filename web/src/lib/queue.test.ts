@@ -90,6 +90,17 @@ describe('next/prev', () => {
     expect(nextIndex({ ...m, index: 1 }, 'all', true)).toBe(2);
     expect(prevIndex({ ...m, index: 3 }, 'off')).toBe(0);
   });
+  it('skips tracks hidden by family mode', () => {
+    const m = q(0);
+    m.tracks[1] = { ...m.tracks[1], familyHidden: true };
+    m.tracks[2] = { ...m.tracks[2], familyHidden: true };
+    expect(nextIndex(m, 'off', false)).toBe(3);
+    expect(prevIndex({ ...m, index: 3 }, 'off')).toBe(0);
+    expect(nextIndex({ ...m, index: 3 }, 'all', false)).toBe(0);
+    expect(nextIndex({ ...m, index: 1 }, 'one', false)).toBe(3); // a hidden current track is not repeated
+    const all = { ...m, tracks: m.tracks.map((x) => ({ ...x, familyHidden: true })) };
+    expect(nextIndex(all, 'all', true)).toBeNull();
+  });
   it('prev goes back or wraps', () => {
     expect(prevIndex(q(2), 'off')).toBe(1);
     expect(prevIndex(q(0), 'off')).toBe(0);

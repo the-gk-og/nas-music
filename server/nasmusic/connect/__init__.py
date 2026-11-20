@@ -165,6 +165,10 @@ class Hub:
         for uid in set(uids):
             self._call_soon(self._broadcast, uid, msg)
 
+    def notify_family(self, uid: str, policy: dict) -> None:
+        """Family mode changed (the user or an admin): devices refetch the library / hide tracks."""
+        self._call_soon(self._broadcast, uid, {"type": "family", "family": policy})
+
     def disconnect_device(self, device_id: str) -> None:
         """A device was signed out / revoked: close its socket."""
         self._call_soon(self._close_device, device_id)

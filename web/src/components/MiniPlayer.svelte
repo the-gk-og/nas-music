@@ -6,6 +6,7 @@
   import { player } from '../lib/player.svelte';
   import { ui } from '../lib/ui.svelte';
   import Cover from './Cover.svelte';
+  import ExplicitBadge from './ExplicitBadge.svelte';
 
   const s = $derived(player.shown);
   const pct = $derived(s.duration ? (s.position / s.duration) * 100 : 0);
@@ -29,7 +30,7 @@
     >
       <div class="thumb" style:view-transition-name="np-cover"><Cover albumId={s.track.albumId} size={128} /></div>
       <div class="text">
-        <div class="ellipsis title">{s.track.title}</div>
+        <div class="ellipsis title"><ExplicitBadge status={s.track.explicit} />{s.track.title}</div>
         {#if player.remoteDevice}
           <div class="ellipsis remote"><Speaker size={13} /> {player.remoteLabel}</div>
         {:else}

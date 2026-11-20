@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from nasmusic.core import now_iso
+from nasmusic.db import family
 from nasmusic.library import queries
 
 MAX_QUEUES = 20
@@ -63,8 +64,26 @@ def _move(items: list, frm: int, to: int) -> list:
 
 
 def _tracks(conn: sqlite3.Connection, uid: str, ids: list[str]) -> list[dict]:
-    by_id = queries.tracks_by_ids(conn, uid, ids, include_missing=True)
+    by_id = queries.tracks_by_ids(conn, uid, ids, include_missing=True, hidden="flag")
     return [by_id[i] for i in ids if i in by_id]
+
+
+def _family_keep(conn: sqlite3.Connection, uid: str, ids: list[str], index: int | None) -> tuple[list[str], int | None]:
+    """Family mode: drop tracks the user may not see from a list being written to a queue, keeping `index`
+    on the same track (or the next allowed one). Tracks already in a queue stay, flagged familyHidden."""
+    hidden = family.hidden_among(conn, uid, ids)
+    if not hidden:
+        return ids, index
+    kept, new_index = [], None
+    for n, t in enumerate(ids):
+        if t in hidden:
+            continue
+        if index is not None and new_index is None and n >= index:
+            new_index = len(kept)
+        kept.append(t)
+    if index is not None and new_index is None:
+        new_index = max(len(kept) - 1, 0)
+    return kept, new_index
 
 
 # ---------- queues ----------
@@ -128,6 +147,7 @@ def create_queue(conn: sqlite3.Connection, uid: str, name: str, track_ids: list[
     """New queue in the lowest free slot. With 20 already, the least recently updated queue (never `protect`,
     the one playing) is replaced and its slot reused. `replace_same_name` reuses a queue with that name."""
     _check_tracks(conn, track_ids)
+    track_ids, start_index = _family_keep(conn, uid, list(track_ids), start_index)
     name = name.strip()[:200] or "Queue"
     now = now_iso()
     with _tx(conn):
@@ -160,6 +180,9 @@ def replace_queue_tracks(conn: sqlite3.Connection, uid: str, qid: str, track_ids
     """Replace every track. currentIndex: given, else the current track's new position, else 0."""
     _queue_row(conn, uid, qid)
     _check_tracks(conn, track_ids)
+    if current_index is not None and track_ids and not 0 <= current_index < len(track_ids):
+        raise BadRequest("currentIndex out of range")
+    track_ids, current_index = _family_keep(conn, uid, list(track_ids), current_index)
     with _tx(conn):
         row = _queue_row(conn, uid, qid)
         old = _queue_ids(conn, qid)
@@ -207,6 +230,7 @@ def edit_queue(conn: sqlite3.Connection, uid: str, qid: str, *, add: list[str] |
     _queue_row(conn, uid, qid)
     if add:
         _check_tracks(conn, add)
+        add = family.filter_ids(conn, uid, add)  # family mode (also covers Jam guest adds to a host's queue)
     with _tx(conn):
         row = _queue_row(conn, uid, qid)
         ids = _queue_ids(conn, qid)

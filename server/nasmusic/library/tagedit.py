@@ -132,12 +132,12 @@ def edit(cfg: Config, conn: sqlite3.Connection, user_id: str, track_ids: list[st
          revert: list[str] | None = None) -> dict:
     """Set fields (`set_`: {db_field: value}, value None = clear the tag) and/or revert fields to the file's
     tags (`revert`: db field names, or ["*"] for all) on many tracks in one transaction. For `lyrics` and
-    `cover`, None means revert. Returns {"batchId", "changed"} (number of audit rows)."""
+    `cover` and `explicit`, None means revert. Returns {"batchId", "changed"} (number of audit rows)."""
     set_ = dict(set_ or {})
     revert = list(revert or [])
     for f in list(set_):
         set_[f] = overrides.clean_value(f, set_[f])
-        if f in ("lyrics", "cover") and set_[f] is None:
+        if f in ("lyrics", "cover", "explicit") and set_[f] is None:
             del set_[f]
             revert.append(f)
     if "*" in revert:
@@ -184,6 +184,10 @@ def edit(cfg: Config, conn: sqlite3.Connection, user_id: str, track_ids: list[st
             touched.update((old_al, new_al))
         if touched:
             refresh_albums(cfg, conn, touched)
+        if "explicit" in set_ or "explicit" in revert:
+            from nasmusic.library import explicit
+
+            explicit.recompute(conn, list(track_ids))
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
@@ -229,7 +233,14 @@ def detail(cfg: Config, conn: sqlite3.Connection, track_id: str) -> dict:
                        "updatedAt": meta[f]["updated_at"], "updatedBy": meta[f]["username"]} for f in sorted(ov)],
         "lyrics": ov.get("lyrics"),
         "hasCoverOverride": "cover" in ov,
+        "explicit": _explicit_detail(conn, track_id),
     }
+
+
+def _explicit_detail(conn: sqlite3.Connection, track_id: str) -> dict:
+    from nasmusic.library import explicit
+
+    return explicit.detail(conn, track_id)
 
 
 def history(conn: sqlite3.Connection, track_id: str | None = None, album_id: str | None = None,

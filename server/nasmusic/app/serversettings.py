@@ -14,7 +14,8 @@ from nasmusic.core import get_setting, set_setting
 
 # API key -> Config field
 FIELDS = {"serverName": "server_name", "lanUrl": "lan_public_url", "tunnelUrl": "tunnel_url",
-          "timezone": "timezone", "opusCacheMaxGb": "opus_cache_gb", "lrclib": "lrclib_enabled"}
+          "timezone": "timezone", "opusCacheMaxGb": "opus_cache_gb", "lrclib": "lrclib_enabled",
+          "explicitDeezer": "explicit_deezer"}
 PREFIX = "server."
 
 
@@ -66,9 +67,9 @@ def validate(key: str, value: Any) -> Any:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not 1 <= value <= 2000:
             raise ValueError("opusCacheMaxGb must be a number between 1 and 2000")
         return float(value)
-    if key == "lrclib":
+    if key in ("lrclib", "explicitDeezer"):
         if not isinstance(value, bool):
-            raise ValueError("lrclib must be true or false")
+            raise ValueError(f"{key} must be true or false")
         return value
     raise ValueError(key)
 
@@ -93,7 +94,8 @@ def apply(base: Config, ov: dict[str, Any]) -> Config:
 
 def values(cfg: Config) -> dict:
     return {"lanUrl": cfg.lan_url, "tunnelUrl": cfg.tunnel_url, "timezone": cfg.timezone,
-            "opusCacheMaxGb": cfg.opus_cache_gb, "lrclib": cfg.lrclib_enabled, "serverName": cfg.server_name}
+            "opusCacheMaxGb": cfg.opus_cache_gb, "lrclib": cfg.lrclib_enabled, "explicitDeezer": cfg.explicit_deezer,
+            "serverName": cfg.server_name}
 
 
 def view(base: Config, ov: dict[str, Any]) -> dict:

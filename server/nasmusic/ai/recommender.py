@@ -92,6 +92,15 @@ class Signals:
     n_feedback: int
     n_plays: int                  # all of the user's plays (any length), for the new-user threshold
     events: list[tuple]           # (datetime, Context, lib index, type, label or None)
+    hidden: np.ndarray | None = None   # bool: hidden from this user by family mode (nasmusic.db.family)
+
+    @property
+    def excluded(self) -> np.ndarray:
+        """Never pick these: thumbs-down OR hidden by family mode. Training still uses `blocked` only (a
+        family-mode track isn't a dislike)."""
+        if self.hidden is None:
+            return self.blocked
+        return self.blocked | self.hidden
 
 
 def play_completion(position_s: float | None, duration_s: float | None) -> float:
@@ -502,6 +511,17 @@ def train_learned(lib: Library, sig: Signals, model: TasteModel, settings: Setti
 
 # ---------------------------------------------------------------- engine facade
 
+
+def family_mask(conn: sqlite3.Connection, user_id: str | None, lib: Library) -> np.ndarray | None:
+    """Bool mask over the library of tracks this user's family mode hides (None = nothing hidden)."""
+    from nasmusic.db import family
+
+    hidden = family.all_hidden(conn, user_id)
+    if not hidden or not len(lib):
+        return None
+    return np.array([t in hidden for t in lib.ids], dtype=bool)
+
+
 class Recommender:
     """Everything the mix builder needs for one user and one run."""
 
@@ -520,6 +540,7 @@ class Recommender:
         self.lib = load_library(conn, self.version)
         self.disabled = cx.disabled_fields(user_settings)
         self.sig = collect_signals(self.store, user_id, self.lib, self.settings, self.tz, self.now, self.disabled)
+        self.sig.hidden = family_mask(conn, user_id, self.lib)
         self.is_new_user = self.sig.n_plays < self.settings.int("ai.rec.new_user_plays")
         self.popularity = np.zeros(len(self.lib))
         if self.is_new_user and len(self.lib):
@@ -633,7 +654,7 @@ class Recommender:
         fresh = np.where(np.isfinite(days), -0.3 * np.clip(1 - days / window, 0, 1),
                          s.num("ai.rec.never_played_boost"))
         out = base + fresh
-        return np.where(self.sig.blocked, -np.inf, out)
+        return np.where(self.sig.excluded, -np.inf, out)
 
     def similar(self, i: int, k: int = 3, exclude_same_album: bool = True) -> list[int]:
         if not len(self.lib):
@@ -643,6 +664,6 @@ class Recommender:
         if exclude_same_album:
             album = self.lib.album[i]
             sims[[j for j, a in enumerate(self.lib.album) if a == album]] = -np.inf
-        sims[self.sig.blocked] = -np.inf
+        sims[self.sig.excluded] = -np.inf
         order = np.argsort(-sims)
         return [int(j) for j in order[:k] if np.isfinite(sims[j])]

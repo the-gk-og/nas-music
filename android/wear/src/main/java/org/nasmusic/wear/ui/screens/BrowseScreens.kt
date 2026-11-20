@@ -140,7 +140,7 @@ fun AlbumsScreen(c: WearContainer, open: (kind: String, id: String) -> Unit) {
         val list = albums
         if (list == null) loading()
         else if (list.isEmpty()) message("No albums (or offline).")
-        else list.forEach { a -> item { NavChip(a.title, a.artist, artAlbumId = a.id) { open(ListKinds.ALBUM, a.id) } } }
+        else list.forEach { a -> item { NavChip(if (a.explicit) "🅴 ${a.title}" else a.title, a.artist, artAlbumId = a.id) { open(ListKinds.ALBUM, a.id) } } }
     }
 }
 
@@ -191,7 +191,7 @@ fun TrackListScreen(c: WearContainer, kind: String, id: String, nowPlaying: () -
         }
         tracks.forEachIndexed { i, t ->
             item {
-                NavChip(t.title, t.artist, icon = if (c.offline.localFile(t.id) != null) Icons.Filled.DownloadDone else null) {
+                NavChip(if (t.isExplicit) "🅴 ${t.title}" else t.title, t.artist, icon = if (c.offline.localFile(t.id) != null) Icons.Filled.DownloadDone else null) {
                     c.player.playTracks(tracks, i, name); nowPlaying()
                 }
             }

@@ -3,6 +3,7 @@ tags (the library is read-only); see nasmusic.library.tagedit."""
 from __future__ import annotations
 
 import sqlite3
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -28,6 +29,7 @@ class TagValues(BaseModel):
     year: int | None = Field(default=None, ge=0, le=9999)
     genre: str | None = Field(default=None, max_length=500)
     lyrics: str | None = Field(default=None, max_length=200_000)
+    explicit: Literal["explicit", "clean"] | None = None   # v6: admin verdict; null = back to automatic
 
 
 RevertField = str

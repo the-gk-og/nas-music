@@ -194,6 +194,10 @@ fun SettingsScreen(c: AppContainer) {
         OutlinedButton(enabled = settings.offlineFavourites || settings.smartDownloads, onClick = { SyncScheduler.syncNow(c.context) }) { Text("Sync now") }
 
         HorizontalDivider()
+        Section("Family mode")
+        org.nasmusic.app.ui.FamilySettings(c)
+
+        HorizontalDivider()
         Section("Playback")
         PlaybackSettings(c)
 

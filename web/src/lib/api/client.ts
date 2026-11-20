@@ -13,6 +13,7 @@ import type {
   ToGetItem,
   ToGetStatus,
   DataSummary,
+  FamilyMode,
   AdminUser,
   Album,
   Artist,
@@ -273,6 +274,10 @@ export class ApiClient {
   /** Merge keys (null deletes). */
   putSettings = (b: { settings: Record<string, unknown> }) => this.put<{ settings: Record<string, unknown> }>('/me/settings', b);
   dataSummary = () => this.get<DataSummary>('/me/data');
+  /** v6 family mode (locked: loosening needs the admin-set PIN). */
+  family = () => this.get<FamilyMode>('/me/family');
+  putFamily = (b: Partial<Pick<FamilyMode, 'enabled' | 'hideProbable' | 'hideUnknown'>> & { pin?: string }) =>
+    this.put<FamilyMode>('/me/family', b);
   dataExportUrl = () => `${this.base}/me/data/export`;
   dataExport = () => this.get<unknown>('/me/data/export');
   deleteData = (signal: string) =>

@@ -47,6 +47,10 @@ def manifest(conn: sqlite3.Connection, uid: str, favourites_format: str = "opus"
                                     "mixIds": []}
         else:
             it["format"], it["why"] = favourites_format, "favourite"
+    from nasmusic.db import family
+
+    for tid in family.hidden_among(conn, uid, list(items)):  # family mode: never download hidden tracks
+        del items[tid]
     for tid, it in items.items():
         f = files[tid]
         it["durationS"] = f["duration_s"]

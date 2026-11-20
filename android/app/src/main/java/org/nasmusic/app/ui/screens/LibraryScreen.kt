@@ -157,7 +157,7 @@ private fun AlbumsSection(c: AppContainer, view: String, sort: String) {
         failed -> Message("Albums need a connection to the server.")
         a == null -> Loading()
         else -> GridOrList(a, view == "grid", { it.id },
-            cell = { ShelfCard(c, ShelfItem("album", it.id, it.title, it.artist, artUrl = org.nasmusic.app.data.FeedRepository.art(it.id)), width = 150.dp) },
+            cell = { ShelfCard(c, ShelfItem("album", it.id, it.title, it.artist, artUrl = org.nasmusic.app.data.FeedRepository.art(it.id), album = it), width = 150.dp) },
             row = { al -> ListRow(al.title, listOfNotNull(al.artist, al.year?.toString()).joinToString(" · "), { AlbumArt(al.id, 52.dp) }) { ui.go("album/${al.id}") } })
     }
 }

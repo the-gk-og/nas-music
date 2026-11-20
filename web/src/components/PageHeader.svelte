@@ -10,6 +10,7 @@
   import type { ShelfItem } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
   import Art from './Art.svelte';
+  import ExplicitBadge from './ExplicitBadge.svelte';
 
   let {
     item,
@@ -54,7 +55,7 @@
     <div class="art" class:round={kind === 'artist'}><Art {item} size={style === 'big' ? 512 : 256} round={kind === 'artist'} /></div>
     <div class="txt">
       <div class="label">{label}</div>
-      <h1>{item.title}</h1>
+      <h1><ExplicitBadge status={item.album?.explicit} />{item.title}</h1>
       {#if item.subtitle || meta}<div class="meta">{item.subtitle}{item.subtitle && meta ? ' · ' : ''}{meta}</div>{/if}
     </div>
   </div>

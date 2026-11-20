@@ -45,6 +45,8 @@ data class Album(
     val durationS: Double? = null,
     val hasArt: Boolean = false,
     val mbid: String? = null,
+    /** api 0.6: contains explicit tracks (of those this user can see) — "E" badge. */
+    val explicit: Boolean = false,
 )
 
 @Serializable
@@ -59,6 +61,7 @@ data class AlbumDetail(
     val hasArt: Boolean = false,
     val mbid: String? = null,
     val tracks: List<Track> = emptyList(),
+    val explicit: Boolean = false,
 )
 
 @Serializable
@@ -82,6 +85,30 @@ data class Track(
     val missing: Boolean = false,
     /** api 0.5: volume levelling (ReplayGain 2.0 scale); null until the server has measured the track. */
     val replayGain: ReplayGain? = null,
+    /** api 0.6: explicit | probable | clean | unknown ("probable" = lyrics word list, not certain). */
+    val explicit: String? = null,
+    /** api 0.6, queues/playlists only: hidden by this user's family mode — the player skips it. */
+    val familyHidden: Boolean = false,
+) {
+    val isExplicit: Boolean get() = explicit == "explicit"
+}
+
+/** api 0.6 family mode. Locked = set by an admin; loosening it needs the admin's PIN. */
+@Serializable
+data class FamilyMode(
+    val enabled: Boolean = false,
+    val hideProbable: Boolean = true,
+    val hideUnknown: Boolean = false,
+    val locked: Boolean = false,
+    val hasPin: Boolean = false,
+)
+
+@Serializable
+data class FamilyUpdate(
+    val enabled: Boolean? = null,
+    val hideProbable: Boolean? = null,
+    val hideUnknown: Boolean? = null,
+    val pin: String? = null,
 )
 
 @Serializable

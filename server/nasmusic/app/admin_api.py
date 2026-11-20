@@ -22,12 +22,12 @@ from nasmusic.app.logbuffer import BUFFER
 from nasmusic.app.scheduler import JOB_NAMES
 from nasmusic.auth import users
 from nasmusic.core import get_setting, set_setting
-from nasmusic.library import lrclib, queries
+from nasmusic.library import explicit, lrclib, queries
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(admin_device)])
 Conn = sqlite3.Connection
 JobName = Literal["scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "discovery", "release_radar",
-                  "blends", "lyrics", "cleanup", "backup"]
+                  "blends", "lyrics", "cleanup", "backup", "explicit"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 KEEP_BACKUPS = 5
 
@@ -156,6 +156,7 @@ def status(conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
         "library": {**stats, "lastScan": get_setting(conn, "job.scan")},
         "analysis": {**a, "done": a["analysed"], "modelVersion": a["model"]},
         "lyrics": {"lrclibEnabled": c.cfg.lrclib_enabled, **lrclib.stats(conn)},
+        "explicit": {"deezerEnabled": c.cfg.explicit_deezer, **explicit.counts(conn)},
         "jobs": all_jobs(conn, c),
     }
 
@@ -483,7 +484,8 @@ def put_server_settings(body: dict[str, Any], conn: Conn = Depends(db), c: AppCo
         if c.cfg.timezone != old_tz:
             c.jobs.reschedule()
     v = serversettings.view(c.base_cfg or c.cfg, ov)
-    return {"values": {k: v[k] for k in ("lanUrl", "tunnelUrl", "timezone", "opusCacheMaxGb", "lrclib", "serverName")},
+    return {"values": {k: v[k] for k in ("lanUrl", "tunnelUrl", "timezone", "opusCacheMaxGb", "lrclib", "explicitDeezer",
+                                         "serverName")},
             "restartRequired": [], "overrides": v["overrides"], "fromConfig": v["fromConfig"]}
 
 

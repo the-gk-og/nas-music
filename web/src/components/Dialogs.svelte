@@ -21,6 +21,8 @@
     Shield,
     SlidersVertical,
     UserRound,
+    Baby,
+    Lock,
     Share2,
     Sparkles,
     Speaker,
@@ -32,6 +34,7 @@
   import { parseLrc, stampLine } from '../lib/lyrics';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
+  import { family } from '../lib/family.svelte';
   import type { Playlist, TrackInfo } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
   import { queueLabel } from '../lib/queue';
@@ -375,6 +378,7 @@
       <button onclick={() => ui.open({ kind: 'devices' })}><Speaker />Devices</button>
       <button onclick={() => goto('toget', '')}><ListEnd />To get</button>
       <button onclick={() => goto('account', '')}><UserRound />Account</button>
+      <button onclick={() => void family.toggle()} aria-pressed={family.mode.enabled}>{#if family.mode.locked}<Lock />{:else}<Baby />{/if}Family mode: {family.mode.enabled ? 'on' : 'off'}</button>
       {#if session.isAdmin}<button onclick={() => goto('admin', '')}><Shield />Admin</button>{/if}
       <hr />
       <button onclick={logout}><LogOut />Sign out</button>

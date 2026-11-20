@@ -21,12 +21,14 @@ from nasmusic.stream.transcode import OpusCache
 log = logging.getLogger(__name__)
 
 JOB_NAMES = ("scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "lyrics", "discovery", "release_radar",
-             "blends", "cleanup", "backup")
+             "blends", "cleanup", "backup", "explicit")
 # The loudness job runs after every scan; a first pass over a big library takes hours, so each run stops
 # after this long and the next scan (or the nightly chain) carries on.
 LOUDNESS_BUDGET_S = 50 * 60
 HISTORY = 20
 LYRICS_PER_RUN = 200
+# The explicit-content job (file tags, Deezer, lyrics word list) is resumable: each run stops after this.
+EXPLICIT_BUDGET_S = 20 * 60
 
 
 class Jobs:
@@ -57,6 +59,14 @@ class Jobs:
         from nasmusic.library import loudness
 
         return loudness.run(conn, self.cfg.library_root, time_budget_s=LOUDNESS_BUDGET_S)
+
+    def _explicit(self, conn):
+        from nasmusic.library import explicit
+
+        deezer = None
+        if self.cfg.explicit_deezer:
+            deezer = explicit.Deezer(transport=getattr(self, "http_transport", None))
+        return explicit.run(conn, self.cfg.library_root, deezer, time_budget_s=EXPLICIT_BUDGET_S)
 
     def _nightly(self, conn):
         return {"mixIds": ai_adapter.run_nightly(conn, ai_config(self.cfg))}
@@ -149,6 +159,7 @@ class Jobs:
             "lyrics": self._lyrics,
             "cleanup": self._cleanup,
             "backup": self._backup,
+            "explicit": self._explicit,
         }[name]
 
     # ----- running -----
@@ -188,11 +199,13 @@ class Jobs:
         if name in ("scan", "full_scan") and rec["ok"]:
             self.trigger("analyse", "chained")
             self.trigger("loudness", "chained")
+            self.trigger("explicit", "chained")
         if name == "nightly" and rec["ok"]:
             self.trigger("pretranscode", "chained")
             self.trigger("lyrics", "chained")
             self.trigger("blends", "chained")
             self.trigger("loudness", "chained")
+            self.trigger("explicit", "chained")
         return rec
 
     def trigger(self, name: str, how: str = "manual") -> bool:

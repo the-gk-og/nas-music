@@ -169,7 +169,7 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
         album = runCatching { c.api.album(albumId) }.getOrNull()
         album?.let { a ->
             more = runCatching { c.api.artist(a.artistId).albums }.getOrDefault(emptyList())
-                .filter { it.id != a.id }.map { ShelfItem("album", it.id, it.title, it.year?.toString(), artUrl = org.nasmusic.app.data.FeedRepository.art(it.id)) }
+                .filter { it.id != a.id }.map { ShelfItem("album", it.id, it.title, it.year?.toString(), artUrl = org.nasmusic.app.data.FeedRepository.art(it.id), album = it) }
         }
     }
     val a = album ?: return Loading()
@@ -177,7 +177,7 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
     val play = { c.player.play(a.tracks, 0, PlaySource.LIBRARY, name) }
     val shuffle = { c.player.play(a.tracks.shuffled(), 0, PlaySource.LIBRARY, name) }
     val radio = { startRadio(c, ui, scope, RadioSeed("album", a.id)); Unit }
-    val meta = listOfNotNull(a.year?.toString(), "${a.tracks.size} songs").joinToString(" · ")
+    val meta = listOfNotNull(if (a.explicit) "Explicit" else null, a.year?.toString(), "${a.tracks.size} songs").joinToString(" · ")
     val menu: @Composable () -> Unit = {
         PageMenu(style, { style = it }) { close ->
             DropdownMenuItem({ Text("Add all to queue") }, { close(); c.player.addToQueue(a.tracks) })
@@ -233,7 +233,7 @@ fun ArtistScreen(c: AppContainer, artistId: String) {
         }
         item {
             ShelfHeader("Albums")
-            ShelfRow(c, a.albums.sortedByDescending { it.year ?: 0 }.map { ShelfItem("album", it.id, it.title, it.year?.toString(), artUrl = org.nasmusic.app.data.FeedRepository.art(it.id)) })
+            ShelfRow(c, a.albums.sortedByDescending { it.year ?: 0 }.map { ShelfItem("album", it.id, it.title, it.year?.toString(), artUrl = org.nasmusic.app.data.FeedRepository.art(it.id), album = it) })
         }
         item {
             ShelfHeader("Artist radio")

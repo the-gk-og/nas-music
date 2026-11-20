@@ -22,7 +22,7 @@ def test_v4_to_v5(tmp_path):
     make_v4(path).close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 5
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION  # v5, then on to the current version
     for t in ("release_radar", "blends", "blend_members", "blend_tracks"):
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
     assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'blend_members_user'").fetchone()

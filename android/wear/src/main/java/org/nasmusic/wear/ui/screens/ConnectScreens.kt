@@ -82,7 +82,7 @@ fun QueueScreen(c: WearContainer, done: () -> Unit) {
             t.isEmpty() -> message("Nothing queued.")
             else -> t.forEachIndexed { i, track ->
                 item {
-                    NavChip(track.title, track.artist, primary = i == ui.index) { c.player.jumpTo(i); done() }
+                    NavChip(if (track.isExplicit) "🅴 ${track.title}" else track.title, track.artist, primary = i == ui.index) { c.player.jumpTo(i); done() }
                 }
             }
         }

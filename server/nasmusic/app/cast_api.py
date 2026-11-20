@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from nasmusic.app.context import AppContext, admin_device, ctx, db, device
+from nasmusic.auth import Device
 from nasmusic.cast import CastHooks, Media, SpeakerRegistry
 from nasmusic.cast import signing
 from nasmusic.config import Config
@@ -230,9 +231,13 @@ def sign_base(request: Request, cfg: Config) -> str:
 
 @router.post("/cast/sign")
 def sign_urls(body: SignBody, request: Request, c: AppContext = Depends(ctx),
-              conn: sqlite3.Connection = Depends(db)):
-    """Signed media + art URLs for tracks, for a client that casts by itself (the Google Cast button)."""
+              conn: sqlite3.Connection = Depends(db), me: Device = Depends(device)):
+    """Signed media + art URLs for tracks, for a client that casts by itself (the Google Cast button).
+    Family mode: tracks the user may not see get no link."""
+    from nasmusic.db import family
+
     key = cast_key(c)
+    hidden = family.hidden_among(conn, me.user_id, body.trackIds)
     base = sign_base(request, c.cfg)
     marks = ",".join("?" * len(body.trackIds))
     rows = {
@@ -245,7 +250,7 @@ def sign_urls(body: SignBody, request: Request, c: AppContext = Depends(ctx),
     out = []
     for tid in body.trackIds:
         r = rows.get(tid)
-        if r is None:
+        if r is None or tid in hidden:
             continue
         ttl = _ttl(c.cfg, r["duration_s"])
         ctype = media_type(r["path"]) if body.format == "original" else FORMAT_TYPES[body.format]

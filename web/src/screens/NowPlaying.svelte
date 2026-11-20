@@ -27,6 +27,7 @@
   import { player } from '../lib/player.svelte';
   import { ui } from '../lib/ui.svelte';
   import Lyrics from './Lyrics.svelte';
+  import ExplicitBadge from '../components/ExplicitBadge.svelte';
 
   const s = $derived(player.shown);
   const t = $derived(s.track);
@@ -101,7 +102,7 @@
 
   <div class="meta">
     {#if t}
-      <h2 class="ellipsis">{t.title}</h2>
+      <h2 class="ellipsis"><ExplicitBadge status={t.explicit} />{t.title}</h2>
       <button class="link ellipsis" onclick={() => ui.go('artist', t.artistId)}>{t.artist}</button>
       <button class="link ellipsis" onclick={() => ui.go('album', t.albumId)}>{t.album}</button>
     {:else}

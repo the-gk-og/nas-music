@@ -111,6 +111,12 @@ interface NasMusicApi {
     @GET("me/settings")
     suspend fun mySettings(): UserSettings
 
+    @GET("me/family")
+    suspend fun family(): FamilyMode
+
+    @PUT("me/family")
+    suspend fun putFamily(@Body body: FamilyUpdate): FamilyMode
+
     @PUT("me/settings")
     suspend fun putMySettings(@Body body: UserSettings): Response<Unit>
 

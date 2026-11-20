@@ -6,6 +6,7 @@
   import type { ShelfItem } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
   import Art from './Art.svelte';
+  import ExplicitBadge from './ExplicitBadge.svelte';
 
   let { item, siblings, wide = false }: { item: ShelfItem; siblings?: ShelfItem[]; wide?: boolean } = $props();
   const playable = $derived(isPlayable(item));
@@ -20,7 +21,7 @@
     onkeydown={(e) => e.key === 'Enter' && openItem(item, siblings)}
   >
     <Art {item} round={item.type === 'artist'} />
-    <div class="t ellipsis">{item.title}</div>
+    <div class="t ellipsis"><ExplicitBadge status={item.album?.explicit || item.track?.explicit} />{item.title}</div>
     {#if item.subtitle}<div class="s ellipsis">{item.subtitle}</div>{/if}
     {#if prog != null}<div class="prog"><span style:width="{Math.round(prog * 100)}%"></span></div>{/if}
   </button>

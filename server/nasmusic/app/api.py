@@ -15,6 +15,7 @@ from nasmusic.app import events as events_mod
 from nasmusic.app.context import AppContext, ctx, db, device
 from nasmusic.auth import Device
 from nasmusic.core import ai_config, now_iso
+from nasmusic.db import family
 from nasmusic.library import art, lrclib, lyrics, overrides, queries
 from nasmusic.stream import clamp_bitrate, media_type
 from nasmusic.stream.transcode import TranscodeError
@@ -44,19 +45,20 @@ def health(c: AppContext = Depends(ctx)):
 
 
 @router.get("/library/artists")
-def list_artists(offset: int = Offset, limit: int = Limit, conn: Conn = Depends(db)):
-    return queries.artists(conn, offset, limit)
+def list_artists(offset: int = Offset, limit: int = Limit, me: Device = Depends(device), conn: Conn = Depends(db)):
+    return queries.artists(conn, offset, limit, uid=me.user_id)
 
 
 @router.get("/library/artists/{artist_id}")
-def get_artist(artist_id: str, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
-    return queries.artist(conn, artist_id, c.data_dir) or _404()
+def get_artist(artist_id: str, me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    return queries.artist(conn, artist_id, c.data_dir, uid=me.user_id) or _404()
 
 
 @router.get("/library/albums")
 def list_albums(artistId: str | None = None, sort: Literal["name", "year", "added"] = "name",
-                offset: int = Offset, limit: int = Limit, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
-    return queries.albums(conn, c.data_dir, artistId, sort, offset, limit)
+                offset: int = Offset, limit: int = Limit, me: Device = Depends(device), conn: Conn = Depends(db),
+                c: AppContext = Depends(ctx)):
+    return queries.albums(conn, c.data_dir, artistId, sort, offset, limit, uid=me.user_id)
 
 
 @router.get("/library/albums/{album_id}")
@@ -86,8 +88,8 @@ def folders(path: str = Query("", max_length=4096), me: Device = Depends(device)
 
 
 @router.get("/library/genres")
-def genres(conn: Conn = Depends(db)):
-    return queries.genres(conn)
+def genres(me: Device = Depends(device), conn: Conn = Depends(db)):
+    return queries.genres(conn, me.user_id)
 
 
 @router.get("/library/genres/{genre:path}/tracks")
@@ -111,12 +113,21 @@ def smart_list(kind: Literal["favourites", "recently_added", "recently_played", 
 # ---------- audio + art ----------
 
 
+def family_guard(conn: Conn, uid: str, track_ids: list[str]) -> None:
+    """A user whose family mode an admin has LOCKED cannot stream (or cast) tracks it hides: 403. Unlocked
+    family mode only hides them (the user could turn it off anyway)."""
+    p = family.policy(conn, uid)
+    if p.locked and family.hidden_among(conn, p, track_ids):
+        raise HTTPException(403, "blocked by family mode")
+
+
 @router.get("/stream/{track_id}")
 def stream(track_id: str, format: Literal["opus", "flac"] = "opus", bitrate: int = Query(160, ge=1, le=1000),
-           conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+           me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
     row = queries.track_file(conn, track_id)
     if row is None:
         _404()
+    family_guard(conn, me.user_id, [track_id])
     src = c.cfg.library_root / row["path"]
     if not src.is_file():
         _404("file missing")

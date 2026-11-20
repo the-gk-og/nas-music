@@ -100,29 +100,53 @@ export function shuffleOrder(len: number, current: number, rng: () => number = M
  * Index of the track that follows `index`, honouring repeat and shuffle order; null at the end.
  * `manual` = user pressed next (repeat-one doesn't hold the track then).
  */
-export function nextIndex(q: QueueModel, repeat: RepeatMode, manual: boolean): number | null {
+function stepNext(q: QueueModel, from: number, repeat: RepeatMode): number | null {
   const n = q.tracks.length;
-  if (!n) return null;
-  if (repeat === 'one' && !manual) return q.index;
   if (q.order && q.order.length === n) {
-    const p = q.order.indexOf(q.index);
+    const p = q.order.indexOf(from);
     if (p + 1 < n) return q.order[p + 1];
     return repeat !== 'off' ? q.order[0] : null;
   }
-  if (q.index + 1 < n) return q.index + 1;
+  if (from + 1 < n) return from + 1;
   return repeat !== 'off' ? 0 : null;
+}
+
+function stepPrev(q: QueueModel, from: number, repeat: RepeatMode): number | null {
+  const n = q.tracks.length;
+  if (q.order && q.order.length === n) {
+    const p = q.order.indexOf(from);
+    if (p > 0) return q.order[p - 1];
+    return repeat !== 'off' ? q.order[n - 1] : null;
+  }
+  if (from > 0) return from - 1;
+  return repeat !== 'off' ? n - 1 : null;
+}
+
+/** Family mode: tracks the server flags `familyHidden` are skipped. */
+const hidden = (q: QueueModel, i: number) => !!q.tracks[i]?.familyHidden;
+
+export function nextIndex(q: QueueModel, repeat: RepeatMode, manual: boolean): number | null {
+  const n = q.tracks.length;
+  if (!n) return null;
+  if (repeat === 'one' && !manual && !hidden(q, q.index)) return q.index;
+  let i: number | null = q.index;
+  for (let k = 0; k < n; k++) {
+    i = stepNext(q, i, repeat === 'one' ? 'all' : repeat);
+    if (i == null || !hidden(q, i)) return i;
+  }
+  return null;
 }
 
 export function prevIndex(q: QueueModel, repeat: RepeatMode): number | null {
   const n = q.tracks.length;
   if (!n) return null;
-  if (q.order && q.order.length === n) {
-    const p = q.order.indexOf(q.index);
-    if (p > 0) return q.order[p - 1];
-    return repeat !== 'off' ? q.order[n - 1] : 0;
+  let i: number | null = q.index;
+  for (let k = 0; k < n; k++) {
+    i = stepPrev(q, i, repeat);
+    if (i == null) break;
+    if (!hidden(q, i)) return i;
   }
-  if (q.index > 0) return q.index - 1;
-  return repeat !== 'off' ? n - 1 : 0;
+  return hidden(q, 0) ? q.index : 0;
 }
 
 /** "20. Search: conver" */

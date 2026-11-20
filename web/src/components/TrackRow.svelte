@@ -3,6 +3,7 @@
   import { fmtTime } from '../lib/format';
   import type { Track } from '../lib/types';
   import Cover from './Cover.svelte';
+  import ExplicitBadge from './ExplicitBadge.svelte';
 
   let {
     track,
@@ -46,7 +47,7 @@
   }
 </script>
 
-<div class="row" class:current role="listitem">
+<div class="row" class:current class:hidden={track.familyHidden} role="listitem" title={track.familyHidden ? 'Hidden by family mode — skipped' : undefined}>
   {#if handle}
     <button class="handle" aria-label="Drag to reorder" onpointerdown={onhandledown}><Equal size={24} /></button>
   {/if}
@@ -64,7 +65,7 @@
   >
     <div class="thumb"><Cover albumId={track.albumId} size={128} /></div>
     <div class="text">
-      <div class="title ellipsis">{track.title}</div>
+      <div class="title ellipsis"><ExplicitBadge status={track.explicit} />{track.title}</div>
       <div class="artist ellipsis">{track.artist}</div>
       {#if showAlbum}
         <div class="album"><span class="ellipsis">{track.album}</span><span class="dur">{fmtTime(track.durationS)}</span></div>
@@ -86,6 +87,9 @@
     border-radius: 12px;
     padding: 4px 6px 4px 0;
     background: var(--bg);
+  }
+  .row.hidden {
+    opacity: 0.4;
   }
   .row.current {
     border-color: var(--accent);

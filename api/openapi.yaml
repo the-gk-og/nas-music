@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,6 +10,13 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    0.6.0 (schema v6): explicit-content flags and family mode. Track gains `explicit`
+    (explicit|probable|clean|unknown; show an "E" badge for explicit) and, in queues/playlists only,
+    `familyHidden`; Album gains `explicit` (contains explicit tracks). With family mode on, the server hides
+    the tracks the user's policy hides from browse/search/smart lists/mixes/Home/radio/sync manifest, drops
+    them from new queues and queue adds, flags them `familyHidden` where they already are (clients skip them),
+    and, when an admin has LOCKED family mode, refuses /stream and cast links for them (403). Connect pushes
+    `{"type": "family", "family": FamilyMode}` when it changes.
     0.5.0 (schema v5): admin tag editing (/admin/tags/*; edits are server-side overrides, every track/album/
     artist/search response shows the effective tags) and collaborative playlists (members, entry ids,
     conflict-safe entry operations, activity, Connect `playlist` messages). Old index-based playlist calls work.
@@ -526,6 +533,37 @@ paths:
         '200':
           description: settings after the merge
           content: { application/json: { schema: { $ref: '#/components/schemas/UserSettings' } } }
+  /me/family:
+    get:
+      summary: v6. The caller's family mode.
+      responses:
+        '200':
+          description: family mode
+          content: { application/json: { schema: { $ref: '#/components/schemas/FamilyMode' } } }
+    put:
+      summary: |
+        v6. Change family mode (any subset). When an admin has locked it, the user may only tighten it;
+        loosening (enabled false, hideProbable/hideUnknown false) needs `pin` (the admin-set unlock PIN):
+        403 without/with a wrong PIN or when there is no PIN (admin-only unlock), 429 after 5 wrong PINs a
+        minute. Turning it off with the PIN also removes the lock.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                enabled: { type: boolean }
+                hideProbable: { type: boolean, description: 'also hide "probably explicit" (lyrics word list) tracks' }
+                hideUnknown: { type: boolean, description: also hide tracks nobody has classified yet }
+                pin: { type: string, maxLength: 12 }
+      responses:
+        '200':
+          description: family mode after the change
+          content: { application/json: { schema: { $ref: '#/components/schemas/FamilyMode' } } }
+        '403': { description: locked (wrong or missing PIN) }
+        '429': { description: too many wrong PINs }
   /me/data:
     get:
       summary: What has been collected about the user (counts per context signal and date range).
@@ -1466,12 +1504,90 @@ paths:
           description: tags
           content: { application/json: { schema: { $ref: '#/components/schemas/TrackTagDetail' } } }
         '403': { description: not an admin }
+  /admin/family:
+    get:
+      summary: Admin only (v6). Every user's family mode.
+      responses:
+        '200':
+          description: users
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AdminFamilyUser' } } } }
+  /admin/users/{userId}/family:
+    put:
+      summary: |
+        Admin only (v6). Set a user's family mode. `locked: true` turns it on and stops the user from loosening
+        it (e.g. a child's account); `pin` (4-12 digits) lets someone unlock it on the user's device;
+        `clearPin: true` makes it admin-only.
+      parameters: [ { name: userId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                enabled: { type: boolean }
+                hideProbable: { type: boolean }
+                hideUnknown: { type: boolean }
+                locked: { type: boolean }
+                pin: { type: string, pattern: '^[0-9]{4,12}$' }
+                clearPin: { type: boolean }
+      responses:
+        '200':
+          description: the user's family mode
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminFamilyUser' } } }
+        '404': { description: no such user }
+  /admin/explicit:
+    get:
+      summary: |
+        Admin only (v6). Explicit-flag review list with each source's evidence. Default: probable + unknown
+        (probable first). Sources in priority order: admin, tags, deezer, lyrics.
+      parameters:
+        - { name: status, in: query, schema: { type: array, items: { $ref: '#/components/schemas/ExplicitStatus' } }, style: form, explode: true }
+        - { name: source, in: query, schema: { type: string, enum: [admin, tags, deezer, lyrics, none] } }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0, minimum: 0 } }
+      responses:
+        '200':
+          description: review list
+          content: { application/json: { schema: { $ref: '#/components/schemas/ExplicitReview' } } }
+    post:
+      summary: |
+        Admin only (v6). Set (or with `value: null`, clear) the admin verdict on tracks and/or whole albums.
+        Stored as the tag override `explicit` (audit log, /admin/tags/history), which beats every automatic source.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              additionalProperties: false
+              properties:
+                trackIds: { type: array, items: { type: string }, maxItems: 5000 }
+                albumIds: { type: array, items: { type: string }, maxItems: 500 }
+                value: { type: [string, 'null'], enum: [explicit, clean, null] }
+      responses:
+        '200':
+          description: done
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/TagEditResult'
+                  - type: object
+                    properties:
+                      tracks: { type: integer }
+                      status: { type: [object, 'null'], additionalProperties: { $ref: '#/components/schemas/ExplicitStatus' }, description: 'per track (null for more than 500)' }
+        '404': { description: unknown track or album }
+        '422': { description: no tracks / bad value }
   /admin/tags/edit:
     post:
       summary: |
         Admin only (v5). Edit and/or revert tags on one or many tracks (bulk = multi-select) in one logged
         batch. `revert` lists field names (title, artist, albumArtist, album, trackNo, discNo, year, genre,
-        lyrics, cover) to put back to the file's tags; ["*"] = all ("revert to file tags"). Editing artist,
+        lyrics, cover, explicit) to put back to the file's tags; ["*"] = all ("revert to file tags"). Editing artist,
         album artist or album regroups tracks into albums/artists (album and artist ids may change; track ids
         never do). Overriding an artist drops the file's MusicBrainz artist id for it.
       requestBody:
@@ -1627,7 +1743,7 @@ paths:
     post:
       summary: Admin only. Start a job now (background). `backup` makes a manual database backup.
       parameters:
-        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, discovery, release_radar, blends, lyrics, cleanup, backup] } }
+        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, discovery, release_radar, blends, lyrics, cleanup, backup, explicit] } }
       responses:
         '200':
           description: the job's status (state running, or idle if it already finished)
@@ -1913,6 +2029,15 @@ components:
             configured: { type: string }
             fallbackReason: { type: [string, 'null'] }
             running: { type: boolean }
+        explicit:
+          type: object
+          description: v6 explicit-flag counts over present tracks
+          properties:
+            deezerEnabled: { type: boolean }
+            explicit: { type: integer }
+            probable: { type: integer }
+            clean: { type: integer }
+            unknown: { type: integer }
         lyrics:
           type: object
           properties:
@@ -2010,6 +2135,7 @@ components:
         timezone: { type: [string, 'null'], description: IANA zone }
         opusCacheMaxGb: { type: [number, 'null'], minimum: 1, maximum: 2000 }
         lrclib: { type: [boolean, 'null'], description: LRCLIB lyrics fallback on/off }
+        explicitDeezer: { type: [boolean, 'null'], description: 'v6: the explicit job asks Deezer about untagged tracks' }
         serverName: { type: [string, 'null'], maxLength: 60 }
     AdminSettings:
       allOf:
@@ -2473,6 +2599,7 @@ components:
         year: { type: [integer, 'null'] }
         genre: { type: [string, 'null'] }
         lyrics: { type: [string, 'null'], description: 'only in edits: LRC or plain text, shown to everyone (lyrics source `library`)' }
+        explicit: { type: [string, 'null'], enum: [explicit, clean, null], description: 'v6, only in edits: admin verdict; null = automatic' }
     TagEditResult:
       type: object
       required: [batchId, changed]
@@ -2497,6 +2624,7 @@ components:
             properties: { field: { type: string }, value: {}, updatedAt: { type: string }, updatedBy: { type: [string, 'null'] } }
         lyrics: { type: [string, 'null'], description: the library-wide lyrics override }
         hasCoverOverride: { type: boolean }
+        explicit: { $ref: '#/components/schemas/ExplicitEvidence' }
     TagEditLogEntry:
       type: object
       properties:
@@ -2708,6 +2836,7 @@ components:
         durationS: { type: number }
         hasArt: { type: boolean }
         mbid: { type: [string, 'null'] }
+        explicit: { type: boolean, description: 'v6: contains explicit tracks (among those the caller can see): "E" badge' }
     Track:
       type: object
       required: [id, title, artistId, artist, albumId, album, durationS, starred]
@@ -2729,6 +2858,60 @@ components:
         missing: { type: boolean, description: 'only present (true) in playlists/queues when the file is gone' }
         replayGain:
           $ref: '#/components/schemas/ReplayGain'
+        explicit:
+          $ref: '#/components/schemas/ExplicitStatus'
+        familyHidden: { type: boolean, description: 'v6, queues/playlists only (true): hidden by the caller''s family mode; skip it' }
+    ExplicitStatus:
+      type: string
+      enum: [explicit, probable, clean, unknown]
+      description: 'v6. probable = the lyrics word list found swearing (not certain). Show "E" for explicit.'
+    FamilyMode:
+      type: object
+      required: [enabled, hideProbable, hideUnknown, locked, hasPin]
+      properties:
+        enabled: { type: boolean }
+        hideProbable: { type: boolean, description: default true }
+        hideUnknown: { type: boolean, description: default false }
+        locked: { type: boolean, description: set by an admin; the user can only tighten it }
+        hasPin: { type: boolean, description: 'an unlock PIN exists (else admin-only unlock)' }
+    AdminFamilyUser:
+      allOf:
+        - $ref: '#/components/schemas/FamilyMode'
+        - type: object
+          properties:
+            userId: { type: string }
+            username: { type: string }
+            isAdmin: { type: boolean }
+            lockedBy: { type: [string, 'null'] }
+    ExplicitEvidence:
+      type: object
+      properties:
+        status: { $ref: '#/components/schemas/ExplicitStatus' }
+        source: { type: [string, 'null'], enum: [admin, tags, deezer, lyrics, null] }
+        admin: { type: [string, 'null'], enum: [explicit, clean, null] }
+        tags: { type: [string, 'null'], enum: [explicit, clean, null] }
+        deezer: { type: [string, 'null'], enum: [explicit, clean, not_found, null] }
+        deezerId: { type: [integer, 'null'] }
+        lyrics: { type: [string, 'null'], enum: [probable, clean, none, null] }
+        lyricsHits: { type: [integer, 'null'] }
+        updatedAt: { type: [string, 'null'] }
+    ExplicitReview:
+      type: object
+      properties:
+        total: { type: integer }
+        counts: { type: object, additionalProperties: { type: integer } }
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ExplicitEvidence'
+              - type: object
+                properties:
+                  trackId: { type: string }
+                  title: { type: string }
+                  artist: { type: string }
+                  album: { type: string }
+                  albumId: { type: string }
     AutoEqEntry:
       type: object
       required: [id, name, source, form]

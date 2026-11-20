@@ -10,6 +10,7 @@ import sqlite3
 from nasmusic.app import ai_adapter, blends, insights, mixes, playlists, suggestions, toget, userdata
 from nasmusic.app import collections as coll
 from nasmusic.config import Config
+from nasmusic.db import family
 from nasmusic.core import ai_config
 from nasmusic.library import art, queries
 
@@ -34,11 +35,11 @@ def shelf(id_: str, kind: str, title: str, items: list[dict], layout: str = "row
 # ---------- item builders ----------
 
 
-def _album_rows(conn: sqlite3.Connection, ids: list[str]) -> dict[str, sqlite3.Row]:
+def _album_rows(conn: sqlite3.Connection, ids: list[str], uid: str | None = None) -> dict[str, sqlite3.Row]:
     ids = list(dict.fromkeys(i for i in ids if i))
     if not ids:
         return {}
-    q = queries.ALBUM_SELECT + f" WHERE al.id IN ({','.join('?' * len(ids))})"
+    q = queries.album_select(queries.fam(conn, uid)) + f" WHERE al.id IN ({','.join('?' * len(ids))})"
     return {r["id"]: r for r in conn.execute(q, ids)}
 
 
@@ -69,8 +70,8 @@ def track_item(t: dict) -> dict:
             "artUrl": f"art/{t['albumId']}", "track": t}
 
 
-def _artist_item(conn: sqlite3.Connection, data_dir, artist_id: str) -> dict | None:
-    r = conn.execute(queries.ARTIST_SELECT + " AND ar.id = ? GROUP BY ar.id", (artist_id,)).fetchone()
+def _artist_item(conn: sqlite3.Connection, data_dir, artist_id: str, uid: str | None = None) -> dict | None:
+    r = conn.execute(queries.artist_select(queries.fam(conn, uid)) + " AND ar.id = ? GROUP BY ar.id", (artist_id,)).fetchone()
     if r is None:
         return None
     a = queries.artist_dict(r)
@@ -123,10 +124,10 @@ def _queue_item(conn: sqlite3.Connection, data_dir, uid: str, qid: str, progress
 def resolve(conn: sqlite3.Connection, data_dir, uid: str, type_: str, id_: str) -> dict | None:
     """Any pinnable / recent item as a ShelfItem, or None if it doesn't exist (for this user)."""
     if type_ == "album":
-        row = _album_rows(conn, [id_]).get(id_)
+        row = _album_rows(conn, [id_], uid).get(id_)
         return album_item(data_dir, row) if row else None
     if type_ == "artist":
-        return _artist_item(conn, data_dir, id_)
+        return _artist_item(conn, data_dir, id_, uid)
     if type_ == "playlist":
         return _playlist_item(conn, data_dir, uid, id_)
     if type_ == "mix":
@@ -137,7 +138,7 @@ def resolve(conn: sqlite3.Connection, data_dir, uid: str, type_: str, id_: str) 
         return ({"type": "smart_list", "id": id_, "title": SMART_TITLES[id_], "subtitle": None, "artUrl": None}
                 if id_ in SMART_TITLES else None)
     if type_ == "genre":
-        g = next((g for g in queries.genres(conn) if g["name"].casefold() == id_.casefold()), None)
+        g = next((g for g in queries.genres(conn, uid) if g["name"].casefold() == id_.casefold()), None)
         return ({"type": "genre", "id": g["name"], "title": g["name"], "subtitle": f"{g['trackCount']} songs",
                  "artUrl": None} if g else None)
     if type_ == "folder":
@@ -313,7 +314,7 @@ def _radio_seeds(conn: sqlite3.Connection, data_dir, uid: str) -> list[dict]:
         "MIN(t.album_id) album FROM user_tracks ut JOIN tracks t ON t.id = ut.track_id "
         "JOIN artists ar ON ar.id = t.artist_id WHERE ut.user_id = ? AND t.missing = 0 AND ut.blocked = 0 "
         "GROUP BY t.artist_id HAVING score > 0 ORDER BY score DESC LIMIT 4", (uid,)).fetchall()
-    rows = _album_rows(conn, [a["album"] for a in artists])
+    rows = _album_rows(conn, [a["album"] for a in artists], uid)
     for a in artists:
         items.append({"type": "radio", "id": f"artist:{a['artist_id']}", "title": f"{a['name']} radio",
                       "subtitle": "Artist radio", "artUrl": _art_for_album(data_dir, rows.get(a["album"])),
@@ -418,6 +419,7 @@ def start_radio(conn: sqlite3.Connection, cfg: Config, uid: str, seed: dict, pro
     seed = {"type": seed["type"], "id": seed.get("id"), "title": title}
     radio_id, ids = ai_adapter.radio_start(conn, ai_config(cfg), uid, seed)
     ids = [i for i in dict.fromkeys(ids) if queries.track_file(conn, i) is not None]
+    ids = family.filter_ids(conn, uid, ids)  # family mode: never radio an explicit track
     if not ids:
         raise NotFound("nothing to play for this radio yet")
     row = conn.execute("SELECT title FROM radio_sessions WHERE id = ?", (radio_id,)).fetchone()
@@ -436,6 +438,7 @@ def more_radio(conn: sqlite3.Connection, cfg: Config, uid: str, qid: str, n: int
     have = coll.queue_track_ids(conn, uid, qid)
     new = ai_adapter.radio_more(conn, ai_config(cfg), uid, row["radio_id"], have, n)
     fresh = [i for i in dict.fromkeys(new) if i not in set(have) and queries.track_file(conn, i) is not None]
+    fresh = family.filter_ids(conn, uid, fresh)
     if not fresh:  # the library ran out: the queue stays as it is
         return coll.get_queue(conn, uid, qid)
     return coll.edit_queue(conn, uid, qid, add=fresh, position="end")

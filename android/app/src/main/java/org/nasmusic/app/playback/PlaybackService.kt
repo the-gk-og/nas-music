@@ -128,6 +128,11 @@ class PlaybackService : MediaLibraryService() {
         player.addListener(object : Player.Listener {
             override fun onEvents(p: Player, events: Player.Events) = onPlayerEvents(events)
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // Family mode: the server flags tracks already in a queue that this user may not hear.
+                if (mediaItem?.mediaMetadata?.extras?.getBoolean(MediaItems.EXTRA_FAMILY_HIDDEN) == true) {
+                    if (player.hasNextMediaItem()) player.seekToNextMediaItem() else player.pause()
+                    return
+                }
                 applyLevelling()
                 loadArtworkData(player.currentMediaItemIndex)
                 loadArtworkData(player.currentMediaItemIndex + 1)

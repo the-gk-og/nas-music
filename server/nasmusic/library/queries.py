@@ -2,35 +2,58 @@
 
 Track dicts are per user (`starred` / `rating` are the caller's): every TRACK_SELECT query takes the
 user id as its FIRST parameter. Missing tracks, and albums/artists with no present tracks, are hidden
-from browsing (playlists and queues still list them, flagged `missing`)."""
+from browsing (playlists and queues still list them, flagged `missing`).
+
+Family mode (schema v6, nasmusic.db.family): every query that takes the user id hides the tracks that user's
+policy hides (and albums/artists/genres/folders left with none). Queues and playlists keep such tracks but
+flag them `familyHidden` (tracks_by_ids(..., hidden="flag")), so positions stay stable and clients skip them."""
 from __future__ import annotations
 
 import posixpath
 import sqlite3
 from pathlib import Path
 
+from nasmusic.db import family
 from nasmusic.library import art, loudness
 
 TRACK_COLS = """t.id, t.title, t.artist_id, ar.name AS artist, t.album_id, al.title AS album, t.track_no, t.disc_no,
        t.year, t.genre, t.duration_s, t.flac_bytes, t.missing, ut.starred_at, ut.rating,
-       t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak"""
+       t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak, fx.status AS explicit_status"""
 TRACK_FROM = """FROM tracks t JOIN artists ar ON ar.id = t.artist_id JOIN albums al ON al.id = t.album_id
-LEFT JOIN user_tracks ut ON ut.track_id = t.id AND ut.user_id = ?"""
+LEFT JOIN user_tracks ut ON ut.track_id = t.id AND ut.user_id = ?
+LEFT JOIN track_explicit fx ON fx.track_id = t.id"""
 TRACK_SELECT = f"SELECT {TRACK_COLS}\n{TRACK_FROM}\n"
 
-ALBUM_SELECT = """
+
+def album_select(fam: str = "") -> str:
+    """Albums with present tracks; `fam` is a family.where() fragment on alias `t` (counts, duration and
+    the explicit marker then only cover the tracks the user may see, and empty albums disappear)."""
+    return f"""
 SELECT al.id, al.title, al.artist_id, ar.name AS artist, al.year, al.mbid, al.art_path, al.added_at,
-       s.n AS track_count, s.dur AS duration_s
+       s.n AS track_count, s.dur AS duration_s, s.explicit AS has_explicit
 FROM albums al JOIN artists ar ON ar.id = al.artist_id
-JOIN (SELECT album_id, COUNT(*) AS n, SUM(duration_s) AS dur FROM tracks WHERE missing = 0 GROUP BY album_id) s
+JOIN (SELECT t.album_id, COUNT(*) AS n, SUM(t.duration_s) AS dur,
+             MAX(EXISTS (SELECT 1 FROM track_explicit ax WHERE ax.track_id = t.id AND ax.status = 'explicit')) AS explicit
+      FROM tracks t WHERE t.missing = 0{fam} GROUP BY t.album_id) s
   ON s.album_id = al.id
 """
 
-ARTIST_SELECT = """
+
+def artist_select(fam: str = "") -> str:
+    return f"""
 SELECT ar.id, ar.name, ar.mbid, ar.sort_name, COUNT(DISTINCT al.id) AS album_count
 FROM artists ar JOIN albums al ON al.artist_id = ar.id
-WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND t.missing = 0)
+WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND t.missing = 0{fam})
 """
+
+
+ALBUM_SELECT = album_select()
+ARTIST_SELECT = artist_select()
+
+
+def fam(conn: sqlite3.Connection, uid: str | None, alias: str = "t") -> str:
+    """The family-mode WHERE fragment for this user ("" when nothing is hidden)."""
+    return family.where(conn, uid, alias)
 
 ALBUM_ORDER = "ORDER BY ar.sort_name COLLATE NOCASE, al.title COLLATE NOCASE, COALESCE(t.disc_no, 1), " \
               "t.track_no IS NULL, t.track_no, t.path"
@@ -42,6 +65,7 @@ def track_dict(r: sqlite3.Row) -> dict:
         "albumId": r["album_id"], "album": r["album"], "trackNo": r["track_no"], "discNo": r["disc_no"],
         "year": r["year"], "genre": r["genre"], "durationS": r["duration_s"], "flacBytes": r["flac_bytes"],
         "starred": r["starred_at"] is not None, "rating": r["rating"],
+        "explicit": (r["explicit_status"] if "explicit_status" in r.keys() else None) or "unknown",
     }
     if r["missing"]:
         d["missing"] = True
@@ -56,6 +80,7 @@ def album_dict(r: sqlite3.Row, data_dir: Path) -> dict:
         "id": r["id"], "title": r["title"], "artistId": r["artist_id"], "artist": r["artist"],
         "year": r["year"], "trackCount": r["track_count"], "durationS": r["duration_s"] or 0.0,
         "hasArt": art.has_art(data_dir, r["art_path"], r["id"]), "mbid": r["mbid"],
+        "explicit": bool(r["has_explicit"]) if "has_explicit" in r.keys() else False,
     }
 
 
@@ -63,20 +88,20 @@ def artist_dict(r: sqlite3.Row) -> dict:
     return {"id": r["id"], "name": r["name"], "albumCount": r["album_count"], "mbid": r["mbid"]}
 
 
-def artists(conn: sqlite3.Connection, offset: int, limit: int) -> list[dict]:
+def artists(conn: sqlite3.Connection, offset: int, limit: int, uid: str | None = None) -> list[dict]:
     rows = conn.execute(
-        ARTIST_SELECT + " GROUP BY ar.id ORDER BY ar.sort_name COLLATE NOCASE, ar.id LIMIT ? OFFSET ?",
+        artist_select(fam(conn, uid)) + " GROUP BY ar.id ORDER BY ar.sort_name COLLATE NOCASE, ar.id LIMIT ? OFFSET ?",
         (limit, offset),
     )
     return [artist_dict(r) for r in rows]
 
 
-def artist(conn: sqlite3.Connection, artist_id: str, data_dir: Path) -> dict | None:
-    r = conn.execute(ARTIST_SELECT + " AND ar.id = ? GROUP BY ar.id", (artist_id,)).fetchone()
+def artist(conn: sqlite3.Connection, artist_id: str, data_dir: Path, uid: str | None = None) -> dict | None:
+    r = conn.execute(artist_select(fam(conn, uid)) + " AND ar.id = ? GROUP BY ar.id", (artist_id,)).fetchone()
     if r is None:
         return None
     d = artist_dict(r)
-    d["albums"] = albums(conn, data_dir, artist_id=artist_id, sort="year", offset=0, limit=10_000)
+    d["albums"] = albums(conn, data_dir, artist_id=artist_id, sort="year", offset=0, limit=10_000, uid=uid)
     return d
 
 
@@ -88,24 +113,25 @@ _ALBUM_SORT = {
 
 
 def albums(conn: sqlite3.Connection, data_dir: Path, artist_id: str | None, sort: str, offset: int,
-           limit: int) -> list[dict]:
+           limit: int, uid: str | None = None) -> list[dict]:
     where, params = "", []
     if artist_id:
         where, params = " WHERE al.artist_id = ?", [artist_id]
     rows = conn.execute(
-        ALBUM_SELECT + where + f" ORDER BY {_ALBUM_SORT.get(sort, _ALBUM_SORT['name'])} LIMIT ? OFFSET ?",
+        album_select(fam(conn, uid)) + where + f" ORDER BY {_ALBUM_SORT.get(sort, _ALBUM_SORT['name'])} LIMIT ? OFFSET ?",
         (*params, limit, offset),
     )
     return [album_dict(r, data_dir) for r in rows]
 
 
 def album(conn: sqlite3.Connection, uid: str, album_id: str, data_dir: Path) -> dict | None:
-    r = conn.execute(ALBUM_SELECT + " WHERE al.id = ?", (album_id,)).fetchone()
+    f = fam(conn, uid)
+    r = conn.execute(album_select(f) + " WHERE al.id = ?", (album_id,)).fetchone()
     if r is None:
         return None
     d = album_dict(r, data_dir)
     rows = conn.execute(
-        TRACK_SELECT + " WHERE t.album_id = ? AND t.missing = 0 "
+        TRACK_SELECT + f" WHERE t.album_id = ? AND t.missing = 0{f} "
         "ORDER BY COALESCE(t.disc_no, 1), t.track_no IS NULL, t.track_no, t.path",
         (uid, album_id),
     )
@@ -118,20 +144,29 @@ def album_art_info(conn: sqlite3.Connection, album_id: str) -> sqlite3.Row | Non
 
 
 def track(conn: sqlite3.Connection, uid: str, track_id: str) -> dict | None:
-    r = conn.execute(TRACK_SELECT + " WHERE t.id = ? AND t.missing = 0", (uid, track_id)).fetchone()
+    r = conn.execute(TRACK_SELECT + f" WHERE t.id = ? AND t.missing = 0{fam(conn, uid)}", (uid, track_id)).fetchone()
     return track_dict(r) if r else None
 
 
-def tracks_by_ids(conn: sqlite3.Connection, uid: str, ids: list[str], include_missing: bool = False) -> dict[str, dict]:
+def tracks_by_ids(conn: sqlite3.Connection, uid: str, ids: list[str], include_missing: bool = False,
+                  hidden: str = "drop") -> dict[str, dict]:
+    """Tracks by id for this user. Family mode: `hidden="drop"` (default; mixes, Home, blends, AI results)
+    leaves out tracks the user may not see; "flag" (queues, playlists) keeps them with familyHidden=true."""
     out: dict[str, dict] = {}
     uniq = list(dict.fromkeys(ids))
+    p = family.policy(conn, uid)
     for i in range(0, len(uniq), 500):
         chunk = uniq[i:i + 500]
         q = TRACK_SELECT + f" WHERE t.id IN ({','.join('?' * len(chunk))})"
         if not include_missing:
             q += " AND t.missing = 0"
         for r in conn.execute(q, (uid, *chunk)):
-            out[r["id"]] = track_dict(r)
+            d = track_dict(r)
+            if p.hides(d["explicit"]):
+                if hidden == "drop":
+                    continue
+                d["familyHidden"] = True
+            out[r["id"]] = d
     return out
 
 
@@ -146,7 +181,7 @@ def track_info(conn: sqlite3.Connection, uid: str, track_id: str) -> dict | None
         f"SELECT {TRACK_COLS}, t.path, t.folder, t.album_artist, t.composer, t.lyricist, t.comment, t.codec, "
         "t.bitrate, t.sample_rate, t.bits_per_sample, t.channels, t.added_at, "
         "COALESCE(ut.play_count, 0) AS play_count, COALESCE(ut.skip_count, 0) AS skip_count, ut.last_played "
-        f"{TRACK_FROM} WHERE t.id = ? AND t.missing = 0", (uid, track_id),
+        f"{TRACK_FROM} WHERE t.id = ? AND t.missing = 0{fam(conn, uid)}", (uid, track_id),
     ).fetchone()
     if r is None:
         return None
@@ -169,7 +204,8 @@ _TRACK_SORT = {
 
 def all_tracks(conn: sqlite3.Connection, uid: str, sort: str, offset: int, limit: int) -> list[dict]:
     rows = conn.execute(
-        TRACK_SELECT + f" WHERE t.missing = 0 ORDER BY {_TRACK_SORT[sort]} LIMIT ? OFFSET ?", (uid, limit, offset))
+        TRACK_SELECT + f" WHERE t.missing = 0{fam(conn, uid)} ORDER BY {_TRACK_SORT[sort]} LIMIT ? OFFSET ?",
+        (uid, limit, offset))
     return [track_dict(r) for r in rows]
 
 
@@ -188,7 +224,7 @@ _LISTS = {
 
 def smart_list(conn: sqlite3.Connection, uid: str, kind: str, offset: int = 0, limit: int = 10_000) -> list[dict]:
     where, order = _LISTS[kind]
-    rows = conn.execute(TRACK_SELECT + f" WHERE t.missing = 0 AND {where} ORDER BY {order} LIMIT ? OFFSET ?",
+    rows = conn.execute(TRACK_SELECT + f" WHERE t.missing = 0 AND {where}{fam(conn, uid)} ORDER BY {order} LIMIT ? OFFSET ?",
                         (uid, limit, offset))
     return [track_dict(r) for r in rows]
 
@@ -202,7 +238,8 @@ def favourites(conn: sqlite3.Connection, uid: str) -> list[dict]:
 
 def folders(conn: sqlite3.Connection, uid: str, path: str) -> dict | None:
     path = path.strip("/")
-    counts = conn.execute("SELECT folder, COUNT(*) AS n FROM tracks WHERE missing = 0 GROUP BY folder").fetchall()
+    ff = fam(conn, uid)
+    counts = conn.execute(f"SELECT t.folder, COUNT(*) AS n FROM tracks t WHERE t.missing = 0{ff} GROUP BY t.folder").fetchall()
     prefix = f"{path}/" if path else ""
     children: dict[str, int] = {}
     exists = path == ""
@@ -217,7 +254,7 @@ def folders(conn: sqlite3.Connection, uid: str, path: str) -> dict | None:
             children[name] = children.get(name, 0) + r["n"]
     if not exists:
         return None
-    rows = conn.execute(TRACK_SELECT + " WHERE t.folder = ? AND t.missing = 0 ORDER BY t.path", (uid, path))
+    rows = conn.execute(TRACK_SELECT + f" WHERE t.folder = ? AND t.missing = 0{ff} ORDER BY t.path", (uid, path))
     parent = None if path == "" else posixpath.dirname(path)
     return {
         "path": path, "parent": parent,
@@ -227,17 +264,17 @@ def folders(conn: sqlite3.Connection, uid: str, path: str) -> dict | None:
     }
 
 
-def genres(conn: sqlite3.Connection) -> list[dict]:
+def genres(conn: sqlite3.Connection, uid: str | None = None) -> list[dict]:
     rows = conn.execute(
-        "SELECT MIN(genre) AS name, COUNT(*) AS n, COUNT(DISTINCT album_id) AS albums FROM tracks "
-        "WHERE missing = 0 AND genre IS NOT NULL AND genre != '' GROUP BY genre COLLATE NOCASE "
-        "ORDER BY genre COLLATE NOCASE")
+        "SELECT MIN(t.genre) AS name, COUNT(*) AS n, COUNT(DISTINCT t.album_id) AS albums FROM tracks t "
+        f"WHERE t.missing = 0 AND t.genre IS NOT NULL AND t.genre != ''{fam(conn, uid)} GROUP BY t.genre COLLATE NOCASE "
+        "ORDER BY t.genre COLLATE NOCASE")
     return [{"name": r["name"], "trackCount": r["n"], "albumCount": r["albums"]} for r in rows]
 
 
 def genre_tracks(conn: sqlite3.Connection, uid: str, genre: str, offset: int, limit: int) -> list[dict]:
     rows = conn.execute(
-        TRACK_SELECT + f" WHERE t.missing = 0 AND t.genre = ? COLLATE NOCASE {ALBUM_ORDER} LIMIT ? OFFSET ?",
+        TRACK_SELECT + f" WHERE t.missing = 0 AND t.genre = ? COLLATE NOCASE{fam(conn, uid)} {ALBUM_ORDER} LIMIT ? OFFSET ?",
         (uid, genre, limit, offset))
     return [track_dict(r) for r in rows]
 
@@ -263,15 +300,16 @@ def search(conn: sqlite3.Connection, uid: str, q: str, limit: int, data_dir: Pat
             params.extend([_like(w)] * len(cols))
         return " AND ".join(parts), params
 
+    f = fam(conn, uid)
     c, p = cond(["ar.name"])
     ar_rows = conn.execute(
-        ARTIST_SELECT + f" AND {c} GROUP BY ar.id ORDER BY ar.sort_name COLLATE NOCASE LIMIT ?", (*p, limit)
+        artist_select(f) + f" AND {c} GROUP BY ar.id ORDER BY ar.sort_name COLLATE NOCASE LIMIT ?", (*p, limit)
     )
     c, p = cond(["al.title", "ar.name"])
-    al_rows = conn.execute(ALBUM_SELECT + f" WHERE {c} ORDER BY al.title COLLATE NOCASE LIMIT ?", (*p, limit))
+    al_rows = conn.execute(album_select(f) + f" WHERE {c} ORDER BY al.title COLLATE NOCASE LIMIT ?", (*p, limit))
     c, p = cond(["t.title", "ar.name", "al.title"])
     tr_rows = conn.execute(
-        TRACK_SELECT + f" WHERE t.missing = 0 AND {c} ORDER BY t.title COLLATE NOCASE LIMIT ?", (uid, *p, limit)
+        TRACK_SELECT + f" WHERE t.missing = 0{f} AND {c} ORDER BY t.title COLLATE NOCASE LIMIT ?", (uid, *p, limit)
     )
     return {
         "artists": [artist_dict(r) for r in ar_rows],

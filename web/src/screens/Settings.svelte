@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ArrowDown, ArrowLeft, ArrowUp } from '@lucide/svelte';
   import { appearance } from '../lib/appearance.svelte';
+  import { family } from '../lib/family.svelte';
   import { ACCENTS, HOME_SHELVES, HOME_SHELF_TITLES, moveInList, type Motion } from '../lib/v3';
   import { WEB_SIGNALS, type SignalKey } from '../lib/events';
   import { player } from '../lib/player.svelte';
@@ -162,6 +163,26 @@
     {/if}
     <div class="muted small">These settings are kept on this device.</div>
   </div>
+
+  <div class="section-title">Family mode</div>
+  <p class="pad muted small">
+    Hides explicit songs everywhere — library, search, mixes, radio — and skips them in queues. Your server does the
+    filtering, so it applies on all your devices.{#if family.mode.locked} Locked by an admin{family.mode.hasPin ? ': loosening it needs the unlock PIN' : ''}.{/if}
+  </p>
+  <label class="sig">
+    <div><div>Family mode {#if family.mode.locked}🔒{/if}</div><div class="muted small">Hide songs marked explicit</div></div>
+    <input type="checkbox" class="switch" checked={family.mode.enabled} onchange={async (e) => { const el = e.currentTarget; const want = el.checked; if (!(await family.set({ enabled: want }))) el.checked = family.mode.enabled; }} />
+  </label>
+  {#if family.mode.enabled}
+    <label class="sig">
+      <div><div>Also hide "probably explicit"</div><div class="muted small">Songs whose lyrics contain swearing (found automatically, not certain)</div></div>
+      <input type="checkbox" class="switch" checked={family.mode.hideProbable} onchange={async (e) => { const el = e.currentTarget; if (!(await family.set({ hideProbable: el.checked }))) el.checked = family.mode.hideProbable; }} />
+    </label>
+    <label class="sig">
+      <div><div>Also hide unchecked songs</div><div class="muted small">Songs nobody has classified yet. Strictest, hides a lot until your server has checked the library.</div></div>
+      <input type="checkbox" class="switch" checked={family.mode.hideUnknown} onchange={async (e) => { const el = e.currentTarget; if (!(await family.set({ hideUnknown: el.checked }))) el.checked = family.mode.hideUnknown; }} />
+    </label>
+  {/if}
 
   <div class="section-title">Data &amp; recommendations</div>
   <p class="pad muted small">

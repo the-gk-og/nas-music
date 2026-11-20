@@ -220,6 +220,9 @@ def load_profile(conn: sqlite3.Connection, user_id: str, now: datetime | None = 
             blocked.add(tid)
             continue
         raw[tid] += 3.0 * (starred is not None) + (0.5 * (rating - 3) if rating else 0.0)
+    from nasmusic.db import family
+
+    blocked |= family.all_hidden(conn, user_id)  # family mode: a member's hidden tracks never enter the blend
     for t in blocked:
         raw.pop(t, None)
     p = Profile(user_id, tracks=track_weights(raw), blocked=blocked)

@@ -16,14 +16,14 @@ from nasmusic.library.tags import TrackTags
 FIELDS: dict[str, str | None] = {
     "title": "title", "artist": "artist", "album_artist": "albumartist", "album": "album",
     "track_no": "track_no", "disc_no": "disc_no", "year": "year", "genre": "genre",
-    "lyrics": None, "cover": None,
+    "lyrics": None, "cover": None, "explicit": None,
 }
 TAG_FIELDS = tuple(k for k, v in FIELDS.items() if v)
 INT_FIELDS = ("track_no", "disc_no", "year")
 # API (camelCase) <-> DB names.
 API_NAMES = {"title": "title", "artist": "artist", "album_artist": "albumArtist", "album": "album",
              "track_no": "trackNo", "disc_no": "discNo", "year": "year", "genre": "genre", "lyrics": "lyrics",
-             "cover": "cover"}
+             "cover": "cover", "explicit": "explicit"}
 FROM_API = {v: k for k, v in API_NAMES.items()}
 
 # What file_tags stores: the overridable tags plus the MBIDs that decide artist/album ids.
@@ -51,6 +51,11 @@ def clean_value(field: str, value):
         raise ValueError(f"unknown field {field!r}")
     if value is None:
         return None
+    if field == "explicit":  # v6: an admin's explicit-content verdict
+        v = str(value).strip().casefold() if isinstance(value, str) else None
+        if v not in ("explicit", "clean"):
+            raise ValueError("explicit must be \"explicit\" or \"clean\"")
+        return v
     if field in INT_FIELDS:
         if isinstance(value, bool) or not isinstance(value, (int, str)):
             raise ValueError(f"{API_NAMES[field]} must be a number")

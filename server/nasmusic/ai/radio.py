@@ -139,7 +139,7 @@ def _resolve_seed(rec: Recommender, seed: dict, rng: np.random.Generator) -> tup
         return f"{row[0]} radio", idx
     # random: one of the user's taste centres (weighted by how much they like it), varied each time
     m = _fast_model(rec)
-    allowed = ~rec.sig.blocked
+    allowed = ~rec.sig.excluded
     if m.centroids.shape[0]:
         w = np.clip(m.centroid_mass, 1e-6, None)
         j = int(rng.choice(len(w), p=w / w.sum()))
@@ -254,7 +254,7 @@ def start(conn: sqlite3.Connection, cfg, user_id: str | None, seed: dict, n: int
     title, anchors = _resolve_seed(rec, seed, rng)
     vec = _unit(rec.lib.emb[anchors].mean(axis=0))
     seed_artists = {rec.lib.artist[i] for i in anchors} if seed.get("type", "random") != "random" else set()
-    first = anchors[0] if seed.get("type") == "track" and not rec.sig.blocked[anchors[0]] else None
+    first = anchors[0] if seed.get("type") == "track" and not rec.sig.excluded[anchors[0]] else None
     taste = 0.3 if seed.get("type", "random") == "random" else 0.2
     picked = _pick(rec, vec, set(), n, rng, [], seed_artists, first, taste)
     ids = [rec.lib.ids[i] for i in picked]
@@ -313,7 +313,7 @@ def because_you_played(conn: sqlite3.Connection, cfg, user_id: str | None, limit
     for ts, _ctx, i, etype, _label in reversed(sig.events):  # most recent first
         if ts < since:
             break
-        if etype != "play" or sig.blocked[i] or i in seeds or lib.artist[i] in seen_artists:
+        if etype != "play" or sig.excluded[i] or i in seeds or lib.artist[i] in seen_artists:
             continue
         favourite = sig.starred[i] or sig.rating[i] >= 4 or sig.weight[i] >= 1.5
         if not favourite:
@@ -325,7 +325,7 @@ def because_you_played(conn: sqlite3.Connection, cfg, user_id: str | None, limit
     shelves, used = [], set(seeds)
     for s in seeds:
         sims = lib.emb @ lib.emb[s]
-        sims[sig.blocked] = -np.inf
+        sims[sig.excluded] = -np.inf
         sims[[j for j, a in enumerate(lib.album) if a == lib.album[s]]] = -np.inf
         tracks, per = [], {}
         for j in np.argsort(-sims):
