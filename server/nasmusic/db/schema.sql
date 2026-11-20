@@ -17,12 +17,14 @@
 -- by nasmusic.db.migrations. Also v7 adds spoken word and live audio (podcasts, podcast_episodes,
 -- podcast_subscriptions, audiobooks, audiobook_files, audiobook_chapters, audiobook_bookmarks, spoken_progress,
 -- web_stations, web_station_favourites). These are deliberately apart from tracks/events: the recommender,
--- Wrapped and scrobbling never see them. Older databases are upgraded by nasmusic.db.migrations.
+-- Wrapped and scrobbling never see them. Older databases are upgraded by nasmusic.db.migrations. Also v7 adds
+-- track_dj (DJ automix analysis: beat grid, Camelot key, mix-in/mix-out points, energy curve). Older databases
+-- are upgraded by nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
 --   is also written by server core when a user answers), release_radar, blend_tracks (+ blends.match/built_at),
---   radio_sessions, radio_stations, radio_feedback.
+--   radio_sessions, radio_stations, radio_feedback, track_dj.
 -- Server core writes blends / blend_members (membership and consent); the AI only reads them.
 -- Timestamps are ISO-8601 UTC text. IDs are text (stable hashes or uuid4 hex).
 
@@ -517,6 +519,37 @@ CREATE TABLE IF NOT EXISTS analysis_jobs (     -- global
     error         TEXT,
     updated_at    TEXT NOT NULL,
     PRIMARY KEY (track_id, model_version)
+);
+
+-- v7 DJ automix analysis (global, AI writes; nasmusic.ai.djmix). One row per track, rewritten when the file
+-- changes. Times are seconds into the file. The beat grid is constant-tempo: beat k is at beat_s + k*60/bpm;
+-- grid_stable = 0 means the tempo drifts (live drummer, rubato) and clients must not beat-match the track.
+CREATE TABLE IF NOT EXISTS track_dj (
+    track_id       TEXT PRIMARY KEY REFERENCES tracks(id),
+    version        TEXT NOT NULL,          -- 'dj-essentia-1' | 'dj-basic-1' (numpy fallback)
+    status         TEXT NOT NULL CHECK (status IN ('done','failed')),
+    error          TEXT,
+    bpm            REAL,
+    bpm_confidence REAL,                   -- 0..1, how well the beats fit the constant grid
+    beat_s         REAL,                   -- first grid beat at or after 0
+    downbeat_s     REAL,                   -- first bar start (beat 1) at or after 0
+    beats_per_bar  INTEGER,
+    grid_stable    INTEGER,                -- 1 = safe to beat-match
+    key            TEXT,                   -- e.g. 'A minor'
+    camelot        TEXT,                   -- e.g. '8A'
+    key_strength   REAL,
+    mix_in_s       REAL,                   -- where an incoming transition should start this track (a downbeat)
+    mix_out_s      REAL,                   -- where an outgoing transition should start (a downbeat in the outro)
+    intro_end_s    REAL,
+    outro_start_s  REAL,
+    last_beat_s    REAL,                   -- end of the music (before trailing silence)
+    vocal_in_s     REAL,                   -- reserved: not detected yet (NULL)
+    vocal_out_s    REAL,
+    energy         REAL,                   -- 0..1 whole-track energy
+    energy_curve   TEXT,                   -- JSON [0..1, ...], one value per curve_step_s
+    curve_step_s   REAL,
+    duration_s     REAL,
+    analysed_at    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS taste_snapshots (

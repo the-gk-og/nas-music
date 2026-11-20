@@ -403,7 +403,11 @@ interface NasMusicApi {
 
     /** Returns the whole queue with the new tracks appended. */
     @POST("radio/{queueId}/more")
-    suspend fun radioMore(@Path("queueId") queueId: String): kotlinx.serialization.json.JsonObject
+    suspend fun radioMore(@Path("queueId") queueId: String, @Body body: RadioMoreRequest = RadioMoreRequest()): kotlinx.serialization.json.JsonObject
+
+    /** api 0.7: reorder for DJ flow (tempo, key, energy); nobody moves more than `window` places. */
+    @POST("automix/order")
+    suspend fun automixOrder(@Body body: AutomixOrderRequest): AutomixOrderResponse
 
     // ---- AI radio (api 0.6): describe-a-vibe, station, steering ----
     @POST("radio/vibe/parse")

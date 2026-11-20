@@ -92,6 +92,7 @@ class AppContainer(val context: Context) {
             downloadedTracks = { offline.offlineTracks.value },
             toast = { ui.toast(it) },
         ),
+        listening = { listening.settings.value },
     ).also { p ->
         // Binding a MediaController starts the playback service, which then applies the takeover.
         connect.onTakeover = { android.os.Handler(android.os.Looper.getMainLooper()).post { p.connect() } }

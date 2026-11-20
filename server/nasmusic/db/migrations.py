@@ -421,7 +421,7 @@ V7_TABLES = ("voice_tokens", "voice_devices", "upload_access", "uploads", "uploa
              "smart_playlist_tracks", "artist_info", "scrobble_accounts", "scrobble_queue", "notifications",
              "podcasts", "podcast_episodes", "podcast_subscriptions", "audiobooks", "audiobook_files",
              "audiobook_chapters", "audiobook_bookmarks", "spoken_progress", "web_stations",
-             "web_station_favourites")
+             "web_station_favourites", "track_dj")
 
 
 def migrate_v6_to_v7(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:

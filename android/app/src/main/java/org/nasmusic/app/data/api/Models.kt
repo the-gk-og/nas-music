@@ -89,9 +89,30 @@ data class Track(
     val explicit: String? = null,
     /** api 0.6, queues/playlists only: hidden by this user's family mode — the player skips it. */
     val familyHidden: Boolean = false,
+    /** api 0.7: DJ automix analysis (beat grid, key, mix points); null until the server has analysed the track. */
+    val mix: TrackMix? = null,
 ) {
     val isExplicit: Boolean get() = explicit == "explicit"
 }
+
+/** api 0.7 TrackMix: seconds into the file; beat k at beatS + k·60/bpm, bars from downbeatS. */
+@Serializable
+data class TrackMix(
+    val bpm: Double? = null,
+    val beatS: Double? = null,
+    val downbeatS: Double? = null,
+    val beatsPerBar: Int? = null,
+    /** Only beat-match when true (else the tempo drifts). */
+    val gridStable: Boolean = false,
+    val key: String? = null,
+    val camelot: String? = null,
+    val mixInS: Double? = null,
+    val mixOutS: Double? = null,
+    val introEndS: Double? = null,
+    val outroStartS: Double? = null,
+    val lastBeatS: Double? = null,
+    val energy: Double? = null,
+)
 
 /** api 0.6 family mode. Locked = set by an admin; loosening it needs the admin's PIN. */
 @Serializable

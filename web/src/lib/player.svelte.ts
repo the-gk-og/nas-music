@@ -35,8 +35,23 @@ import { session } from './session.svelte';
 import type { CommandAction, ConnectDevice, PlaybackState, Queue, RadioSeed, RadioStation, RepeatMode, SteerAction, Track } from './types';
 import { appendNew, needsTopUp, radioContext, replaceUpcoming } from './v3';
 import {
+  bassIn,
+  bassOut,
+  correctedRate,
+  expectedIn,
+  planTransition,
+  progress,
+  rampRate,
+  volIn,
+  volOut,
+  RAMP_BEATS,
+  type DjPlan,
+} from './automix';
+import {
   PRELOAD_AHEAD_S,
   crossfadeFor,
+  djFallbackS,
+  djFor,
   defaultListening,
   fadeIn,
   fadeOut,
@@ -124,8 +139,13 @@ export class Player {
   private decks: HTMLAudioElement[] = [];
   private deckGains: GainNode[] = [];
   private mix: GainNode | null = null;
-  /** The other deck, loaded with the next track. */
-  private preloaded: { id: string; el: HTMLAudioElement } | null = null;
+  /** The other deck, loaded with the next track (cued at `startS`, the DJ mix-in point, or 0). */
+  private preloaded: { id: string; el: HTMLAudioElement; startS: number } | null = null;
+  /** Per-deck low shelf (DJ bass swap). */
+  private deckBass: BiquadFilterNode[] = [];
+  /** A running DJ transition: mixing both decks, then easing the incoming tempo back to 1. */
+  private dj: { plan: DjPlan; out: HTMLAudioElement; inn: HTMLAudioElement; phase: 'mix' | 'ramp'; rampFrom: number } | null = null;
+  private djPlans = new Map<string, DjPlan | null>();
   private preloading: string | null = null;
   private preloadFailed = new Set<string>();
   private transitioning = false;
@@ -295,6 +315,7 @@ export class Player {
     });
     a.addEventListener('pause', () => {
       if (!mine()) return;
+      if (this.dj?.phase === 'mix') this.cancelDj();
       this.playing = false;
       this.updateMediaSession();
       this.stateChanged();
@@ -345,6 +366,10 @@ export class Player {
   /** 10 Hz while playing: preload the next track, start it on time, run the sleep timer. */
   private watchTransition() {
     this.watchSleep();
+    if (this.dj) {
+      this.djTick();
+      if (this.dj?.phase === 'mix') return; // nothing else to start while two decks are mixing
+    }
     const a = this.audio;
     const q = this.queue;
     const cur = this.current;
@@ -360,6 +385,19 @@ export class Player {
       return;
     }
     if (n == null || !next || n === q.index) return; // end of queue / repeat one: the plain 'ended' path
+    if (djFor(this.listening, cur, next) && !this.speedFaded()) {
+      const plan = this.djPlan(cur, next);
+      if (plan) {
+        const toStart = (plan.outStartS - a.currentTime) / (a.playbackRate || 1);
+        if (toStart <= PRELOAD_AHEAD_S) this.preload(next, plan.inStartS);
+        if (toStart > 0.05) return;
+        if (toStart > -0.5 && this.isPreloaded(next.id)) {
+          void this.djTransition(n, plan);
+          return;
+        }
+        // missed the start (buffering, a seek past it): the plain crossfade at the end below
+      }
+    }
     if (remaining <= PRELOAD_AHEAD_S) this.preload(next);
     if (!this.isPreloaded(next.id)) return;
     const fade = crossfadeFor(this.listening, cur, next);
@@ -375,7 +413,7 @@ export class Player {
     return this.preloaded?.id === id && this.preloaded.el.readyState >= 3;
   }
 
-  private preload(t: Track) {
+  private preload(t: Track, startS = 0) {
     if (this.preloaded?.id === t.id || this.preloading === t.id || this.preloadFailed.has(t.id)) return;
     const el = this.otherDeck();
     if (!el || this.fadingOut?.el === el) return; // still fading out; try again on the next tick
@@ -392,7 +430,14 @@ export class Player {
         el.playbackRate = this.speed;
         el.preservesPitch = true;
         el.load();
-        this.preloaded = { id: t.id, el };
+        if (startS > 0) {
+          const cue = () => {
+            el.currentTime = startS;
+            el.removeEventListener('loadedmetadata', cue);
+          };
+          el.addEventListener('loadedmetadata', cue);
+        }
+        this.preloaded = { id: t.id, el, startS };
       })
       .catch(() => {
         this.preloading = null;
@@ -407,6 +452,7 @@ export class Player {
     try {
       if (!q || !this.preloaded || q.tracks[n]?.id !== this.preloaded.id) return;
       if (this.audio?.paused && !this.audio.ended) return; // paused meanwhile
+      if (this.preloaded.startS) this.preloaded.el.currentTime = 0; // cued for a DJ mix that didn't happen
       this.tracker.ended();
       this.queue = { ...q, index: n };
       if (this.viewQueue?.id === q.id) this.viewQueue = this.queue;
@@ -428,10 +474,159 @@ export class Player {
   }
 
   private stopFading() {
+    if (this.dj) this.cancelDj();
     if (!this.fadingOut) return;
     clearTimeout(this.fadingOut.timer);
     if (this.fadingOut.el !== this.audio) this.fadingOut.el.pause();
     this.fadingOut = null;
+  }
+
+  // ================= DJ automix =================
+
+  /** The sleep timer is running: keep transitions plain (it may fade or stop at the end of the track). */
+  private speedFaded(): boolean {
+    return !!this.sleep;
+  }
+
+  private djPlan(a: Track, b: Track): DjPlan | null {
+    // keyed on the analysis too: a queue refreshed from the server may bring it later
+    const key = `${a.id}>${b.id}:${a.mix?.mixOutS}:${a.mix?.bpm}:${b.mix?.mixInS}:${b.mix?.bpm}:${this.listening.djBeats}:${this.listening.allowTempo}:${this.listening.crossfadeS}`;
+    if (!this.djPlans.has(key)) {
+      if (this.djPlans.size > 50) this.djPlans.clear();
+      this.djPlans.set(key, planTransition(a, b, { beats: this.listening.djBeats, allowTempo: this.listening.allowTempo, fallbackS: djFallbackS(this.listening) }));
+    }
+    return this.djPlans.get(key) ?? null;
+  }
+
+  /** Start a DJ transition into queue index `n` on the preloaded (cued) deck. */
+  private async djTransition(n: number, plan: DjPlan) {
+    const q = this.queue;
+    const pre = this.preloaded;
+    const out = this.audio;
+    if (!q || !pre || !out || q.tracks[n]?.id !== pre.id) return;
+    if (out.paused) return;
+    this.transitioning = true;
+    try {
+      const t = q.tracks[n];
+      this.tracker.ended();
+      this.queue = { ...q, index: n };
+      if (this.viewQueue?.id === q.id) this.viewQueue = this.queue;
+      this.preloaded = null;
+      this.stopFading();
+      const inn = pre.el;
+      this.audio = inn;
+      // land on the beat even if the outgoing deck moved on since the plan's start
+      const want = expectedIn(plan, out.currentTime);
+      if (Math.abs(inn.currentTime - want) > 0.01) inn.currentTime = want;
+      inn.preservesPitch = true;
+      inn.playbackRate = this.speed * plan.rate;
+      this.dj = { plan, out, inn, phase: 'mix', rampFrom: 0 };
+      this.scheduleDjCurves(plan, out, inn);
+      void this.topUpRadio();
+      this.tracker.start(t, this.queueMeta.get(q.id) ?? {});
+      this.position = inn.currentTime;
+      this.duration = isFinite(inn.duration) ? inn.duration : t.durationS;
+      this.error = null;
+      this.ab = { a: null, b: null };
+      this.updateMediaSession();
+      await this.startAudio();
+      this.stateChanged();
+      this.saveLocal();
+      void this.saveQueuePosition(true);
+    } finally {
+      this.transitioning = false;
+    }
+  }
+
+  /** Volume and bass curves on the audio clock, from the outgoing deck's position now. */
+  private scheduleDjCurves(plan: DjPlan, out: HTMLAudioElement, inn: HTMLAudioElement) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const x0 = progress(plan, out.currentTime);
+    const left = Math.max(0.05, ((1 - x0) * plan.durationS) / (out.playbackRate || 1));
+    const N = 64;
+    const xs = Array.from({ length: N }, (_, i) => x0 + ((1 - x0) * i) / (N - 1));
+    const gIn = this.deckGain(inn), gOut = this.deckGain(out);
+    const lvlIn = this.currentGain(), lvlOut = gOut?.gain.value ?? 1;
+    const set = (p: AudioParam | undefined, vals: number[]) => {
+      if (!p) return;
+      p.cancelScheduledValues(now);
+      try {
+        p.setValueCurveAtTime(Float32Array.from(vals), now, left);
+      } catch {
+        p.value = vals[vals.length - 1];
+      }
+    };
+    set(gIn?.gain, xs.map((x) => lvlIn * volIn(plan, x)));
+    set(gOut?.gain, xs.map((x) => lvlOut * volOut(plan, x)));
+    set(this.deckBassOf(inn)?.gain, xs.map((x) => bassIn(plan, x)));
+    set(this.deckBassOf(out)?.gain, xs.map((x) => bassOut(plan, x)));
+  }
+
+  /** 10 Hz during a DJ transition: keep the beats locked, finish the mix, ease the tempo back. */
+  private djTick() {
+    const d = this.dj;
+    if (!d) return;
+    if (d.inn !== this.audio) return this.cancelDj();
+    if (d.phase === 'mix') {
+      const x = progress(d.plan, d.out.currentTime);
+      if (x >= 1 || d.out.paused || d.out.ended) {
+        d.out.pause();
+        this.resetDeckDsp(d.out, 0);
+        d.phase = 'ramp';
+        d.rampFrom = d.inn.currentTime;
+        return;
+      }
+      if (d.plan.beatmatch && !d.inn.paused && !d.inn.seeking) {
+        const err = d.inn.currentTime - expectedIn(d.plan, d.out.currentTime);
+        const r = correctedRate(d.plan.rate, err);
+        if (r == null) d.inn.currentTime = expectedIn(d.plan, d.out.currentTime) + 0.02;
+        else d.inn.playbackRate = this.speed * r;
+      }
+      return;
+    }
+    const after = d.inn.currentTime - d.rampFrom;
+    d.inn.playbackRate = this.speed * rampRate(d.plan, after);
+    if (after >= RAMP_BEATS * d.plan.inBeatS || d.plan.rate === 1) {
+      d.inn.playbackRate = this.speed;
+      this.dj = null;
+    }
+  }
+
+  /** Abort a DJ transition (manual skip, seek, pause, speed change): the current deck plays on normally. */
+  private cancelDj() {
+    const d = this.dj;
+    if (!d) return;
+    this.dj = null;
+    if (d.out !== this.audio) {
+      d.out.pause();
+      this.resetDeckDsp(d.out, 0);
+    }
+    if (this.audio) {
+      this.audio.playbackRate = this.speed;
+      this.resetDeckDsp(this.audio, null);
+    }
+    this.applyDeckGain();
+  }
+
+  /** Bass back to flat; gain to `gain` (null: leave it to applyDeckGain). */
+  private resetDeckDsp(el: HTMLAudioElement, gain: number | null) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const b = this.deckBassOf(el);
+    if (b) {
+      b.gain.cancelScheduledValues(t);
+      b.gain.setTargetAtTime(0, t, 0.02);
+    }
+    const g = this.deckGain(el);
+    if (g && gain != null) {
+      g.gain.cancelScheduledValues(t);
+      g.gain.setTargetAtTime(gain, t, 0.02);
+    }
+  }
+
+  private deckBassOf(el: HTMLAudioElement | null): BiquadFilterNode | null {
+    return el ? (this.deckBass[this.decks.indexOf(el)] ?? null) : null;
   }
 
   private deckGain(el: HTMLAudioElement | null): GainNode | null {
@@ -547,11 +742,18 @@ export class Player {
       this.graph = buildEqGraph(this.ctx);
       this.mix = this.ctx.createGain();
       this.mix.connect(this.graph.input);
+      this.deckBass = [];
       this.deckGains = this.decks.map((el) => {
         const src = this.ctx!.createMediaElementSource(el);
+        const bass = this.ctx!.createBiquadFilter();
+        bass.type = 'lowshelf';
+        bass.frequency.value = 180;
+        bass.gain.value = 0;
         const g = this.ctx!.createGain();
-        src.connect(g);
+        src.connect(bass);
+        bass.connect(g);
         g.connect(this.mix!);
+        this.deckBass.push(bass);
         return g;
       });
       this.deckGain(this.otherDeck())!.gain.value = 0;
@@ -705,6 +907,10 @@ export class Player {
       await this.playIndex(index);
       return;
     }
+    if (this.wantsAutomixOrder(meta) && tracks.length - index > 2) {
+      tracks = await this.automixOrder(tracks, index);
+      ids.splice(0, ids.length, ...tracks.map((t) => t.id));
+    }
     let q: QueueModel;
     try {
       const created = await session.api.createQueue(name, ids, index);
@@ -716,6 +922,33 @@ export class Player {
     this.queueMeta.set(q.id, meta);
     this.setQueue(q);
     await this.playIndex(index);
+  }
+
+  private djOrdering(): boolean {
+    return this.listening.transition === 'dj' && this.listening.automixOrder;
+  }
+
+  /** DJ automix "reorder for flow": mixes, blends, shelves and playlists (not albums, artists or search). */
+  private wantsAutomixOrder(meta: PlayMeta): boolean {
+    const s = this.listening;
+    return s.transition === 'dj' && s.automixOrder && !this.shuffle && (meta.source === 'mix' || meta.source === 'more_like' || meta.addedFrom === 'playlist');
+  }
+
+  /** Reorder tracks after `index` for DJ flow (server: tempo, key, energy arc; nobody moves far). Never fails. */
+  private async automixOrder(tracks: Track[], index: number): Promise<Track[]> {
+    const head = tracks.slice(0, index);
+    const rest = tracks.slice(index);
+    try {
+      const res = await Promise.race([
+        session.api.automixOrder(rest.map((t) => t.id)),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000)),
+      ]);
+      const byId = new Map(rest.map((t) => [t.id, t]));
+      const out = res.trackIds.map((id) => byId.get(id)).filter((t): t is Track => !!t);
+      return out.length === rest.length ? [...head, ...out] : tracks;
+    } catch {
+      return tracks;
+    }
   }
 
   private setQueue(q: QueueModel) {
@@ -752,7 +985,7 @@ export class Player {
     ui.toast(`Starting ${label}…`);
     let created: Queue;
     try {
-      created = await session.api.startRadio(seed, seed.type === 'moment' ? radioContext(new Date(), deviceKind()) : undefined);
+      created = await session.api.startRadio(seed, seed.type === 'moment' ? radioContext(new Date(), deviceKind()) : undefined, this.djOrdering());
     } catch (e) {
       ui.toast(e instanceof ApiError && (e.status === 404 || e.status === 503) ? 'Radio isn’t available on this server yet' : (e as Error).message);
       return;
@@ -806,7 +1039,7 @@ export class Player {
     if (!q?.radio || this.toppingUp || !needsTopUp(q.tracks.length, q.index)) return;
     this.toppingUp = true;
     try {
-      const more = await session.api.radioMore(q.id);
+      const more = await session.api.radioMore(q.id, 25, this.djOrdering());
       const fresh = more.tracks ?? [];
       for (const t of fresh) this.trackCache.set(t.id, t);
       if (this.queue?.id !== q.id) return;
@@ -830,6 +1063,7 @@ export class Player {
     const pre = this.preloaded;
     if (pre && pre.id === t.id && pre.el !== a && !startS && pre.el.readyState >= 2) {
       this.preloaded = null;
+      if (pre.startS) pre.el.currentTime = 0; // cued for a DJ mix: a manual jump starts from the top
       const old = a;
       this.audio = a = pre.el;
       this.retire(old, autoplay ? fadeS : 0);
@@ -967,6 +1201,7 @@ export class Player {
     const a = this.audio;
     if (!a) return;
     const to = Math.max(0, Math.min(sec, this.duration || sec));
+    this.cancelDj();
     this.tracker.seek(a.currentTime, to);
     a.currentTime = to;
     this.position = to;
@@ -1013,6 +1248,7 @@ export class Player {
     s = Math.max(0.25, Math.min(3, Math.round(s * 100) / 100));
     if (this.remote('setSpeed', { speed: s })) return;
     this.speed = s;
+    this.cancelDj();
     for (const d of this.decks) d.playbackRate = s;
     this.saveLocal();
     this.stateChanged();

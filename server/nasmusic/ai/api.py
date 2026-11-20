@@ -389,3 +389,37 @@ def similar_artists(conn: sqlite3.Connection, cfg: AIConfig, artist_id: str, lim
     except Exception:
         log.exception("similar_artists failed for %s", artist_id)
         return []
+
+
+# ---------------------------------------------------------------- v7: DJ automix
+
+def automix_analyse_pending(conn: sqlite3.Connection, cfg: AIConfig, time_budget_s: float = 50 * 60) -> dict:
+    """Beat grid / key / mix points for tracks without a current `track_dj` row (resumable, time-boxed, one
+    low-priority worker process). Returns {version, analysed, failed, left}. Never raises."""
+    from . import djmix
+
+    try:
+        return djmix.run(conn, Path(cfg.library_root), time_budget_s=time_budget_s)
+    except Exception as e:
+        log.exception("automix analysis failed")
+        return {"analysed": 0, "failed": 0, "left": None, "error": f"{type(e).__name__}: {e}"[:300]}
+
+
+def automix_order(conn: sqlite3.Connection, cfg: AIConfig, track_ids: list[str], window: int = 6,
+                  keep_first: bool = True, arc: bool = True) -> tuple[list[str], list[dict]]:
+    """Reorder `track_ids` for DJ flow (tempo incl. half/double, Camelot key, energy; an energy arc when `arc`).
+    No track moves more than `window` places; with `keep_first` the first stays first. Returns (ids — the same
+    multiset — and per-pair transitions [{fromId, toId, tempoRatio, tempoMultiplier, keyDistance, beatmatch}]).
+    Unknown ids are kept in place-ish with neutral costs. Cheap (SQL + pure Python)."""
+    from . import automix
+
+    return automix.order_ids(conn, list(track_ids), window=max(1, min(int(window), 50)), keep_first=keep_first,
+                             arc=arc)
+
+
+def track_mix_detail(conn: sqlite3.Connection, cfg: AIConfig, track_id: str) -> dict | None:
+    """{trackId, status, version, analysedAt, bpmConfidence, keyStrength, energyCurve, curveStepS, durationS, mix}
+    or None when the track hasn't been analysed for automix yet."""
+    from . import djmix
+
+    return djmix.detail(conn, track_id)

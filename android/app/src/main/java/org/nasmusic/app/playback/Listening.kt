@@ -20,13 +20,25 @@ import kotlin.math.sin
  */
 @Serializable
 data class ListeningSettings(
+    /** off (gapless) | crossfade | dj (beat-matched automix; falls back to a crossfade). Null = saved before
+     *  automix existed: crossfadeS > 0 means crossfade. */
+    val transition: String? = null,
+    /** Crossfade length (also DJ's fallback); 0 = gapless in old settings. */
     val crossfadeS: Int = 0,
+    /** DJ automix: 8, 16 or 32 beats. */
+    val djBeats: Int = 16,
+    /** DJ automix: time-stretch the incoming track ±8 % (pitch kept) so beats line up. */
+    val allowTempo: Boolean = true,
+    /** DJ automix: reorder radio, mixes and playlists for flow when they start. */
+    val automixOrder: Boolean = true,
     /** off | track | album | auto */
     val levelling: String = "auto",
     val preampDb: Float = 0f,
     val preventClipping: Boolean = true,
 ) {
     fun normalised() = copy(
+        transition = transition?.takeIf { it in TRANSITIONS } ?: if (crossfadeS > 0) "crossfade" else "off",
+        djBeats = Automix.djBeats(djBeats),
         crossfadeS = crossfadeS.coerceIn(0, CROSSFADE_MAX_S),
         levelling = levelling.takeIf { it in LEVELLING_MODES } ?: "auto",
         preampDb = preampDb.coerceIn(-15f, 15f),
@@ -35,7 +47,13 @@ data class ListeningSettings(
     companion object {
         const val CROSSFADE_MAX_S = 12
         val LEVELLING_MODES = listOf("off", "track", "album", "auto")
+        val TRANSITIONS = listOf("off", "crossfade", "dj")
     }
+
+    val dj: Boolean get() = transition == "dj"
+    /** Crossfade used by DJ mode when two tracks can't be beat-matched. */
+    val djFallbackS: Int get() = if (crossfadeS > 0) crossfadeS else 6
+    val djOrdering: Boolean get() = dj && automixOrder
 }
 
 class ListeningRepository(context: Context) {
@@ -66,11 +84,12 @@ data class TrackFacts(
     val trackPeak: Double? = null,
     val albumGain: Double? = null,
     val albumPeak: Double? = null,
+    val mix: org.nasmusic.app.data.api.TrackMix? = null,
 ) {
     companion object {
         fun of(t: Track) = TrackFacts(
             t.id, t.albumId, t.trackNo, t.discNo, t.durationS,
-            t.replayGain?.trackGain, t.replayGain?.trackPeak, t.replayGain?.albumGain, t.replayGain?.albumPeak,
+            t.replayGain?.trackGain, t.replayGain?.trackPeak, t.replayGain?.albumGain, t.replayGain?.albumPeak, t.mix,
         )
     }
 }
@@ -88,10 +107,18 @@ object ListeningRules {
 
     /** Crossfade length in ms for an automatic a → b transition (0 = gapless). */
     fun crossfadeMs(s: ListeningSettings, a: TrackFacts?, b: TrackFacts?): Long {
-        if (a == null || b == null || s.crossfadeS <= 0 || a.id == b.id || followsOnAlbum(a, b)) return 0
+        val len = when (s.transition) { "off" -> 0; "dj" -> s.djFallbackS; else -> s.crossfadeS }
+        if (a == null || b == null || len <= 0 || a.id == b.id || followsOnAlbum(a, b)) return 0
         val shortest = min(a.durationS.takeIf { it > 0 } ?: Double.MAX_VALUE, b.durationS.takeIf { it > 0 } ?: Double.MAX_VALUE)
-        return (min(s.crossfadeS.toDouble(), shortest / 3) * 1000).toLong().coerceAtLeast(0)
+        return (min(len.toDouble(), shortest / 3) * 1000).toLong().coerceAtLeast(0)
     }
+
+    /** DJ automix for a → b? Never between consecutive album tracks (they stay gapless). */
+    fun djFor(s: ListeningSettings, a: TrackFacts?, b: TrackFacts?): Boolean =
+        s.dj && a != null && b != null && a.id != b.id && !followsOnAlbum(a, b)
+
+    fun djPlan(s: ListeningSettings, a: TrackFacts, b: TrackFacts): DjPlan? =
+        Automix.plan(a.id, a.durationS, a.mix, b.id, b.durationS, b.mix, DjOptions(s.djBeats, s.allowTempo, s.djFallbackS.toDouble()))
 
     /** Album gain when the setting says so, or ("auto") when neighbours in play order are the same album in order. */
     fun useAlbumGain(s: ListeningSettings, prev: TrackFacts?, cur: TrackFacts?, next: TrackFacts?, shuffled: Boolean): Boolean =

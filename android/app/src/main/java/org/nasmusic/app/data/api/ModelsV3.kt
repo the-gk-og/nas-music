@@ -98,7 +98,7 @@ data class RadioContext(
 )
 
 @Serializable
-data class RadioRequest(val seed: RadioSeed, val context: RadioContext? = null)
+data class RadioRequest(val seed: RadioSeed, val context: RadioContext? = null, val automix: Boolean? = null)
 
 /** One interpreted describe-a-vibe chip. The app shows [label] and lets the user drop chips; the server interprets the rest. */
 @Serializable
@@ -255,3 +255,14 @@ data class CastSignedItem(
 
 @Serializable
 data class CastSignResponse(val items: List<CastSignedItem> = emptyList())
+
+
+/** api 0.7 radio top-up; automix = order the new batch for DJ flow. */
+@Serializable
+data class RadioMoreRequest(val count: Int = 25, val automix: Boolean? = null)
+
+@Serializable
+data class AutomixOrderRequest(val trackIds: List<String>, val keepFirst: Boolean = true, val window: Int = 6, val arc: Boolean = true)
+
+@Serializable
+data class AutomixOrderResponse(val trackIds: List<String>)

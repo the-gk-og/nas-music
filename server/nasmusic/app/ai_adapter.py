@@ -171,3 +171,18 @@ def similar_artists(conn: sqlite3.Connection, cfg: AIConfig, artist_id: str, lim
         return [(str(a), float(s)) for a, s in fn(conn, cfg, artist_id, limit) or []]
     except Exception:
         return []
+
+
+# ---------- v7: DJ automix ----------
+
+def automix_analyse_pending(conn: sqlite3.Connection, cfg: AIConfig, time_budget_s: float) -> dict:
+    return ai.automix_analyse_pending(conn, cfg, time_budget_s)
+
+
+def automix_order(conn: sqlite3.Connection, cfg: AIConfig, track_ids: list[str], window: int = 6,
+                  keep_first: bool = True, arc: bool = True) -> tuple[list[str], list[dict]]:
+    return ai.automix_order(conn, cfg, track_ids, window=window, keep_first=keep_first, arc=arc)
+
+
+def track_mix_detail(conn: sqlite3.Connection, cfg: AIConfig, track_id: str) -> dict | None:
+    return ai.track_mix_detail(conn, cfg, track_id)
