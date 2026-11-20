@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -35,6 +35,15 @@ info:
     0.6.0 (schema v6): Jam - listen together (/jams for the host, /jam/* for guests with `X-Jam-Token`, /jam/ws).
     Guest tokens are not device tokens: they work only on /jam/* and never stream audio.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
+    0.7.0 (schema v7): spoken word and live audio, tag `spoken` - podcasts (/podcasts*, subscribe by RSS URL or
+    directory search; the server polls feeds, may keep the newest episodes downloaded, and streams or proxies
+    them at /stream/episode/{id}), audiobooks (/audiobooks*, from the optional read-only `audiobooks_root`;
+    parts at /stream/book/{id}/{part}, book-wide positions, chapters, bookmarks), internet radio (/stations*,
+    Radio Browser search, live stream proxied at /stream/station/{id} with ICY metadata removed,
+    /stations/{id}/now-playing). Resume positions: /spoken/progress (newest `updatedAt` wins, per user, all
+    devices) and /spoken/continue. Covers at /art/podcast|book|station/{id}. Casting: POST /cast/sign-spoken.
+    None of this is music: clients must NOT send /events, scrobble, or add these to queues/playlists, and the
+    recommender, Wrapped and Last.fm never see them. Family mode hides shows/episodes/stations flagged explicit.
     Times are ISO-8601 UTC strings. IDs are opaque strings.
 servers:
   - url: /api/v1
@@ -2501,11 +2510,497 @@ paths:
         '404': { description: not found }
     delete:
       responses: { '204': { description: deleted }, '404': { description: not found } }
+  # ---------- 0.7.0 spoken word + internet radio (tag spoken) ----------
+  /podcasts:
+    get:
+      tags: [spoken]
+      summary: The caller's subscriptions, newest episode first (family mode hides explicit shows).
+      responses:
+        '200': { description: subscriptions, content: { application/json: { schema: { type: object, required: [podcasts], properties: { podcasts: { type: array, items: { $ref: '#/components/schemas/Podcast' } } } } } } }
+    post:
+      tags: [spoken]
+      summary: Subscribe by feed URL. The server fetches the feed if new to it. 422 = not a reachable podcast feed; 403 = explicit show while family mode is on.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [feedUrl], properties: { feedUrl: { type: string } } } } } }
+      responses:
+        '201': { description: subscribed, content: { application/json: { schema: { $ref: '#/components/schemas/Podcast' } } } }
+        '403': { description: hidden by family mode }
+        '422': { description: bad URL or not a feed }
+  /podcasts/search:
+    get:
+      tags: [spoken]
+      summary: Directory search (Podcast Index when the server has a key, and the iTunes Search API). Discovery only - subscribe with the returned feedUrl.
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, maxLength: 200 } }
+        - { name: limit, in: query, schema: { type: integer, default: 25, minimum: 1, maximum: 50 } }
+      responses:
+        '200': { description: results, content: { application/json: { schema: { type: object, required: [results, errors], properties: { results: { type: array, items: { $ref: '#/components/schemas/PodcastSearchResult' } }, errors: { type: array, items: { type: string } } } } } } }
+  /podcasts/episodes:
+    get:
+      tags: [spoken]
+      summary: Latest episodes across all subscriptions (the "new episodes" inbox).
+      parameters:
+        - { name: filter, in: query, schema: { type: string, enum: [all, unplayed, in_progress, downloaded], default: unplayed } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+      responses:
+        '200': { description: episodes, content: { application/json: { schema: { $ref: '#/components/schemas/EpisodeList' } } } }
+  /podcasts/episodes/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      tags: [spoken]
+      summary: One episode with full description, chapters (feed, Podcasting 2.0 JSON, or embedded) and the show's speed / skip-silence for the caller.
+      responses:
+        '200': { description: episode, content: { application/json: { schema: { $ref: '#/components/schemas/EpisodeDetail' } } } }
+        '404': { description: not found or hidden }
+  /podcasts/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      tags: [spoken]
+      responses:
+        '200': { description: show, content: { application/json: { schema: { $ref: '#/components/schemas/Podcast' } } } }
+        '404': { description: not found or hidden }
+    patch:
+      tags: [spoken]
+      summary: Per-user show settings (speed, skipSilence, autoDownload on the phone); serverKeepLast is shared by all subscribers (0 = stream from the feed).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                speed: { type: number, minimum: 0.5, maximum: 3 }
+                skipSilence: { type: boolean }
+                autoDownload: { type: boolean }
+                serverKeepLast: { type: integer, minimum: 0, maximum: 100 }
+      responses:
+        '200': { description: show, content: { application/json: { schema: { $ref: '#/components/schemas/Podcast' } } } }
+        '404': { description: not subscribed }
+    delete:
+      tags: [spoken]
+      summary: Unsubscribe. When nobody subscribes any more the server forgets the feed and deletes its downloads.
+      responses: { '204': { description: unsubscribed }, '404': { description: not subscribed } }
+  /podcasts/{id}/episodes:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      tags: [spoken]
+      parameters:
+        - { name: filter, in: query, schema: { type: string, enum: [all, unplayed, in_progress, downloaded], default: all } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 1000 } }
+      responses:
+        '200': { description: episodes newest first, content: { application/json: { schema: { $ref: '#/components/schemas/EpisodeList' } } } }
+  /podcasts/{id}/refresh:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    post:
+      tags: [spoken]
+      summary: Fetch the feed now.
+      responses:
+        '200': { description: result, content: { application/json: { schema: { type: object, properties: { id: { type: string }, ok: { type: boolean }, new: { type: integer }, error: { type: string } } } } } }
+  /podcasts/{id}/played:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    post:
+      tags: [spoken]
+      summary: Mark every episode of the show played.
+      responses:
+        '200': { description: count, content: { application/json: { schema: { type: object, properties: { marked: { type: integer } } } } } }
+  /stream/episode/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      tags: [spoken]
+      summary: Episode audio - the server's downloaded copy, else proxied from the feed's enclosure URL with Range passed through. Accepts ?token=.
+      responses:
+        '200': { description: audio, content: { audio/*: {} } }
+        '206': { description: partial audio }
+        '404': { description: not found or hidden }
+        '502': { description: the podcast host failed }
+  /art/podcast/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } }, { name: size, in: query, schema: { type: integer, default: 512 } } ]
+    get:
+      tags: [spoken]
+      summary: Show cover (JPEG, cached on the server). Accepts ?token=.
+      responses: { '200': { description: image, content: { image/jpeg: {} } }, '404': { description: no art } }
+  /audiobooks:
+    get:
+      tags: [spoken]
+      parameters:
+        - { name: sort, in: query, schema: { type: string, enum: [title, author, added, recent], default: title } }
+      responses:
+        '200': { description: 'books (enabled = the server has an audiobooks_root)', content: { application/json: { schema: { type: object, required: [enabled, books], properties: { enabled: { type: boolean }, books: { type: array, items: { $ref: '#/components/schemas/Audiobook' } } } } } } }
+  /audiobooks/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      tags: [spoken]
+      responses:
+        '200': { description: book, content: { application/json: { schema: { $ref: '#/components/schemas/AudiobookDetail' } } } }
+        '404': { description: not found }
+  /audiobooks/{id}/bookmarks:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    post:
+      tags: [spoken]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [positionS], properties: { positionS: { type: number, minimum: 0 }, note: { type: [string, 'null'], maxLength: 1000 } } } } } }
+      responses:
+        '201': { description: created, content: { application/json: { schema: { $ref: '#/components/schemas/Bookmark' } } } }
+  /audiobooks/{id}/bookmarks/{bookmarkId}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } }, { name: bookmarkId, in: path, required: true, schema: { type: string } } ]
+    delete:
+      tags: [spoken]
+      responses: { '204': { description: deleted }, '404': { description: not found } }
+  /stream/book/{id}/{part}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } }, { name: part, in: path, required: true, schema: { type: integer } } ]
+    get:
+      tags: [spoken]
+      summary: An audiobook part, the original file (Range supported). Accepts ?token=.
+      responses: { '200': { description: audio, content: { audio/*: {} } }, '404': { description: not found } }
+  /art/book/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } }, { name: size, in: query, schema: { type: integer, default: 512 } } ]
+    get:
+      tags: [spoken]
+      responses: { '200': { description: image, content: { image/jpeg: {} } }, '404': { description: no art } }
+  /stations:
+    get:
+      tags: [spoken]
+      summary: The caller's favourite internet radio stations, most recently played first.
+      responses:
+        '200': { description: stations, content: { application/json: { schema: { type: object, required: [stations], properties: { stations: { type: array, items: { $ref: '#/components/schemas/Station' } } } } } } }
+    post:
+      tags: [spoken]
+      summary: Add a station (by stream URL, or a Radio Browser result's fields) and make it a favourite. With probe (default) the server connects once, follows .pls/.m3u playlists and reads icy-name/genre/bitrate. HLS is refused (422).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [streamUrl]
+              properties:
+                streamUrl: { type: string }
+                name: { type: string }
+                homepage: { type: string }
+                imageUrl: { type: string }
+                country: { type: string }
+                tags: { type: array, items: { type: string } }
+                codec: { type: string }
+                bitrate: { type: integer }
+                explicit: { type: boolean }
+                radiobrowserUuid: { type: string }
+                probe: { type: boolean, default: true }
+      responses:
+        '201': { description: added, content: { application/json: { schema: { $ref: '#/components/schemas/Station' } } } }
+        '403': { description: explicit station while family mode is on }
+        '422': { description: not a playable stream }
+  /stations/search:
+    get:
+      tags: [spoken]
+      summary: Search the Radio Browser community directory (at least one of q, tag, country). HLS-only stations are left out.
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: tag, in: query, schema: { type: string } }
+        - { name: country, in: query, schema: { type: string, description: 'ISO code (2 letters) or name' } }
+        - { name: limit, in: query, schema: { type: integer, default: 40, maximum: 100 } }
+      responses:
+        '200': { description: results, content: { application/json: { schema: { type: object, required: [results], properties: { results: { type: array, items: { $ref: '#/components/schemas/StationSearchResult' } } } } } } }
+        '502': { description: directory unavailable }
+  /stations/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      tags: [spoken]
+      responses: { '200': { description: station, content: { application/json: { schema: { $ref: '#/components/schemas/Station' } } } }, '404': { description: not found } }
+    delete:
+      tags: [spoken]
+      summary: Remove from favourites.
+      responses: { '204': { description: removed }, '404': { description: not a favourite } }
+  /stations/{id}/now-playing:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      tags: [spoken]
+      summary: Current ICY StreamTitle (from the server's proxy, or a short probe when nobody listens through it). Poll every ~15 s while playing.
+      responses:
+        '200': { description: now playing, content: { application/json: { schema: { type: object, required: [stationId, title], properties: { stationId: { type: string }, title: { type: [string, 'null'] }, updatedAt: { type: [string, 'null'] } } } } } }
+  /stream/station/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    get:
+      tags: [spoken]
+      summary: The live stream through the server (never ends; not seekable; ICY metadata removed). Accepts ?token=.
+      responses: { '200': { description: live audio, content: { audio/*: {} } }, '502': { description: station unreachable } }
+  /art/station/{id}:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } }, { name: size, in: query, schema: { type: integer, default: 256 } } ]
+    get:
+      tags: [spoken]
+      responses: { '200': { description: image, content: { image/jpeg: {} } }, '404': { description: no art } }
+  /spoken/progress:
+    get:
+      tags: [spoken]
+      summary: Resume positions changed after `since` (all when omitted), oldest change first.
+      parameters: [ { name: since, in: query, schema: { type: string } } ]
+      responses:
+        '200': { description: positions, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/SpokenProgress' } } } } } } }
+    put:
+      tags: [spoken]
+      summary: |
+        Store positions (batch; offline devices send their queue). A write whose updatedAt is older than the
+        stored one is not applied (applied false, current state returned). Omitted fields keep their value.
+        Reaching the last 30 s (or 98 %) marks it played; played true without a position resets it to 0.
+        Book positions are book-wide seconds (see AudiobookDetail.parts[].startS).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: object
+                    required: [kind, id]
+                    properties:
+                      kind: { type: string, enum: [episode, book] }
+                      id: { type: string }
+                      positionS: { type: number, minimum: 0 }
+                      durationS: { type: number }
+                      played: { type: boolean }
+                      speed: { type: number, minimum: 0.5, maximum: 3, description: "books only (episodes use the show's speed)" }
+                      updatedAt: { type: string, description: when the client recorded it }
+      responses:
+        '200':
+          description: per item
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { type: object, properties: { kind: { type: string }, id: { type: string }, applied: { type: boolean }, progress: { oneOf: [ { $ref: '#/components/schemas/SpokenProgress' }, { type: 'null' } ] } } } }
+  /spoken/continue:
+    get:
+      tags: [spoken]
+      summary: Episodes and books in progress, most recently touched first.
+      parameters: [ { name: limit, in: query, schema: { type: integer, default: 20 } } ]
+      responses:
+        '200':
+          description: items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [kind, progress]
+                      properties:
+                        kind: { type: string, enum: [episode, book] }
+                        episode: { $ref: '#/components/schemas/Episode' }
+                        book: { $ref: '#/components/schemas/Audiobook' }
+                        progress: { $ref: '#/components/schemas/SpokenProgress' }
+  /cast/sign-spoken:
+    post:
+      tags: [spoken]
+      summary: Signed URLs for casting an episode, an audiobook (one item per part, or just `part`) or a live station (live true; no duration). Same base URL rules as /cast/sign.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [kind, id], properties: { kind: { type: string, enum: [episode, book, station] }, id: { type: string }, part: { type: integer } } } } } }
+      responses:
+        '200':
+          description: items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        url: { type: string }
+                        artUrl: { type: [string, 'null'] }
+                        contentType: { type: string }
+                        title: { type: string }
+                        subtitle: { type: [string, 'null'] }
+                        durationS: { type: [number, 'null'] }
+                        startS: { type: number }
+                        part: { type: integer }
+                        live: { type: boolean }
+                        expiresAt: { type: integer }
+        '404': { description: not found or hidden }
 components:
   securitySchemes:
     device: { type: http, scheme: bearer }
     jamGuest: { type: apiKey, in: header, name: X-Jam-Token, description: 'Jam guest token (jg_…) from POST /jam/join/{code}' }
   schemas:
+    # ---------- 0.7.0 spoken ----------
+    SpokenProgress:
+      type: object
+      required: [kind, id, positionS, played, updatedAt]
+      properties:
+        kind: { type: string, enum: [episode, book] }
+        id: { type: string }
+        positionS: { type: number }
+        durationS: { type: [number, 'null'] }
+        played: { type: boolean }
+        speed: { type: [number, 'null'] }
+        updatedAt: { type: string }
+        deviceId: { type: [string, 'null'] }
+    Podcast:
+      type: object
+      required: [id, feedUrl, title, explicit, subscribed, speed, skipSilence, autoDownload]
+      properties:
+        id: { type: string }
+        feedUrl: { type: string }
+        title: { type: string }
+        author: { type: [string, 'null'] }
+        description: { type: [string, 'null'], description: may contain HTML }
+        summary: { type: [string, 'null'], description: plain text, short }
+        link: { type: [string, 'null'] }
+        language: { type: [string, 'null'] }
+        explicit: { type: boolean }
+        hasImage: { type: boolean, description: 'cover at art/podcast/{id}' }
+        lastPolledAt: { type: [string, 'null'] }
+        lastError: { type: [string, 'null'] }
+        serverKeepLast: { type: [integer, 'null'] }
+        subscribed: { type: boolean }
+        subscribedAt: { type: [string, 'null'] }
+        speed: { type: number }
+        skipSilence: { type: boolean }
+        autoDownload: { type: boolean }
+        unplayed: { type: integer }
+        latestAt: { type: [string, 'null'] }
+    PodcastSearchResult:
+      type: object
+      required: [id, title, feedUrl, explicit, source, subscribed]
+      properties:
+        id: { type: string, description: the id the podcast will have once subscribed }
+        title: { type: string }
+        author: { type: [string, 'null'] }
+        feedUrl: { type: string }
+        imageUrl: { type: [string, 'null'], description: remote URL (directory artwork) }
+        explicit: { type: boolean }
+        genre: { type: [string, 'null'] }
+        episodeCount: { type: [integer, 'null'] }
+        source: { type: string, enum: [podcastindex, itunes] }
+        subscribed: { type: boolean }
+    Episode:
+      type: object
+      required: [id, podcastId, title, explicit, onServer, hasChapters]
+      properties:
+        id: { type: string }
+        podcastId: { type: string }
+        podcastTitle: { type: string }
+        title: { type: string }
+        summary: { type: [string, 'null'] }
+        publishedAt: { type: [string, 'null'] }
+        durationS: { type: [number, 'null'] }
+        explicit: { type: boolean }
+        season: { type: [integer, 'null'] }
+        episode: { type: [integer, 'null'] }
+        contentType: { type: [string, 'null'] }
+        sizeBytes: { type: [integer, 'null'] }
+        onServer: { type: boolean, description: 'downloaded on the server (fast seeking, works if the host is down)' }
+        hasChapters: { type: boolean }
+        link: { type: [string, 'null'] }
+        progress: { oneOf: [ { $ref: '#/components/schemas/SpokenProgress' }, { type: 'null' } ] }
+    EpisodeList:
+      type: object
+      required: [episodes]
+      properties:
+        episodes: { type: array, items: { $ref: '#/components/schemas/Episode' } }
+    Chapter:
+      type: object
+      required: [start, title]
+      properties:
+        start: { type: number, description: seconds }
+        title: { type: string }
+        url: { type: string }
+        img: { type: string }
+    EpisodeDetail:
+      allOf:
+        - $ref: '#/components/schemas/Episode'
+        - type: object
+          properties:
+            description: { type: [string, 'null'], description: 'HTML from the feed (sanitise before rendering)' }
+            chapters: { type: array, items: { $ref: '#/components/schemas/Chapter' } }
+            speed: { type: number }
+            skipSilence: { type: boolean }
+    Audiobook:
+      type: object
+      required: [id, title, durationS]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        author: { type: [string, 'null'] }
+        narrator: { type: [string, 'null'] }
+        year: { type: [integer, 'null'] }
+        durationS: { type: number }
+        addedAt: { type: string }
+        summary: { type: [string, 'null'] }
+        progress: { oneOf: [ { $ref: '#/components/schemas/SpokenProgress' }, { type: 'null' } ] }
+    Bookmark:
+      type: object
+      required: [id, positionS, createdAt]
+      properties:
+        id: { type: string }
+        positionS: { type: number, description: book-wide seconds }
+        note: { type: [string, 'null'] }
+        createdAt: { type: string }
+    AudiobookDetail:
+      allOf:
+        - $ref: '#/components/schemas/Audiobook'
+        - type: object
+          required: [parts, chapters, bookmarks]
+          properties:
+            description: { type: [string, 'null'] }
+            parts:
+              type: array
+              items:
+                type: object
+                required: [index, durationS, startS]
+                properties:
+                  index: { type: integer, description: 'stream/book/{id}/{index}' }
+                  durationS: { type: number }
+                  startS: { type: number, description: offset of this part in the book }
+                  sizeBytes: { type: [integer, 'null'] }
+                  contentType: { type: string }
+                  name: { type: string }
+            chapters:
+              type: array
+              items: { type: object, required: [index, title, startS], properties: { index: { type: integer }, title: { type: string }, startS: { type: number, description: book-wide seconds } } }
+            bookmarks: { type: array, items: { $ref: '#/components/schemas/Bookmark' } }
+    Station:
+      type: object
+      required: [id, name, streamUrl, tags, explicit, hasImage, favourite]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        streamUrl: { type: string, description: 'upstream URL (play through stream/station/{id}, not this)' }
+        homepage: { type: [string, 'null'] }
+        country: { type: [string, 'null'] }
+        tags: { type: array, items: { type: string } }
+        codec: { type: [string, 'null'] }
+        bitrate: { type: [integer, 'null'] }
+        explicit: { type: boolean }
+        hasImage: { type: boolean }
+        favourite: { type: boolean }
+        lastPlayedAt: { type: [string, 'null'] }
+    StationSearchResult:
+      type: object
+      required: [id, name, streamUrl, explicit, favourite]
+      properties:
+        id: { type: string, description: the id the station will have once added }
+        name: { type: string }
+        streamUrl: { type: string }
+        homepage: { type: [string, 'null'] }
+        imageUrl: { type: [string, 'null'] }
+        country: { type: [string, 'null'] }
+        tags: { type: array, items: { type: string } }
+        codec: { type: [string, 'null'] }
+        bitrate: { type: [integer, 'null'] }
+        explicit: { type: boolean }
+        radiobrowserUuid: { type: [string, 'null'] }
+        favourite: { type: boolean }
     JamSettings:
       type: object
       required: [approval, allowPlayNext, maxPerGuest]

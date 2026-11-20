@@ -1,4 +1,4 @@
--- nas-music shared schema v6 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v7 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
@@ -9,7 +9,10 @@
 -- family mode (family_mode), automatic tag fixing (fingerprints, acoustid_lookups, mb_releases,
 -- autotag_suggestions), MusicBrainz-id override fields in tag_overrides, and hidden duplicates
 -- (duplicate_hidden; tracks.missing = 2), Jam (jams, jam_guests, jam_requests, jam_votes), and AI radio
--- (radio_sessions.station_key/params, radio_stations, radio_feedback). Older databases are upgraded by
+-- (radio_sessions.station_key/params, radio_stations, radio_feedback). v7 adds spoken word and live audio
+-- (podcasts, podcast_episodes, podcast_subscriptions, audiobooks, audiobook_files, audiobook_chapters,
+-- audiobook_bookmarks, spoken_progress, web_stations, web_station_favourites). These are deliberately apart
+-- from tracks/events: the recommender, Wrapped and scrobbling never see them. Older databases are upgraded by
 -- nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
@@ -703,4 +706,148 @@ CREATE TABLE IF NOT EXISTS jam_votes (
     track_id  TEXT NOT NULL,
     value     INTEGER NOT NULL CHECK (value IN (-1, 1)),
     PRIMARY KEY (jam_id, guest_id, track_id)
+);
+
+-- ---------- v7 spoken word + internet radio (docs/podcasts-radio.md) ----------
+-- Server core only. NOT music: the AI, Wrapped and scrobbling never read these tables.
+
+-- One row per feed (shared by every subscriber). id = sha1(feed_url)[:16].
+CREATE TABLE IF NOT EXISTS podcasts (
+    id               TEXT PRIMARY KEY,
+    feed_url         TEXT NOT NULL UNIQUE,
+    title            TEXT NOT NULL,
+    author           TEXT,
+    description      TEXT,
+    link             TEXT,
+    language         TEXT,
+    image_url        TEXT,
+    explicit         INTEGER NOT NULL DEFAULT 0,   -- <itunes:explicit> / directory flag (family mode hides)
+    keep_last        INTEGER,                      -- server downloads: newest N episodes; NULL = config default, 0 = stream only
+    etag             TEXT,
+    last_modified    TEXT,
+    last_polled_at   TEXT,
+    last_error       TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS podcast_episodes (
+    id              TEXT PRIMARY KEY,              -- sha1(podcast_id + guid)[:16]
+    podcast_id      TEXT NOT NULL REFERENCES podcasts(id) ON DELETE CASCADE,
+    guid            TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    description     TEXT,
+    link            TEXT,
+    published_at    TEXT,
+    duration_s      REAL,
+    enclosure_url   TEXT NOT NULL,
+    enclosure_type  TEXT,
+    enclosure_bytes INTEGER,
+    image_url       TEXT,
+    explicit        INTEGER NOT NULL DEFAULT 0,
+    season          INTEGER,
+    episode         INTEGER,
+    chapters_url    TEXT,                          -- Podcasting 2.0 JSON chapters (fetched on demand)
+    chapters        TEXT,                          -- JSON [{start, title, url?, img?}] (feed psc:chapters or fetched)
+    local_path      TEXT,                          -- relative to data_dir/podcasts when downloaded on the server
+    local_bytes     INTEGER,
+    downloaded_at   TEXT,
+    download_error  TEXT,
+    UNIQUE (podcast_id, guid)
+);
+CREATE INDEX IF NOT EXISTS podcast_episodes_pub ON podcast_episodes(podcast_id, published_at);
+
+CREATE TABLE IF NOT EXISTS podcast_subscriptions (
+    user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    podcast_id    TEXT NOT NULL REFERENCES podcasts(id) ON DELETE CASCADE,
+    subscribed_at TEXT NOT NULL,
+    speed         REAL NOT NULL DEFAULT 1.0,       -- playback speed for this show
+    skip_silence  INTEGER NOT NULL DEFAULT 0,
+    auto_download INTEGER NOT NULL DEFAULT 0,      -- phone: download new episodes on sync
+    PRIMARY KEY (user_id, podcast_id)
+);
+
+-- Audiobooks: a read-only folder (config audiobooks_root). Folder = book, files = parts. id = sha1(folder)[:16].
+CREATE TABLE IF NOT EXISTS audiobooks (
+    id          TEXT PRIMARY KEY,
+    folder      TEXT NOT NULL UNIQUE,              -- relative to audiobooks_root ('' parts = a loose file's path)
+    title       TEXT NOT NULL,
+    author      TEXT,
+    narrator    TEXT,
+    description TEXT,
+    year        INTEGER,
+    duration_s  REAL NOT NULL DEFAULT 0,
+    cover_path  TEXT,                              -- relative to audiobooks_root; NULL = embedded or none
+    signature   TEXT NOT NULL,                     -- file names + sizes + mtimes: rescan when it changes
+    missing     INTEGER NOT NULL DEFAULT 0,
+    added_at    TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS audiobook_files (
+    book_id    TEXT NOT NULL REFERENCES audiobooks(id) ON DELETE CASCADE,
+    idx        INTEGER NOT NULL,
+    path       TEXT NOT NULL,                      -- relative to audiobooks_root
+    duration_s REAL NOT NULL DEFAULT 0,
+    start_s    REAL NOT NULL DEFAULT 0,            -- offset of this part in the whole book
+    bytes      INTEGER,
+    PRIMARY KEY (book_id, idx)
+);
+
+CREATE TABLE IF NOT EXISTS audiobook_chapters (
+    book_id TEXT NOT NULL REFERENCES audiobooks(id) ON DELETE CASCADE,
+    idx     INTEGER NOT NULL,
+    title   TEXT NOT NULL,
+    start_s REAL NOT NULL,                         -- book-wide seconds
+    PRIMARY KEY (book_id, idx)
+);
+
+CREATE TABLE IF NOT EXISTS audiobook_bookmarks (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    book_id    TEXT NOT NULL REFERENCES audiobooks(id) ON DELETE CASCADE,
+    position_s REAL NOT NULL,
+    note       TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audiobook_bookmarks_user ON audiobook_bookmarks(user_id, book_id);
+
+-- Per-user resume position for episodes and books (book position is book-wide seconds). Newest write wins.
+CREATE TABLE IF NOT EXISTS spoken_progress (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind       TEXT NOT NULL CHECK (kind IN ('episode','book')),
+    item_id    TEXT NOT NULL,
+    position_s REAL NOT NULL DEFAULT 0,
+    duration_s REAL,
+    played     INTEGER NOT NULL DEFAULT 0,
+    speed      REAL,                               -- books: per-book speed (episodes use the show's)
+    device_id  TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, kind, item_id)
+);
+CREATE INDEX IF NOT EXISTS spoken_progress_recent ON spoken_progress(user_id, updated_at);
+
+-- Internet radio stations (shared catalogue of what anyone added) + per-user favourites.
+CREATE TABLE IF NOT EXISTS web_stations (
+    id           TEXT PRIMARY KEY,                 -- sha1(stream_url)[:16]
+    stream_url   TEXT NOT NULL UNIQUE,
+    name         TEXT NOT NULL,
+    homepage     TEXT,
+    favicon      TEXT,
+    country      TEXT,
+    tags         TEXT,                             -- comma-separated
+    codec        TEXT,
+    bitrate      INTEGER,
+    explicit     INTEGER NOT NULL DEFAULT 0,
+    radiobrowser_uuid TEXT,
+    created_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS web_station_favourites (
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    station_id TEXT NOT NULL REFERENCES web_stations(id) ON DELETE CASCADE,
+    added_at   TEXT NOT NULL,
+    last_played_at TEXT,
+    PRIMARY KEY (user_id, station_id)
 );

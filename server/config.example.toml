@@ -50,3 +50,13 @@ opus_cache_gb = 20                 # LRU limit for transcoded Opus files
 # snapcast_control_port = 1705
 # snapcast_stream_port = 4953      # snapserver source: tcp://0.0.0.0:4953?name=nasmusic&mode=server&sampleformat=48000:16:2
 # snapcast_stream_id = "nasmusic"
+
+# ---- Podcasts, audiobooks, internet radio (docs/podcasts-radio.md) ----
+# audiobooks_root = "/audiobooks"  # a SECOND read-only mount of m4b/mp3 books (folder = book); unset = off
+# podcast_poll_minutes = 60        # how often subscribed feeds are checked
+# podcast_keep_last = 3            # newest N episodes per show downloaded to <data_dir>/podcasts (0 = stream only)
+# podcast_storage_gb = 20          # cap for downloaded episodes (oldest go first)
+# podcastindex_api_key = ""        # optional, better podcast search: free key + secret from
+# podcastindex_api_secret = ""     #   https://api.podcastindex.org/signup (keep them out of git)
+# podcast_itunes_search = true     # iTunes Search API for discovery (no key; only finds feed URLs)
+# radio_browser_url = "https://all.api.radio-browser.info"  # community station directory

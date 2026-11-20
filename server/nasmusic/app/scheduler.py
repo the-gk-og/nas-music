@@ -21,7 +21,7 @@ from nasmusic.stream.transcode import OpusCache
 log = logging.getLogger(__name__)
 
 JOB_NAMES = ("scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "lyrics", "discovery", "release_radar",
-             "blends", "cleanup", "backup", "explicit", "autotag")
+             "blends", "cleanup", "backup", "explicit", "autotag", "podcasts", "audiobooks")
 # The loudness job runs after every scan; a first pass over a big library takes hours, so each run stops
 # after this long and the next scan (or the nightly chain) carries on.
 LOUDNESS_BUDGET_S = 50 * 60
@@ -144,6 +144,17 @@ class Jobs:
         res.pop("status", None)
         return res
 
+    def _podcasts(self, conn):
+        """Poll subscribed podcast feeds and keep each show's newest episodes downloaded (nasmusic.spoken)."""
+        from nasmusic.spoken import podcasts
+
+        return podcasts.run(conn, self.cfg, getattr(self, "http_transport", None))
+
+    def _audiobooks(self, conn):
+        from nasmusic.spoken import audiobooks
+
+        return audiobooks.scan(conn, self.cfg.audiobooks_root, self.cfg.data_dir)
+
     def _discovery(self, conn):
         return {"newSuggestions": ai_adapter.run_weekly_discovery(conn, ai_config(self.cfg))}
 
@@ -169,6 +180,8 @@ class Jobs:
             "backup": self._backup,
             "explicit": self._explicit,
             "autotag": self._autotag,
+            "podcasts": self._podcasts,
+            "audiobooks": self._audiobooks,
         }[name]
 
     # ----- running -----
@@ -206,6 +219,8 @@ class Jobs:
                 conn.close()
                 lock.release()
         if name in ("scan", "full_scan") and rec["ok"]:
+            if self.cfg.audiobooks_root is not None:
+                self.trigger("audiobooks", "chained")
             self.trigger("analyse", "chained")
             self.trigger("loudness", "chained")
             self.trigger("explicit", "chained")
@@ -239,6 +254,8 @@ class Jobs:
                       minutes=self.cfg.scan_interval_minutes,
                       next_run_time=datetime.now(tz) if initial_scan else None)
         sched.add_job(self.run, "cron", args=["nightly", "schedule"], id="nightly", hour=2, minute=0)
+        sched.add_job(self.run, "interval", args=["podcasts", "schedule"], id="podcasts",
+                      minutes=self.cfg.podcast_poll_minutes)
         sched.add_job(self.run, "cron", args=["discovery", "schedule"], id="discovery", day_of_week="sun", hour=3, minute=0)
         # New music comes out on Fridays: refresh Release Radar early Friday morning (after the 02:00 nightly).
         sched.add_job(self.run, "cron", args=["release_radar", "schedule"], id="release_radar", day_of_week="fri",

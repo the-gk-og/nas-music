@@ -53,6 +53,15 @@ class Config:
     snapcast_control_port: int = 1705
     snapcast_stream_port: int = 4953            # snapserver `tcp://...?mode=server` source the server feeds PCM to
     snapcast_stream_id: str = "nasmusic"        # that source's name= in snapserver.conf
+    # ---- podcasts, audiobooks, internet radio (nasmusic/spoken; never part of music features) ----
+    audiobooks_root: Path | None = None         # separate read-only folder of books (folder = book); unset = off
+    podcast_poll_minutes: int = 60
+    podcast_keep_last: int = 3                  # server downloads per show (newest N; 0 = stream from the feed)
+    podcast_storage_gb: float = 20.0            # cap for data_dir/podcasts
+    podcastindex_api_key: str | None = None     # free key + secret from https://api.podcastindex.org
+    podcastindex_api_secret: str | None = None
+    podcast_itunes_search: bool = True          # iTunes Search API for podcast discovery (no key)
+    radio_browser_url: str = "https://all.api.radio-browser.info"
     source_path: Path | None = field(default=None, compare=False)
 
     @property
@@ -119,9 +128,14 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
     for key in ("library_root", "data_dir"):
         pth = Path(vals[key]).expanduser()
         vals[key] = pth if pth.is_absolute() else (base / pth).resolve()
+    if vals.get("audiobooks_root"):
+        pth = Path(vals["audiobooks_root"]).expanduser()
+        vals["audiobooks_root"] = pth if pth.is_absolute() else (base / pth).resolve()
+    else:
+        vals["audiobooks_root"] = None
     for key in ("tunnel_url", "cf_access_client_id", "cf_access_client_secret", "admin_password_hash",
                 "lastfm_api_key", "acoustid_api_key", "lan_public_url", "cast_media_url", "homeassistant_url", "homeassistant_token",
-                "snapcast_host"):
+                "snapcast_host", "podcastindex_api_key", "podcastindex_api_secret"):
         if vals.get(key) == "":
             vals[key] = None
     if vals.get("tunnel_url"):
@@ -129,4 +143,6 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
     cfg = Config(**vals, source_path=source)
     if cfg.opus_cache_gb <= 0:
         raise ConfigError("opus_cache_gb must be positive")
+    if cfg.podcast_keep_last < 0 or cfg.podcast_storage_gb < 0 or cfg.podcast_poll_minutes < 5:
+        raise ConfigError("podcast_keep_last/podcast_storage_gb must be >= 0 and podcast_poll_minutes >= 5")
     return cfg
