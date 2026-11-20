@@ -31,6 +31,10 @@
   import Account from './screens/Account.svelte';
   import AdminConsole from './screens/admin/AdminConsole.svelte';
   import PlayerBar from './components/PlayerBar.svelte';
+  import SpokenBar from './components/SpokenBar.svelte';
+  import Spoken from './screens/spoken/Spoken.svelte';
+  import PodcastDetail from './screens/spoken/PodcastDetail.svelte';
+  import BookDetail from './screens/spoken/BookDetail.svelte';
   import RightPanel from './components/RightPanel.svelte';
   import { appearance } from './lib/appearance.svelte';
   import { library } from './lib/library.svelte';
@@ -168,6 +172,9 @@
     {:else if n === 'equalizer'}<Equalizer />
     {:else if n === 'account'}<Account />
     {:else if n === 'admin'}<AdminConsole />
+    {:else if n === 'spoken'}<Spoken />
+    {:else if n === 'podcast'}<PodcastDetail id={p} />
+    {:else if n === 'book'}<BookDetail id={p} />
     {:else}<Home />
     {/if}
   {/snippet}
@@ -180,6 +187,7 @@
           <div class="view">{@render page(name, ui.route.param)}</div>
         {/key}
       </div>
+      {#if !fullNow}<SpokenBar />{/if}
       {#if form !== 'desktop' && !fullNow}<MiniPlayer />{/if}
     </main>
     {#if form === 'desktop' && ui.panel && !fullNow && name !== 'admin'}<RightPanel />{/if}

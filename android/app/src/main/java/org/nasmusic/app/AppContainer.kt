@@ -55,6 +55,7 @@ class AppContainer(val context: Context) {
     val discovery = ApiFactory.discovery(callFactory)
     val jam = ApiFactory.jam(callFactory)
     val uploads = org.nasmusic.app.upload.UploadsApi.create(callFactory)
+    val spokenApi: org.nasmusic.app.data.api.SpokenApi = ApiFactory.spoken(callFactory)
 
     val pairing = PairingRepository(secureStore, baseClient)
     val musicDir: File = File(context.filesDir, "music")
@@ -103,6 +104,10 @@ class AppContainer(val context: Context) {
     val sleep = org.nasmusic.app.playback.SleepTimerState()
     val contextCollector = ContextCollector(context, scope)
     val feeds = org.nasmusic.app.data.FeedRepository(api)
+    /** Podcasts, audiobooks, internet radio: a separate player/service, never part of music features. */
+    val spoken: org.nasmusic.app.spoken.SpokenPlayer = org.nasmusic.app.spoken.SpokenPlayer(
+        context, { spokenApi }, org.nasmusic.app.spoken.SpokenDownloads(callFactory, File(context.filesDir, "spoken")),
+    )
     val family = org.nasmusic.app.data.FamilyRepository { api }.also { f -> connect.onFamilyChanged = { f.changed(it) } }
     /** api 0.7 notifications: Connect pushes + catch-up on every (re)connect; NewMusicWorker polls in the background. */
     val notifications = org.nasmusic.app.notify.NotificationRepository(context) { api }.also { n ->
@@ -120,6 +125,8 @@ class AppContainer(val context: Context) {
             contextCollector.syncFrom(api)
             pullAppearance()
             family.refresh()
+            runCatching { spoken.flush() }
+            if (r == Route.LAN) scope.launch { runCatching { spoken.downloads.autoDownload(spokenApi) } }
         }
     }
 

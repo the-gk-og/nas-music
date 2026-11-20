@@ -122,7 +122,7 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
     from nasmusic import web
     from nasmusic.app import (account_api, admin_api, api, autotag_api, cast_api, collections_api, connect_api,
                               discover_api, family_api, insights_api, jam_api, logbuffer, scrobble_api,
-                              smart_api, tags_api, uploads_api, voice_api)
+                              smart_api, spoken_api, tags_api, uploads_api, voice_api)
     from nasmusic.web import spa
 
     install_token_redaction()
@@ -133,7 +133,8 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
               collections_api.router, discover_api.router, insights_api.router, insights_api.admin, admin_api.router,
               tags_api.router, autotag_api.router, connect_api.router, cast_api.media_router, cast_api.router,
               family_api.router, family_api.admin, jam_api.public, jam_api.host, voice_api.public,
-              voice_api.router, uploads_api.router, uploads_api.admin, smart_api.router, scrobble_api.router):
+              voice_api.router, uploads_api.router, uploads_api.admin, smart_api.router, scrobble_api.router,
+              spoken_api.router):
         app.include_router(r, prefix="/api/v1")
     app.include_router(web.router)
     app.include_router(spa.router_for(cfg, web.render_join))  # catch-all: must stay last

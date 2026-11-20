@@ -112,6 +112,7 @@
       {#each CHIPS as [c, label]}
         <button class="chip" class:on={chip === c} role="tab" aria-selected={chip === c} onclick={() => ui.go('library', c)}>{label}</button>
       {/each}
+      <button class="chip" onclick={() => ui.go('spoken')}>Podcasts &amp; more</button>
     </div>
     <div class="tools">
       {#if SORTS[chip].length}

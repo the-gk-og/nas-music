@@ -46,6 +46,8 @@ services:
       # Uploads (deploy/README.md "Uploads"): a SEPARATE writable folder, owner 568, group 3000, mode 2775.
       # Create it on the NAS first, then set upload_root = "/uploads" in /data/config.toml.
       - /mnt/NAS/Shared/music-uploads:/uploads
+      # Optional audiobooks (config.toml: audiobooks_root = "/audiobooks"); read-only like the music.
+      # - /mnt/NAS/Shared/audiobooks:/audiobooks:ro
       - nasmusic-data:/data
 
   # Public HTTPS via the friend's relay (deploy/relay). Caddy gets the Let's Encrypt certificate.

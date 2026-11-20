@@ -18,8 +18,7 @@ from pydantic import BaseModel, Field
 
 from nasmusic.app.context import AppContext, admin_device, ctx, db, device
 from nasmusic.auth import Device
-from nasmusic.cast import CastHooks, Media, SpeakerRegistry
-from nasmusic.cast import signing
+from nasmusic.cast import CastHooks, Media, SpeakerRegistry, signing
 from nasmusic.config import Config
 from nasmusic.core import open_db
 from nasmusic.library import art
@@ -264,6 +263,109 @@ def sign_urls(body: SignBody, request: Request, c: AppContext = Depends(ctx),
             }
         )
     return {"items": out}
+
+
+# ---------- podcasts / audiobooks / internet radio (nasmusic.spoken) ----------
+
+SPOKEN_KINDS = ("episode", "book", "station")
+
+
+@media_router.get("/cast/spoken/{kind}/{ident}")
+async def cast_spoken(kind: Literal["episode", "book", "station"], ident: str, request: Request,
+                      exp: int = Query(0), sig: str = Query("", max_length=64), c: AppContext = Depends(ctx),
+                      conn: sqlite3.Connection = Depends(db)):
+    """Signed media for speakers: an episode, an audiobook part (`<bookId>.<part>`) or a live station."""
+    from nasmusic.app import spoken_api
+
+    if not signing.verify(cast_key(c), "spoken", f"{kind}:{ident}", "", exp, sig):
+        _forbidden()
+    if kind == "episode":
+        row = conn.execute("SELECT * FROM podcast_episodes WHERE id = ?", (ident,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "not found")
+        return await spoken_api.serve_episode(c, row, request.headers.get("range"))
+    if kind == "book":
+        bid, _, part = ident.partition(".")
+        if not part.isdigit():
+            raise HTTPException(404, "not found")
+        return spoken_api.serve_book_part(c.cfg, conn, bid, int(part))
+    row = conn.execute("SELECT stream_url FROM web_stations WHERE id = ?", (ident,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "not found")
+    return await spoken_api.serve_station(c, ident, row["stream_url"])
+
+
+@media_router.get("/cast/spoken-art/{kind}/{ident}")
+def cast_spoken_art(kind: Literal["podcast", "book", "station"], ident: str, exp: int = Query(0),
+                    sig: str = Query("", max_length=64), c: AppContext = Depends(ctx),
+                    conn: sqlite3.Connection = Depends(db)):
+    from nasmusic.app import spoken_api
+
+    if not signing.verify(cast_key(c), "spokenart", f"{kind}:{ident}", "", exp, sig):
+        _forbidden()
+    return spoken_api.cover_file(c, conn, kind, ident, 512)
+
+
+def _signed(base: str, key: bytes, kind: str, path_kind: str, ident: str, ttl: float) -> str:
+    from urllib.parse import quote, urlencode
+
+    exp = signing.expiry(ttl)
+    q = urlencode({"exp": exp, "sig": signing.sign(key, kind, f"{path_kind}:{ident}", "", exp)})
+    route = "spoken" if kind == "spoken" else "spoken-art"
+    return f"{base.rstrip('/')}/api/v1/cast/{route}/{path_kind}/{quote(ident, safe='.')}?{q}"
+
+
+class SpokenSignBody(BaseModel):
+    kind: Literal["episode", "book", "station"]
+    id: str = Field(min_length=1, max_length=64)
+    part: int | None = Field(default=None, ge=0)   # books: which part (default: every part)
+
+
+@router.post("/cast/sign-spoken")
+def sign_spoken(body: SpokenSignBody, request: Request, c: AppContext = Depends(ctx),
+                conn: sqlite3.Connection = Depends(db), me: Device = Depends(device)):
+    """Signed URLs for casting an episode, audiobook parts or a live station (family mode respected)."""
+    from nasmusic.spoken import audiobooks, podcasts, stations
+
+    key = cast_key(c)
+    base = sign_base(request, c.cfg)
+    items = []
+    if body.kind == "episode":
+        r = podcasts.episode_row(conn, me.user_id, body.id)
+        if r is None:
+            raise HTTPException(404, "not found")
+        ttl = _ttl(c.cfg, r["duration_s"] or 4 * 3600)
+        items.append({"url": _signed(base, key, "spoken", "episode", r["id"], ttl),
+                      "artUrl": _signed(base, key, "spokenart", "podcast", r["podcast_id"], ttl),
+                      "contentType": r["enclosure_type"] or "audio/mpeg", "title": r["title"],
+                      "subtitle": r["ptitle"], "durationS": r["duration_s"], "live": False,
+                      "expiresAt": signing.expiry(ttl)})
+    elif body.kind == "book":
+        b = conn.execute("SELECT * FROM audiobooks WHERE id = ? AND missing = 0", (body.id,)).fetchone()
+        if b is None:
+            raise HTTPException(404, "not found")
+        for f in conn.execute("SELECT * FROM audiobook_files WHERE book_id = ? ORDER BY idx", (body.id,)):
+            if body.part is not None and f["idx"] != body.part:
+                continue
+            ttl = _ttl(c.cfg, f["duration_s"])
+            items.append({"url": _signed(base, key, "spoken", "book", f"{b['id']}.{f['idx']}", ttl),
+                          "artUrl": _signed(base, key, "spokenart", "book", b["id"], ttl),
+                          "contentType": audiobooks.media_type(f["path"]), "title": b["title"],
+                          "subtitle": b["author"], "durationS": f["duration_s"], "startS": f["start_s"],
+                          "part": f["idx"], "live": False, "expiresAt": signing.expiry(ttl)})
+    else:
+        got = stations.get(conn, me.user_id, body.id)
+        if got is None:
+            raise HTTPException(404, "not found")
+        st = got[0]
+        ttl = signing.MAX_TTL_S
+        items.append({"url": _signed(base, key, "spoken", "station", st["id"], ttl),
+                      "artUrl": _signed(base, key, "spokenart", "station", st["id"], ttl) if st["favicon"] else None,
+                      "contentType": {"AAC": "audio/aac", "AAC+": "audio/aac", "OGG": "audio/ogg",
+                                      "FLAC": "audio/flac"}.get(st["codec"] or "", "audio/mpeg"),
+                      "title": st["name"], "subtitle": "Internet radio", "durationS": None, "live": True,
+                      "expiresAt": signing.expiry(ttl)})
+    return {"items": items}
 
 
 def cast_app(context: AppContext) -> FastAPI:

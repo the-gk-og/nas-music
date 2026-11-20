@@ -248,6 +248,17 @@ export class ApiClient {
     return url;
   }
 
+  /**
+   * URL for spoken-word media and covers (`/stream/episode|book|station/…`, `/art/podcast|book|station/…`),
+   * usable in <audio>/<img>: same-origin cookie, or `?token=` in bearer mode. Mock mode: '' (no media).
+   */
+  mediaUrl(path: string): string {
+    if (this.media) return '';
+    const url = this.base + path;
+    if (this.mode === 'bearer' && this.token) return `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(this.token)}`;
+    return url;
+  }
+
   streamBlob(trackId: string, format: 'opus' | 'flac' = 'opus'): Promise<string> {
     return this.blobUrl(`/stream/${encodeURIComponent(trackId)}?format=${format}`);
   }

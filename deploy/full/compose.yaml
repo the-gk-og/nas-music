@@ -20,6 +20,8 @@ services:
       NASMUSIC_CONFIG: /data/config.toml
     volumes:
       - /mnt/POOL/media/music:/music:ro
+      # Optional audiobooks (config.toml: audiobooks_root = "/audiobooks"); read-only like the music.
+      # - /mnt/NAS/Shared/audiobooks:/audiobooks:ro
       - /mnt/POOL/apps/nasmusic:/data
 
   cloudflared:
