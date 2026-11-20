@@ -53,6 +53,7 @@ class AppContainer(val context: Context) {
     val callFactory = RoutedCallFactory(::clients, { router.route.value }, baseClient)
     val api = ApiFactory.create(callFactory)
     val discovery = ApiFactory.discovery(callFactory)
+    val jam = ApiFactory.jam(callFactory)
 
     val pairing = PairingRepository(secureStore, baseClient)
     val musicDir: File = File(context.filesDir, "music")

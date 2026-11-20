@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Timer
@@ -95,6 +96,7 @@ fun QueuePanel(c: AppContainer, onOpenFull: (() -> Unit)? = null) {
     var sortMenu by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<String?>(null) } // "save" | "rename"
     var text by remember { mutableStateOf("") }
+    var jamOpen by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -152,6 +154,7 @@ fun QueuePanel(c: AppContainer, onOpenFull: (() -> Unit)? = null) {
                     Text(formatDuration(tracks.sumOf { it.durationS }))
                 }
             }
+            IconButton(onClick = { jamOpen = true }) { Icon(Icons.Default.Groups, "Jam: listen together") }
             IconButton(onClick = { text = title.substringAfter(". "); dialog = "save" }, enabled = tracks.isNotEmpty()) { Icon(Icons.Default.Save, "Save as playlist") }
             Column {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreHoriz, "Queue menu") }
@@ -176,6 +179,8 @@ fun QueuePanel(c: AppContainer, onOpenFull: (() -> Unit)? = null) {
             if (showingCurrent) c.player.skipTo(i) else viewed?.let { c.player.playQueue(it, i) }
         }
     }
+
+    if (jamOpen) JamSheet(c) { jamOpen = false }
 
     dialog?.let { kind ->
         AlertDialog(

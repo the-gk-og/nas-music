@@ -23,6 +23,7 @@
 
   let phase = $state<'loading' | 'join' | 'in' | 'gone' | 'invalid'>('loading');
   let goneText = $state('');
+  let canRejoin = $state(false);
   let preview = $state<JamPreview | null>(null);
   let name = $state('');
   let busy = $state(false);
@@ -99,8 +100,10 @@
           offset = clockOffset(e.serverTime);
           syncAudio();
         } else if (e.type === 'reaction') float(e.emoji, e.name);
-        else if (e.type === 'gone')
+        else if (e.type === 'gone') {
+          canRejoin = e.reason !== 'ended';
           leaveWith(e.reason === 'kicked' ? 'The host removed you from this Jam.' : e.reason === 'ended' ? 'The Jam has ended. Thanks for listening!' : 'Your Jam session expired.');
+        }
       },
     });
     sock.start();
@@ -198,6 +201,7 @@
 
   async function leave() {
     if (token) await guestApi.leave(token).catch(() => {});
+    canRejoin = true;
     leaveWith('You left the Jam.');
   }
 
@@ -248,7 +252,7 @@
       <div class="big">♫</div>
       <h1>{phase === 'gone' ? 'See you next time' : 'Jam'}</h1>
       <p class="muted">{goneText}</p>
-      {#if phase === 'gone' && preview}<button class="btn" onclick={() => location.reload()}>Rejoin</button>{/if}
+      {#if phase === 'gone' && canRejoin}<button class="btn" onclick={() => location.reload()}>Rejoin</button>{/if}
     </div>
   {:else if phase === 'join' && preview}
     <form class="center card" onsubmit={(e) => { e.preventDefault(); void join(); }}>
