@@ -29,7 +29,7 @@
 
   const name = $derived(album ? `Album: ${album.title}` : '');
   const meta = { source: 'library' as const, addedFrom: 'album' };
-  const item = $derived<ShelfItem | null>(album ? { type: 'album', id: album.id, title: album.title, subtitle: album.artist, albumId: album.id } : null);
+  const item = $derived<ShelfItem | null>(album ? { type: 'album', id: album.id, title: album.title, subtitle: album.artist, albumId: album.id, album } : null);
   const moreItems = $derived(more.map((a): ShelfItem => ({ type: 'album', id: a.id, title: a.title, subtitle: String(a.year ?? ''), albumId: a.id })));
 </script>
 

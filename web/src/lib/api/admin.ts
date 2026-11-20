@@ -1,7 +1,7 @@
 // Admin console API (/api/v1/admin/*). Shapes are this client's proposal until api/openapi.yaml defines
 // them; everything admin goes through this one module so adopting the real contract touches one file.
 import type { ApiClient } from './client';
-import type { DeviceKind, MyDevice, Track } from '../types';
+import type { DeviceKind, ExplicitStatus, FamilyMode, MyDevice, Track } from '../types';
 
 export interface DiskUsage {
   name: string;
@@ -153,6 +153,8 @@ export interface TagValues {
   year?: number | null;
   genre?: string | null;
   lyrics?: string | null;
+  /** v6 admin verdict (null = automatic). */
+  explicit?: 'explicit' | 'clean' | null;
 }
 export type TagField = keyof TagValues | 'cover';
 
@@ -333,4 +335,63 @@ export function filterLogs(entries: LogEntry[], minLevel: string, q: string): Lo
   return entries.filter(
     (e) => Math.max(0, order.indexOf(e.level)) >= min && (!needle || e.message.toLowerCase().includes(needle) || e.logger.toLowerCase().includes(needle)),
   );
+}
+
+// ---- v6 explicit flags + family mode (/admin/explicit, /admin/family) ----
+
+export type ExplicitSource = 'admin' | 'tags' | 'deezer' | 'lyrics';
+
+export interface ExplicitEvidence {
+  status: ExplicitStatus;
+  source: ExplicitSource | null;
+  admin: 'explicit' | 'clean' | null;
+  tags: 'explicit' | 'clean' | null;
+  deezer: 'explicit' | 'clean' | 'not_found' | null;
+  deezerId?: number | null;
+  lyrics: 'probable' | 'clean' | 'none' | null;
+  lyricsHits: number | null;
+  updatedAt?: string | null;
+}
+
+export interface ExplicitReviewItem extends ExplicitEvidence {
+  trackId: string;
+  title: string;
+  artist: string;
+  album: string;
+  albumId: string;
+}
+
+export interface ExplicitReview {
+  total: number;
+  counts: Record<ExplicitStatus, number>;
+  items: ExplicitReviewItem[];
+}
+
+export interface AdminFamilyUser extends FamilyMode {
+  userId: string;
+  username: string;
+  isAdmin: boolean;
+  lockedBy: string | null;
+}
+
+export function familyApi(c: ApiClient) {
+  const enc = encodeURIComponent;
+  return {
+    review: (p: { status?: ExplicitStatus[]; source?: ExplicitSource | 'none'; q?: string; limit?: number; offset?: number } = {}) => {
+      const qs = new URLSearchParams();
+      for (const s of p.status ?? []) qs.append('status', s);
+      if (p.source) qs.set('source', p.source);
+      if (p.q) qs.set('q', p.q);
+      qs.set('limit', String(p.limit ?? 100));
+      qs.set('offset', String(p.offset ?? 0));
+      return c.get<ExplicitReview>(`/admin/explicit?${qs}`);
+    },
+    set: (b: { trackIds?: string[]; albumIds?: string[]; value: 'explicit' | 'clean' | null }) =>
+      c.post<TagEditResult & { tracks: number }>('/admin/explicit', b),
+    users: () => c.get<AdminFamilyUser[]>('/admin/family'),
+    setUser: (
+      userId: string,
+      b: Partial<Pick<FamilyMode, 'enabled' | 'hideProbable' | 'hideUnknown' | 'locked'>> & { pin?: string; clearPin?: boolean },
+    ) => c.put<AdminFamilyUser>(`/admin/users/${enc(userId)}/family`, b),
+  };
 }

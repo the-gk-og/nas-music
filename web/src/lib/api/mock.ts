@@ -66,6 +66,7 @@ export class MockBackend {
   latencyMs = 60;
   hub = new MockHub(this);
   admin = new MockAdmin();
+  family = { enabled: false, hideProbable: true, hideUnknown: false, locked: false, hasPin: false };
   pinsList: { type: PinType; id: string }[] = [];
   toget: ToGetItem[] = [];
   catalog: CatalogItem[] = [];
@@ -238,6 +239,13 @@ export class MockBackend {
     if (path === '/me/settings') {
       if (method === 'PUT') Object.assign(this.settings, (body.settings as Record<string, unknown>) ?? {});
       return { settings: this.settings };
+    }
+    if (path === '/me/family') {
+      if (method === 'PUT') {
+        const b = body as { enabled?: boolean; hideProbable?: boolean; hideUnknown?: boolean };
+        for (const k of ['enabled', 'hideProbable', 'hideUnknown'] as const) if (typeof b[k] === 'boolean') this.family[k] = b[k]!;
+      }
+      return this.family;
     }
     if (path === '/me/data') {
       if (method === 'DELETE') return undefined;
@@ -610,6 +618,18 @@ export class MockBackend {
     // admin
     if (path.startsWith('/admin/') && !me.isAdmin) throw new HttpError(403, 'Admins only');
     const A = this.admin;
+    if (path === '/admin/family') return this.users.map((u) => ({ userId: u.id, username: u.username, isAdmin: u.isAdmin, lockedBy: null, ...this.family }));
+    if ((r = m(/^\/admin\/users\/([^/]+)\/family$/))) {
+      const u = this.users.find((x) => x.id === r![1]);
+      if (!u) throw new HttpError(404, 'no such user');
+      return { userId: u.id, username: u.username, isAdmin: u.isAdmin, lockedBy: null, ...this.family, ...(body as object) };
+    }
+    if (path === '/admin/explicit') {
+      if (method === 'POST') return { batchId: 'b', changed: 0, tracks: ((body.trackIds as string[]) ?? []).length };
+      const items = L.tracks.slice(0, 20).map((t) => ({ trackId: t.id, title: t.title, artist: t.artist, album: t.album, albumId: t.albumId,
+        status: 'unknown', source: null, admin: null, tags: null, deezer: null, lyrics: null, lyricsHits: null }));
+      return { total: items.length, counts: { explicit: 0, probable: 0, clean: 0, unknown: L.tracks.length }, items };
+    }
     if (path === '/admin/status') return A.status({ tracks: L.tracks.length, albums: L.albums.length, artists: L.artists.length });
     if (path === '/admin/now-playing') {
       const st = this.hub.state;

@@ -23,6 +23,7 @@
   import { player } from '../lib/player.svelte';
   import { ui } from '../lib/ui.svelte';
   import Cover from './Cover.svelte';
+  import ExplicitBadge from './ExplicitBadge.svelte';
 
   const s = $derived(player.shown);
   const t = $derived(s.track);
@@ -40,7 +41,7 @@
         <Cover albumId={t.albumId} size={128} />
       </button>
       <div class="meta">
-        <button class="title ellipsis" onclick={() => ui.go('album', t.albumId)}>{t.title}</button>
+        <button class="title ellipsis" onclick={() => ui.go('album', t.albumId)}><ExplicitBadge status={t.explicit} />{t.title}</button>
         <button class="artist ellipsis" onclick={() => ui.go('artist', t.artistId)}>{t.artist}</button>
         {#if player.remoteDevice}<div class="remote ellipsis"><Speaker size={12} /> {player.remoteLabel}</div>{/if}
       </div>

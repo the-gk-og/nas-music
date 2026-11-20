@@ -18,6 +18,8 @@ export interface Album {
   durationS?: number;
   hasArt?: boolean;
   mbid?: string | null;
+  /** v6: contains explicit tracks (of those the caller can see) — "E" badge. */
+  explicit?: boolean;
 }
 
 export interface Track {
@@ -37,6 +39,21 @@ export interface Track {
   rating?: number | null;
   /** Volume levelling (ReplayGain 2.0 scale); absent until the server has measured the track. */
   replayGain?: ReplayGain | null;
+  /** v6 explicit-content flag; "probable" = lyrics word list, not certain. */
+  explicit?: ExplicitStatus;
+  /** v6, queues/playlists only: hidden by the caller's family mode — players skip it. */
+  familyHidden?: boolean;
+}
+
+export type ExplicitStatus = 'explicit' | 'probable' | 'clean' | 'unknown';
+
+export interface FamilyMode {
+  enabled: boolean;
+  hideProbable: boolean;
+  hideUnknown: boolean;
+  /** Locked by an admin: the user can only tighten it (loosening needs the PIN). */
+  locked: boolean;
+  hasPin: boolean;
 }
 
 export interface ReplayGain {
@@ -369,6 +386,7 @@ export type ServerMessage =
   | { type: 'release' }
   | { type: 'queues'; queueId: string }
   | { type: 'playlist'; playlistId: string; rev: number | null; deleted?: boolean }
+  | { type: 'family'; family: FamilyMode }
   | { type: 'pong' }
   | { type: 'error'; detail: string; source?: 'speaker' };
 

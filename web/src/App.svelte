@@ -32,6 +32,7 @@
   import { appearance } from './lib/appearance.svelte';
   import { library } from './lib/library.svelte';
   import { tabletSidePane } from './lib/v3';
+  import { family } from './lib/family.svelte';
 
   /** `/join/<code>` (served by the server) or `#/join/<code>` registers with an invite. */
   function inviteFromUrl(): string {
@@ -59,6 +60,7 @@
     void appearance.load();
     void library.refreshPlaylists();
     void library.refreshPins();
+    void family.load();
   }
 
   function onSignedIn() {
