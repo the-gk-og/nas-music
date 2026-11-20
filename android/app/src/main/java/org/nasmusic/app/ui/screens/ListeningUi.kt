@@ -38,17 +38,66 @@ import org.nasmusic.app.AppContainer
 import org.nasmusic.app.data.api.AutoEqEntry
 import org.nasmusic.app.playback.SleepTimer
 
-/** Settings → Playback: crossfade and volume levelling (kept on this phone). */
+/** Settings → Playback: transitions (gapless / crossfade / DJ automix) and volume levelling (kept on this phone). */
 @Composable
 fun PlaybackSettings(c: AppContainer) {
     val s by c.listening.settings.collectAsStateWithLifecycle()
-    Text("Crossfade: " + if (s.crossfadeS == 0) "off (gapless)" else "${s.crossfadeS} s")
-    Slider(
-        value = s.crossfadeS.toFloat(),
-        onValueChange = { v -> c.listening.update { it.copy(crossfadeS = v.toInt()) } },
-        valueRange = 0f..12f, steps = 11,
+    Text("Transitions")
+    val transitions = listOf("off" to "Off", "crossfade" to "Crossfade", "dj" to "DJ automix")
+    SingleChoiceSegmentedButtonRow {
+        transitions.forEachIndexed { i, (k, l) ->
+            SegmentedButton(
+                selected = s.transition == k,
+                onClick = { c.listening.update { it.copy(transition = k, crossfadeS = if (k != "off" && it.crossfadeS == 0) 6 else it.crossfadeS) } },
+                shape = SegmentedButtonDefaults.itemShape(i, transitions.size),
+            ) { Text(l) }
+        }
+    }
+    Text(
+        when (s.transition) {
+            "off" -> "Gapless: each song follows straight on."
+            "crossfade" -> "Blend the end of a song into the next."
+            else -> "DJ automix: beat-matched mixes from each song's outro into the next one's intro, with a bass swap. " +
+                "Songs the server hasn't analysed yet, or that don't match, get a smooth crossfade."
+        } + " Songs that follow each other on the same album always play gapless.",
+        style = MaterialTheme.typography.bodySmall,
     )
-    Text("Songs that follow each other on the same album always play gapless.", style = MaterialTheme.typography.bodySmall)
+    if (s.transition != "off") {
+        val len = if (s.crossfadeS == 0) 6 else s.crossfadeS
+        Text((if (s.transition == "dj") "Crossfade when songs don't match" else "Crossfade") + ": $len s")
+        Slider(
+            value = len.toFloat(),
+            onValueChange = { v -> c.listening.update { it.copy(crossfadeS = v.toInt()) } },
+            valueRange = 1f..12f, steps = 10,
+        )
+    }
+    if (s.transition == "dj") {
+        Text("Mix length")
+        SingleChoiceSegmentedButtonRow {
+            org.nasmusic.app.playback.Automix.DJ_BEATS.forEachIndexed { i, b ->
+                SegmentedButton(selected = s.djBeats == b, onClick = { c.listening.update { it.copy(djBeats = b) } },
+                    shape = SegmentedButtonDefaults.itemShape(i, 3)) { Text("$b beats") }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Allow tempo change")
+                Text("Speed the next song up or down (up to 8 %, pitch kept) so the beats line up. Off: only songs at the same tempo are beat-matched.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(s.allowTempo, { on -> c.listening.update { it.copy(allowTempo = on) } })
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Reorder for flow")
+                Text("When radio, a mix or a playlist starts, order it by tempo, key and energy. Songs only move a few places.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(s.automixOrder, { on -> c.listening.update { it.copy(automixOrder = on) } })
+        }
+        Text("When you cast to a speaker or play on another device, it plays normally (gapless, or the speaker's own crossfade); " +
+            "DJ mixing happens only when this phone plays the music.", style = MaterialTheme.typography.bodySmall)
+    }
     Text("Volume levelling")
     val modes = listOf("off" to "Off", "track" to "Track", "album" to "Album", "auto" to "Auto")
     SingleChoiceSegmentedButtonRow {

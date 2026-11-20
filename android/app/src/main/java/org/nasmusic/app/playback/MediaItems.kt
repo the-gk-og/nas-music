@@ -4,7 +4,9 @@ import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import org.nasmusic.app.data.api.ApiFactory
 import org.nasmusic.app.data.api.Track
+import org.nasmusic.app.data.api.TrackMix
 import org.nasmusic.app.net.RoutedCallFactory
 
 /** Where a play came from; matches the Event.source enum in the API. */
@@ -27,6 +29,8 @@ object MediaItems {
     const val EXTRA_RG_TRACK_PEAK = "nas.rgTrackPeak"
     const val EXTRA_RG_ALBUM_GAIN = "nas.rgAlbumGain"
     const val EXTRA_RG_ALBUM_PEAK = "nas.rgAlbumPeak"
+    /** api 0.7 Track.mix as JSON (DJ automix). */
+    const val EXTRA_MIX = "nas.mix"
 
     fun artUrl(albumId: String, size: Int = 512) = RoutedCallFactory.virtual("art/$albumId?size=$size")
 
@@ -52,6 +56,7 @@ object MediaItems {
                 rg.albumGain?.let { putDouble(EXTRA_RG_ALBUM_GAIN, it) }
                 rg.albumPeak?.let { putDouble(EXTRA_RG_ALBUM_PEAK, it) }
             }
+            t.mix?.let { putString(EXTRA_MIX, ApiFactory.json.encodeToString(TrackMix.serializer(), it)) }
         }
         val md = MediaMetadata.Builder()
             .setTitle(t.title)
@@ -87,6 +92,7 @@ object MediaItems {
                     it.getDouble(EXTRA_RG_TRACK_GAIN), it.dbl(EXTRA_RG_TRACK_PEAK), it.dbl(EXTRA_RG_ALBUM_GAIN), it.dbl(EXTRA_RG_ALBUM_PEAK),
                 )
             },
+            mix = x?.getString(EXTRA_MIX)?.let { j -> runCatching { ApiFactory.json.decodeFromString(TrackMix.serializer(), j) }.getOrNull() },
         )
     }
 

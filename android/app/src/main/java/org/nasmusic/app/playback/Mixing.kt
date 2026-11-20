@@ -52,8 +52,23 @@ class Crossfader(private val build: () -> ExoPlayer) {
     private var startedAtMs = 0L
     private var lengthMs = 0L
     private var startVolume = 1f
+    /** DJ automix drives volume and stops it itself ([startManual]); [step] leaves it alone. */
+    private var manual = false
 
     val active: Boolean get() = startedAtMs > 0
+    val startedAt: Long get() = startedAtMs
+    val positionMs: Long get() = fader?.currentPosition ?: 0L
+    val playing: Boolean get() = fader?.isPlaying == true
+
+    fun startManual(volume: Float) {
+        val f = fader ?: return
+        manual = true
+        f.volume = volume
+        f.play()
+        startedAtMs = System.currentTimeMillis()
+    }
+
+    fun setVolume(v: Float) { fader?.volume = v.coerceIn(0f, 1f) }
 
     fun prepare(item: MediaItem, startMs: Long, speed: Float) {
         if (preparedId == item.mediaId && fader != null) return
@@ -79,7 +94,7 @@ class Crossfader(private val build: () -> ExoPlayer) {
 
     /** Advance the fade. Returns progress 0..1 (for the main player's fade-in), or null when no fade runs. */
     fun step(): Double? {
-        if (!active) return null
+        if (!active || manual) return null
         val x = (System.currentTimeMillis() - startedAtMs).toDouble() / lengthMs
         if (x >= 1.0) {
             release()
@@ -94,5 +109,6 @@ class Crossfader(private val build: () -> ExoPlayer) {
         fader = null
         preparedId = null
         startedAtMs = 0
+        manual = false
     }
 }

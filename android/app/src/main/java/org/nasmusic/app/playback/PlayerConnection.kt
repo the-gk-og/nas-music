@@ -69,6 +69,8 @@ class PlayerConnection(
     private val api: () -> NasMusicApi,
     private val scope: CoroutineScope,
     private val offline: OfflineSource = OfflineSource.NONE,
+    /** Listening settings (DJ automix ordering). */
+    private val listening: () -> ListeningSettings = { ListeningSettings() },
 ) {
     private var controller: MediaController? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -238,6 +240,22 @@ class PlayerConnection(
             if (kept.size < tracks.size) offline.toast("Offline: playing the ${kept.size} downloaded songs")
             return playResolved(kept, at, source, queueName, mixId, reasons?.let { r -> kept.map { k -> r.getOrNull(tracks.indexOf(k)) } }, searchQuery)
         }
+        // DJ automix "reorder for flow": mixes, blends and playlists (not albums, artists, search or downloads)
+        val flowList = source == PlaySource.MIX || source == PlaySource.MORE_LIKE || queueName.startsWith("Playlist: ")
+        if (listening().djOrdering && flowList && !connect.isRemote && ext == null && tracks.size - startIndex > 2) {
+            scope.launch {
+                val start = startIndex.coerceIn(0, tracks.size - 1)
+                val ordered = runCatching {
+                    kotlinx.coroutines.withTimeout(2_000) {
+                        api().automixOrder(org.nasmusic.app.data.api.AutomixOrderRequest(tracks.drop(start).map { it.id }))
+                    }
+                }.getOrNull()?.let { Automix.reorder(tracks, { it.id }, start, reasons, it.trackIds) }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    playResolved(ordered?.first ?: tracks, start, source, queueName, mixId, ordered?.second ?: reasons, searchQuery)
+                }
+            }
+            return
+        }
         playResolved(tracks, startIndex, source, queueName, mixId, reasons, searchQuery)
     }
 
@@ -292,7 +310,7 @@ class PlayerConnection(
     /** Start a radio (docs/v3-ux.md §5) and play it here, or on the active device when remote. */
     suspend fun startRadio(seed: org.nasmusic.app.data.api.RadioSeed): Boolean {
         val hints = if (seed.type == "moment") AiRadio.context(context) else null
-        val q = (if (offline.isOffline() && !connect.isRemote) null else runCatching { api().startRadio(org.nasmusic.app.data.api.RadioRequest(seed, hints)) }.getOrNull())
+        val q = (if (offline.isOffline() && !connect.isRemote) null else runCatching { api().startRadio(org.nasmusic.app.data.api.RadioRequest(seed, hints, automix = listening().djOrdering.takeIf { it })) }.getOrNull())
             ?: return startOfflineRadio(seed)
         queues.markRadio(q.id)
         queues.refresh()

@@ -61,6 +61,8 @@ import org.nasmusic.app.connect.ConnectMessage
 import org.nasmusic.app.connect.PlaybackState
 import org.nasmusic.app.container
 import org.nasmusic.app.data.api.Track
+import org.nasmusic.app.eq.BassShelfProcessor
+import kotlin.math.abs
 import org.nasmusic.app.eq.EqAudioProcessor
 
 /**
@@ -97,10 +99,11 @@ class PlaybackService : MediaLibraryService() {
         val http = OkHttpDataSource.Factory(c.callFactory).setUserAgent("nas-music-android")
         val dataSources = DefaultDataSource.Factory(this, http)
         // Each player gets its own EQ processor (they keep filter state); both read the same settings.
-        fun renderers() = object : DefaultRenderersFactory(this) {
+        // ... and its own low shelf for the DJ automix bass swap.
+        fun renderers(bass: BassShelfProcessor) = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink =
                 DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(EqAudioProcessor { c.eq.active.value }))
+                    .setAudioProcessors(arrayOf(EqAudioProcessor { c.eq.active.value }, bass))
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                     .build()
@@ -109,7 +112,7 @@ class PlaybackService : MediaLibraryService() {
 
         // Gapless: ExoPlayer plays consecutive items through one AudioTrack and trims encoder delay/padding
         // (Opus pre-skip; FLAC has none), as long as the sample rate/channels stay the same.
-        player = ExoPlayer.Builder(this, renderers())
+        player = ExoPlayer.Builder(this, renderers(mainBass))
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSources))
             .setAudioAttributes(attributes, /* handleAudioFocus = */ true)
             .setHandleAudioBecomingNoisy(true)
@@ -117,7 +120,8 @@ class PlaybackService : MediaLibraryService() {
             .build()
         mixer = VolumeMixer { player.volume = it }
         crossfader = Crossfader {
-            ExoPlayer.Builder(this, renderers())
+            faderBass = BassShelfProcessor()
+            ExoPlayer.Builder(this, renderers(faderBass))
                 .setMediaSourceFactory(DefaultMediaSourceFactory(dataSources))
                 .setAudioAttributes(attributes, /* handleAudioFocus = */ false)
                 .build()
@@ -141,7 +145,8 @@ class PlaybackService : MediaLibraryService() {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 // Pressing play on this phone makes it the Connect active device (§5 rule 1).
                 if (isPlaying && !applyingRemote) c.connect.claimPlayback()
-                if (!isPlaying) cancelCrossfade()
+                // A user pause stops a fade; buffering (e.g. the seek into the next song's mix-in) doesn't.
+                if (!isPlaying && !player.playWhenReady) cancelCrossfade()
                 if (isPlaying) { handler.removeCallbacks(fastTick); handler.post(fastTick) }
             }
             override fun onPlaybackStateChanged(state: Int) {
@@ -200,11 +205,123 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private var crossfadeSeeking = false
+    private val BASS_LOOKAHEAD_S = 0.2
 
     private fun cancelCrossfade() {
         if (crossfadeSeeking) return
+        if (dj != null) cancelDj()
         crossfader.release()
         mixer.fade = 1f
+    }
+
+    // ---- DJ automix (Automix.kt has the maths) ----
+
+    private val mainBass = BassShelfProcessor()
+    private var faderBass = BassShelfProcessor()
+
+    private class DjRun(val plan: DjPlan, val userSpeed: Float, val outVolume: Float) {
+        var mixing = true
+        var rampFromS = 0.0
+        var lastFixMs = 0L
+        var seekedToFix = false
+        var setSpeed = 0f
+    }
+
+    private var dj: DjRun? = null
+    /** The song whose DJ start was missed: it ends with the plain crossfade. */
+    private var djMissedFor: String? = null
+    private val djPlans = HashMap<String, DjPlan?>()
+
+    /** The user's speed (DJ transitions change the player's speed for a while). */
+    private fun userSpeed(): Float = dj?.userSpeed ?: player.playbackParameters.speed
+
+    private fun setDjSpeed(run: DjRun, speed: Float) {
+        run.setSpeed = speed
+        player.playbackParameters = PlaybackParameters(speed, player.playbackParameters.pitch)
+    }
+
+    private fun djPlan(s: ListeningSettings, a: TrackFacts, b: TrackFacts): DjPlan? {
+        val key = "${a.id}>${b.id}:${s.djBeats}:${s.allowTempo}:${s.djFallbackS}"
+        if (djPlans.size > 50) djPlans.clear()
+        return djPlans.getOrPut(key) { ListeningRules.djPlan(s, a, b) }
+    }
+
+    /** At the outgoing mix-out point: the transient player plays the outgoing tail, the main player jumps to the
+     *  incoming mix-in point at the matched tempo. */
+    private fun startDj(plan: DjPlan, nextIdx: Int) {
+        val run = DjRun(plan, player.playbackParameters.speed, mixer.total)
+        crossfader.startManual(run.outVolume)
+        faderBass.targetDb = 0.0
+        mainBass.targetDb = Automix.bassIn(plan, 0.0)
+        mixer.fade = 0f
+        dj = run
+        tracker?.markAutoTransition()
+        crossfadeSeeking = true
+        try {
+            player.seekTo(nextIdx, Automix.ms(Automix.expectedIn(plan, crossfader.positionMs / 1000.0)))
+        } finally { crossfadeSeeking = false }
+        setDjSpeed(run, run.userSpeed * plan.rate.toFloat())
+    }
+
+    private fun djTick(run: DjRun) {
+        // The user changed the speed meanwhile: they win.
+        if (run.setSpeed != 0f && abs(player.playbackParameters.speed - run.setSpeed) > 0.001f) {
+            dj = null
+            crossfader.release(); mainBass.targetDb = 0.0; mixer.fade = 1f
+            return
+        }
+        val p = run.plan
+        val inPos = player.currentPosition / 1000.0
+        val now = System.currentTimeMillis()
+        if (run.mixing) {
+            val outPos = crossfader.positionMs / 1000.0
+            val x = Automix.progress(p, outPos)
+            if (x >= 1.0 || !crossfader.playing && now - crossfader.startedAt > 1000) {
+                crossfader.release()
+                mainBass.targetDb = 0.0
+                mixer.fade = 1f
+                run.mixing = false
+                run.rampFromS = inPos
+                return
+            }
+            crossfader.setVolume(run.outVolume * Automix.volOut(p, x).toFloat())
+            mixer.fade = Automix.volIn(p, x).toFloat()
+            // the processors work ahead of what is heard by about the sink's buffer
+            val xa = Automix.progress(p, outPos + BASS_LOOKAHEAD_S)
+            faderBass.targetDb = Automix.bassOut(p, xa)
+            mainBass.targetDb = Automix.bassIn(p, xa)
+            if (p.beatmatch && player.isPlaying && now - run.lastFixMs > 400) {
+                run.lastFixMs = now
+                val want = Automix.expectedIn(p, outPos)
+                val r = Automix.correctedRate(p.rate, inPos - want)
+                if (r == null && !run.seekedToFix) {
+                    run.seekedToFix = true // once: a seek re-buffers, which costs more phase than it fixes
+                    crossfadeSeeking = true
+                    try { player.seekTo(Automix.ms(want + 0.15)) } finally { crossfadeSeeking = false }
+                } else {
+                    setDjSpeed(run, run.userSpeed * (r ?: (p.rate * (if (inPos > want) 0.98 else 1.02))).toFloat())
+                }
+            }
+            return
+        }
+        val after = inPos - run.rampFromS
+        if (!p.beatmatch || p.rate == 1.0 || after >= Automix.RAMP_BEATS * p.inBeatS) {
+            setDjSpeed(run, run.userSpeed)
+            dj = null
+        } else if (now - run.lastFixMs > 250) {
+            run.lastFixMs = now
+            setDjSpeed(run, run.userSpeed * Automix.rampRate(p, after).toFloat())
+        }
+    }
+
+    /** Abort (pause, seek, skip): the incoming song plays on normally. */
+    private fun cancelDj() {
+        val run = dj ?: return
+        dj = null
+        crossfader.release()
+        mainBass.targetDb = 0.0
+        mixer.fade = 1f
+        player.playbackParameters = PlaybackParameters(run.userSpeed, player.playbackParameters.pitch)
     }
 
     /** 20 Hz while playing: crossfade timing and the sleep timer's fades. */
@@ -216,7 +333,11 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private fun listeningTick() {
-        crossfader.step()?.let { x -> mixer.fade = ListeningRules.fadeIn(x).toFloat() } ?: run { if (mixer.fade != 1f && !crossfader.active) mixer.fade = 1f }
+        dj?.let { run ->
+            djTick(run)
+            if (run.mixing && dj === run) return
+        }
+        crossfader.step()?.let { x -> mixer.fade = ListeningRules.fadeIn(x).toFloat() } ?: run { if (mixer.fade != 1f && !crossfader.active && dj == null) mixer.fade = 1f }
         val sleep = c.sleep.timer.value
         val cur = player.currentMediaItem ?: return
         val nextIdx = player.nextMediaItemIndex
@@ -241,7 +362,27 @@ class PlaybackService : MediaLibraryService() {
         // Crossfade
         if (next == null || crossfader.active || player.mediaItemCount < 2) return
         if (c.abRepeat.loop.value != null) return
-        val fadeMs = ListeningRules.crossfadeMs(c.listening.settings.value, MediaItems.facts(cur), MediaItems.facts(next))
+        val settings = c.listening.settings.value
+        // DJ automix: from the outgoing mix-out point (sleep timer: plain transitions only)
+        val fa = MediaItems.facts(cur)
+        val fb = MediaItems.facts(next)
+        if (dj == null && sleep == null && fa != null && fb != null && djMissedFor != cur.mediaId && ListeningRules.djFor(settings, fa, fb)) {
+            val plan = djPlan(settings, fa, fb)
+            if (plan != null) {
+                val startAt = Automix.ms(plan.outStartS)
+                if (pos >= startAt - 5_000 && pos < startAt) crossfader.prepare(cur, startAt, player.playbackParameters.speed)
+                if (pos < startAt) return
+                if (pos < startAt + 600) {
+                    if (crossfader.isReadyFor(cur.mediaId)) startDj(plan, nextIdx)
+                    return
+                }
+                // missed it (buffering, a seek past it): the plain crossfade below, from a fresh fader
+                djMissedFor = cur.mediaId
+                crossfader.release()
+                return
+            }
+        }
+        val fadeMs = ListeningRules.crossfadeMs(settings, fa, fb)
         if (fadeMs <= 0 || dur < fadeMs * 2) return
         val startAt = dur - fadeMs
         if (pos >= startAt - 5_000 && pos < startAt) crossfader.prepare(cur, startAt, player.playbackParameters.speed)
@@ -442,7 +583,7 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             try {
                 val localIds = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
-                val resp = if (c.router.route.value == org.nasmusic.app.net.Route.OFFLINE) null else runCatching { c.api.radioMore(qid) }.getOrNull()
+                val resp = if (c.router.route.value == org.nasmusic.app.net.Route.OFFLINE) null else runCatching { c.api.radioMore(qid, org.nasmusic.app.data.api.RadioMoreRequest(automix = c.listening.settings.value.djOrdering.takeIf { it })) }.getOrNull()
                 val fresh = if (resp != null) RadioLogic.newTracks(resp, localIds, org.nasmusic.app.data.api.ApiFactory.json)
                 else if (c.router.route.value == org.nasmusic.app.net.Route.OFFLINE) {
                     // Offline: keep the radio going with downloaded songs it hasn't played yet.
@@ -499,7 +640,7 @@ class PlaybackService : MediaLibraryService() {
                 volume = cast?.volume ?: mixer.user,
                 shuffle = player.shuffleModeEnabled,
                 repeat = when (player.repeatMode) { Player.REPEAT_MODE_ONE -> "one"; Player.REPEAT_MODE_ALL -> "all"; else -> "off" },
-                speed = player.playbackParameters.speed,
+                speed = userSpeed(),
                 castTo = if (cast != null) ext?.name ?: "a Cast speaker" else null,
             ),
         )
@@ -566,7 +707,7 @@ class PlaybackService : MediaLibraryService() {
             "setVolume" -> float("volume")?.let { mixer.user = it; tracker?.userVolumeChanged(mixer.user) }
             "setShuffle" -> a["on"]?.jsonPrimitive?.booleanOrNull?.let { player.shuffleModeEnabled = it }
             "setRepeat" -> a["mode"]?.jsonPrimitive?.contentOrNull?.let { player.repeatMode = repeatMode(it) }
-            "setSpeed" -> float("speed")?.let { player.playbackParameters = PlaybackParameters(it.coerceIn(0.25f, 4f), player.playbackParameters.pitch) }
+            "setSpeed" -> float("speed")?.let { cancelDj(); player.playbackParameters = PlaybackParameters(it.coerceIn(0.25f, 4f), player.playbackParameters.pitch) }
             "playQueue" -> {
                 val id = a["queueId"]?.jsonPrimitive?.contentOrNull ?: return
                 val q = c.queueSync.load(id) ?: return
