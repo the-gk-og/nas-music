@@ -198,6 +198,10 @@ fun SettingsScreen(c: AppContainer) {
         org.nasmusic.app.ui.FamilySettings(c)
 
         HorizontalDivider()
+        Section("Voice control")
+        org.nasmusic.app.ui.VoiceSettings(c)
+
+        HorizontalDivider()
         Section("Playback")
         PlaybackSettings(c)
 

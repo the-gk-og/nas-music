@@ -1,0 +1,42 @@
+# OPTIONAL alternative to the automation in nasmusic_voice.yaml: Home Assistant recognises the intent and slots
+# itself, then intent_script (nasmusic_intents.yaml) sends them to nas-music. Use ONE of the two approaches.
+# Copy to <config>/custom_sentences/en/nasmusic.yaml.
+language: en
+intents:
+  NasPlay:
+    data:
+      - sentences:
+          - "(play|put on|listen to|shuffle) {query}"
+          - "start {query} radio"
+  NasPause:
+    data:
+      - sentences:
+          - "(pause|stop) [the] (music|song|track)"
+  NasResume:
+    data:
+      - sentences:
+          - "(resume|unpause|continue) [the] (music|song)"
+  NasNext:
+    data:
+      - sentences:
+          - "(skip|next song|next track|skip [this] (song|track))"
+  NasPrevious:
+    data:
+      - sentences:
+          - "(previous|last) (song|track)"
+  NasVolume:
+    data:
+      - sentences:
+          - "[set] [the] music volume to {level} [percent]"
+  NasNowPlaying:
+    data:
+      - sentences:
+          - "(what's|what is) playing"
+          - "what (song|track) is (this|that|playing)"
+lists:
+  query:
+    wildcard: true
+  level:
+    range:
+      from: 0
+      to: 100

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -34,6 +34,11 @@ info:
     For You returns the shelf kinds release_radar, blends and wrapped, with ShelfItem types blend and wrapped.
     0.6.0 (schema v6): Jam - listen together (/jams for the host, /jam/* for guests with `X-Jam-Token`, /jam/ws).
     Guest tokens are not device tokens: they work only on /jam/* and never stream audio.
+    0.7.0 (schema v7): voice control for Home Assistant Assist. POST /voice/command takes recognised text or an
+    intent + slots and answers with a sentence to speak. It is authenticated ONLY by a voice token (`nmv_…`,
+    per user, created/revoked under /me/voice/tokens); voice tokens work nowhere else and device tokens don't
+    work there. /me/voice/devices lists the user's Connect devices and speakers with the aliases ("bedroom",
+    "Stacey's room") and default flag voice uses to pick where to play.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
     Times are ISO-8601 UTC strings. IDs are opaque strings.
 servers:
@@ -571,6 +576,136 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/FamilyMode' } } }
         '403': { description: locked (wrong or missing PIN) }
         '429': { description: too many wrong PINs }
+  /voice/command:
+    post:
+      tags: [voice]
+      summary: |
+        v7. Run a voice command (Home Assistant Assist) as the voice token's user, through Connect. Send either
+        `text` (what the user said, English) or `intent` + `slots` (HA's recognised intent: NasPlay, NasPause,
+        NasResume, NasNext, NasPrevious, NasVolume, NasVolumeUp, NasVolumeDown, NasNowPlaying, or HA built-ins
+        HassMediaPause/Unpause/Next/Previous, HassSetVolume). Understood: play {playlist|album|artist|song|radio|
+        mix|vibe description} [in/on {device, speaker, room alias}], pause, resume, skip, previous, volume (absolute
+        or up/down), what's playing. Names are matched fuzzily against the user's library (family mode applies:
+        hidden tracks are never found or queued), playlists, today's mixes and Connect devices. Where to play: the
+        named device, else the satellite's `area` / `areaDevices`, else the active device, else the user's default
+        voice device. Always 200 for an understood request, with `ok` false and a spoken explanation when it can't
+        be done (not found, offline, nothing playing).
+      security: [{ voice: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, maxLength: 500, description: 'e.g. "play my Pop radio in the bedroom"' }
+                intent: { type: string, maxLength: 60 }
+                slots:
+                  type: object
+                  additionalProperties: true
+                  description: 'intent slots: playlist|album|artist|song|radio|mix|vibe|genre|query (the thing to play), kind, device|room|speaker, volume_level'
+                area: { type: string, maxLength: 100, description: the HA area of the voice satellite (for "here") }
+                areaDevices:
+                  type: array
+                  maxItems: 30
+                  items: { type: string, maxLength: 200 }
+                  description: media_player entity ids (or names) in that area
+                language: { type: string, maxLength: 20 }
+                dryRun: { type: boolean, default: false, description: resolve only; play nothing }
+      responses:
+        '200':
+          description: result
+          content: { application/json: { schema: { $ref: '#/components/schemas/VoiceResult' } } }
+        '400': { description: neither text nor intent }
+        '401': { description: missing, invalid or revoked voice token }
+  /me/voice/tokens:
+    get:
+      tags: [voice]
+      summary: v7. The caller's voice tokens (never the token itself).
+      responses:
+        '200':
+          description: tokens
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens]
+                properties:
+                  tokens: { type: array, items: { $ref: '#/components/schemas/VoiceToken' } }
+    post:
+      tags: [voice]
+      summary: v7. Create a voice token. The token is in this response only.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 100, default: Home Assistant }
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/VoiceToken' }
+                  - type: object
+                    required: [token]
+                    properties:
+                      token: { type: string, description: 'nmv_…; send as Authorization: Bearer to /voice/command' }
+        '409': { description: too many tokens (20) }
+  /me/voice/tokens/{tokenId}:
+    parameters: [{ name: tokenId, in: path, required: true, schema: { type: string } }]
+    delete:
+      tags: [voice]
+      summary: v7. Revoke a voice token (immediately).
+      responses:
+        '204': { description: revoked }
+        '404': { description: no such token (or not yours) }
+  /me/voice/devices:
+    get:
+      tags: [voice]
+      summary: |
+        v7. Devices voice can play on: online Connect devices, server speakers, the caller's other signed-in
+        devices (offline) and speakers that have aliases but aren't discovered right now (offline).
+      responses:
+        '200':
+          description: devices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties:
+                  devices: { type: array, items: { $ref: '#/components/schemas/VoiceDevice' } }
+  /me/voice/devices/{deviceId}:
+    parameters:
+      - { name: deviceId, in: path, required: true, schema: { type: string }, description: 'a device id or speaker id (spk:…; may contain ":" and ".")' }
+    put:
+      tags: [voice]
+      summary: v7. Set a device's voice aliases and/or make it the default (only one default per user).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                aliases: { type: array, maxItems: 10, items: { type: string, maxLength: 60 } }
+                isDefault: { type: boolean }
+      responses:
+        '200':
+          description: saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, aliases, isDefault]
+                properties:
+                  id: { type: string }
+                  aliases: { type: array, items: { type: string } }
+                  isDefault: { type: boolean }
   /me/data:
     get:
       summary: What has been collected about the user (counts per context signal and date range).
@@ -2504,8 +2639,48 @@ paths:
 components:
   securitySchemes:
     device: { type: http, scheme: bearer }
+    voice: { type: http, scheme: bearer, description: 'voice token (nmv_…) from POST /me/voice/tokens; only for /voice/command' }
     jamGuest: { type: apiKey, in: header, name: X-Jam-Token, description: 'Jam guest token (jg_…) from POST /jam/join/{code}' }
   schemas:
+    VoiceResult:
+      type: object
+      required: [ok, intent, speech]
+      properties:
+        ok: { type: boolean }
+        intent: { type: string, enum: [play, pause, resume, next, previous, volume, now_playing, unknown] }
+        speech: { type: string, description: 'what to say back, e.g. "Playing Pop radio on Elijah bedroom display."' }
+        device:
+          type: object
+          required: [id, name]
+          properties: { id: { type: string }, name: { type: string } }
+        item:
+          type: object
+          description: what was (or would be) played / is playing
+          required: [kind, title]
+          properties:
+            kind: { type: string, description: 'playlist | album | artist | song | mix | radio | vibe | moment' }
+            id: { type: [string, 'null'] }
+            title: { type: string }
+        queueId: { type: string }
+    VoiceToken:
+      type: object
+      required: [id, name, createdAt, lastUsed]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        createdAt: { type: string }
+        lastUsed: { type: [string, 'null'] }
+    VoiceDevice:
+      type: object
+      required: [id, name, kind, online, aliases, isDefault]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, description: 'android | web | desktop | watch | speaker | other (accept unknown kinds)' }
+        castType: { type: string }
+        online: { type: boolean }
+        aliases: { type: array, items: { type: string } }
+        isDefault: { type: boolean }
     JamSettings:
       type: object
       required: [approval, allowPlayNext, maxPerGuest]

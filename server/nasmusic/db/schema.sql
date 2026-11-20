@@ -1,4 +1,4 @@
--- nas-music shared schema v6 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v7 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
@@ -9,8 +9,8 @@
 -- family mode (family_mode), automatic tag fixing (fingerprints, acoustid_lookups, mb_releases,
 -- autotag_suggestions), MusicBrainz-id override fields in tag_overrides, and hidden duplicates
 -- (duplicate_hidden; tracks.missing = 2), Jam (jams, jam_guests, jam_requests, jam_votes), and AI radio
--- (radio_sessions.station_key/params, radio_stations, radio_feedback). Older databases are upgraded by
--- nasmusic.db.migrations.
+-- (radio_sessions.station_key/params, radio_stations, radio_feedback). v7 adds voice control (voice_tokens,
+-- voice_devices). Older databases are upgraded by nasmusic.db.migrations.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -153,6 +153,31 @@ CREATE TABLE IF NOT EXISTS devices (
     revoked     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS devices_user ON devices(user_id);
+
+-- v7 voice control (Home Assistant Assist): per-user long-lived tokens that can ONLY call POST /voice/command
+-- (not device tokens: they never authenticate anything else). Only the sha256 is stored.
+CREATE TABLE IF NOT EXISTS voice_tokens (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    token_hash  TEXT NOT NULL UNIQUE,
+    created_at  TEXT NOT NULL,
+    last_used   TEXT,
+    revoked     INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS voice_tokens_user ON voice_tokens(user_id);
+
+-- v7: what a user calls a Connect device / speaker by voice ("bedroom", "Stacey's room"), and the device voice
+-- commands play on when no room is named and nothing is playing. device_id = a devices.id or a speaker id
+-- ('spk:<castType>:<id>'), so no foreign key.
+CREATE TABLE IF NOT EXISTS voice_devices (
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id   TEXT NOT NULL,
+    aliases     TEXT NOT NULL DEFAULT '[]',   -- JSON list of strings
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, device_id)
+);
 
 CREATE TABLE IF NOT EXISTS pair_codes (
     code        TEXT PRIMARY KEY,

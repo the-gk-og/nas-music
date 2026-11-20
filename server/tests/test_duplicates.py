@@ -143,7 +143,7 @@ def test_v5_to_v6(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == db.SCHEMA_VERSION == 6
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     assert [tuple(r) for r in conn.execute("SELECT track_id, field, value, updated_by FROM tag_overrides")] == \
         [("t1", "title", '"Fixed"', "u1")]
     conn.execute("INSERT INTO tag_overrides VALUES ('t1', 'mb_track', '\"x\"', 'u1', 'x')")
