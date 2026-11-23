@@ -70,6 +70,8 @@ def _apply_fields(state: dict, incoming: dict) -> None:
             continue
         if k == "media":
             state["media"] = clean_media(v)
+            if state["media"] is not None:   # spoken: no music queue/track (clients may omit null fields)
+                state["queueId"] = state["trackId"] = None
         elif isinstance(v, types):
             state[k] = v
 

@@ -9,7 +9,7 @@
   let catSrc = $state<string | null>(null);
 
   // Album art goes through <Cover> (cached); any other artUrl is resolved here.
-  const albumFromUrl = $derived(/^art\/(?!artist\/)([^/?]+)/.exec(item.artUrl ?? '')?.[1] ?? null);
+  const albumFromUrl = $derived(/^art\/(?!(?:artist|podcast|book|station)\/)([^/?]+)/.exec(item.artUrl ?? '')?.[1] ?? null);
   const rel = $derived(albumFromUrl ? null : (item.artUrl ?? item.catalog?.artUrl ?? item.toget?.artUrl ?? null));
   $effect(() => {
     catSrc = null;

@@ -37,7 +37,14 @@
   function withPins(f: ShelfT[]): ShelfT[] {
     if (!feed) return f;
     const has = f.some((s) => s.kind === 'pinned');
-    const out = f.map((s) => (s.kind === 'pinned' ? { ...s, items: library.pins } : s));
+    const gone = library.continueDismissed;
+    const out = f.map((s) =>
+      s.kind === 'pinned'
+        ? { ...s, items: library.pins }
+        : s.kind === 'continue_listening'
+          ? { ...s, items: s.items.filter((i) => !gone.has(`${i.type}:${i.id}`)) }
+          : s,
+    );
     return has ? out : [...out, { id: 'pinned', kind: 'pinned', title: 'Pinned', items: library.pins }];
   }
 

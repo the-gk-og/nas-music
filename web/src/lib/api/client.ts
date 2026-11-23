@@ -500,6 +500,9 @@ export class ApiClient {
   pins = () => this.get<ShelfItem[]>('/pins');
   pin = (type: PinType, id: string, position?: number) => this.post<ShelfItem[]>('/pins', { type, id, position });
   unpin = (type: PinType, id: string) => this.del<void>(`/pins/${type}/${encodeURIComponent(id)}`);
+  /** api 0.8 Continue listening: music queues left part-way + episodes/books in progress, newest first. */
+  continueListening = (limit = 20) => this.get<{ items: ShelfItem[] }>('/continue', { limit }).then((r) => r.items);
+  dismissContinue = (type: 'queue' | 'episode' | 'book', id: string) => this.del<void>(`/continue/${type}/${encodeURIComponent(id)}`);
   startRadio = (seed: RadioSeed, context?: RadioContext, automix = false) =>
     this.post<Queue>('/radio', { seed, ...(context ? { context } : {}), ...(automix ? { automix } : {}) });
   // ---- AI radio (v6) ----

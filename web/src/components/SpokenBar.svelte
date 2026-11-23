@@ -16,9 +16,14 @@
     wasPlaying = p;
   });
 
-  const c = $derived(spoken.current);
+  // This browser's podcast/book/station, or the one the active device plays when this is a remote.
+  $effect(() => {
+    void spoken.syncRemote(player.isRemote ? player.remoteState?.media : null);
+  });
+  const c = $derived(spoken.shownItem);
   const chapters = $derived(c?.chapters ?? []);
-  const ch = $derived(spoken.chapterIndex);
+  const ch = $derived(spoken.shownChapterIndex);
+  const pos = $derived(spoken.shownPosition);
   const sleepLabel = $derived(
     spoken.sleepAt === 'chapter' ? 'end of chapter' : typeof spoken.sleepAt === 'number' ? `${Math.max(1, Math.ceil((spoken.sleepAt - spoken.sleepNow) / 60000))} min` : '',
   );
@@ -48,8 +53,8 @@
           {#if chapters.length > 1}<button class="icon-btn" aria-label="Previous chapter" onclick={() => spoken.chapter(-1)}><SkipBack size={18} /></button>{/if}
           <button class="icon-btn" aria-label="Back 15 seconds" onclick={() => spoken.skip(-15)}><Undo2 size={20} /></button>
         {/if}
-        <button class="pp" aria-label={spoken.playing ? 'Pause' : 'Play'} onclick={() => spoken.toggle()}>
-          {#if spoken.playing}<Pause size={22} />{:else}<Play size={22} />{/if}
+        <button class="pp" aria-label={spoken.shownPlaying ? 'Pause' : 'Play'} onclick={() => spoken.toggle()}>
+          {#if spoken.shownPlaying}<Pause size={22} />{:else}<Play size={22} />{/if}
         </button>
         {#if !spoken.live}
           <button class="icon-btn" aria-label="Forward 30 seconds" onclick={() => spoken.skip(30)}><Redo2 size={20} /></button>
@@ -58,15 +63,15 @@
         <button class="icon-btn" aria-label={expanded ? 'Less' : 'More'} onclick={() => (expanded = !expanded)}>
           {#if expanded}<ChevronDown size={18} />{:else}<ChevronUp size={18} />{/if}
         </button>
-        <button class="icon-btn" aria-label="Close" onclick={() => spoken.close()}><X size={18} /></button>
+        {#if !spoken.remote}<button class="icon-btn" aria-label="Close" onclick={() => spoken.close()}><X size={18} /></button>{/if}
       </div>
     </div>
     {#if !spoken.live}
       <div class="seek">
-        <span class="small muted">{clock(spoken.position)}</span>
-        <input type="range" min="0" max={c.duration ?? 0} step="1" value={spoken.position} aria-label="Position"
+        <span class="small muted">{clock(pos)}</span>
+        <input type="range" min="0" max={c.duration ?? 0} step="1" value={pos} aria-label="Position"
           onchange={(e) => spoken.seek(Number((e.target as HTMLInputElement).value))} />
-        <span class="small muted">-{clock(Math.max(0, (c.duration ?? 0) - spoken.position) / spoken.speed)}</span>
+        <span class="small muted">-{clock(Math.max(0, (c.duration ?? 0) - pos) / spoken.speed)}</span>
       </div>
     {:else}
       <div class="seek small muted">{spoken.loading ? 'Connecting…' : spoken.playing ? 'Live' : 'Paused'}{spoken.error ? ` · ${spoken.error}` : ''}</div>

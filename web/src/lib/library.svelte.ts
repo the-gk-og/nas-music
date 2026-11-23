@@ -14,6 +14,19 @@ class LibraryStore {
   /** v7 smart playlists (rule-based); [] on servers without them. */
   smartPlaylists = $state<SmartPlaylist[]>([]);
   pins = $state<ShelfItem[]>([]);
+  /** Continue listening items removed on this device ("type:id"), hidden right away. */
+  continueDismissed = $state<Set<string>>(new Set());
+
+  async dismissContinue(it: ShelfItem) {
+    const type = it.type === 'episode' || it.type === 'book' ? it.type : 'queue';
+    const id = type === 'queue' ? (it.progress?.queueId ?? it.id) : it.id;
+    this.continueDismissed = new Set([...this.continueDismissed, `${it.type}:${it.id}`]);
+    try {
+      await session.api.dismissContinue(type, id);
+    } catch {
+      /* older server: hidden on this device until reload */
+    }
+  }
 
   /** Live playlist pushes (Connect `playlist`): screens showing that playlist watch `changed`. */
   changed = $state<{ id: string; rev: number | null; deleted: boolean; n: number } | null>(null);

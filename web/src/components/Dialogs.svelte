@@ -351,6 +351,9 @@
       {#if it.type === 'album' || it.type === 'artist' || it.type === 'playlist' || it.type === 'mix'}
         <button onclick={() => { ui.close(); openItem(it); }}><Disc3 />Open</button>
       {/if}
+      {#if it.progress && (it.type === 'queue' || it.type === 'episode' || it.type === 'book')}
+        <button onclick={() => { ui.close(); void library.dismissContinue(it); }}><X />Remove from Continue listening</button>
+      {/if}
       {#if it.type === 'track' && it.track}
         <button onclick={() => ui.open({ kind: 'songMenu', ctx: { track: it.track! } })}><Info />Song menu…</button>
       {/if}
