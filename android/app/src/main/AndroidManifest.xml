@@ -141,6 +141,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- Album art for Android Auto / lock screen / watches (fetched with the app's pinned, authenticated
+             client). Not exported: PlaybackService grants read access per URI to the media browser. -->
+        <provider
+            android:name=".playback.ArtProvider"
+            android:authorities="${applicationId}.art"
+            android:exported="false"
+            android:grantUriPermissions="true" />
         <!-- Declares the app as a media app for Android Auto. This is only a resource that Android Auto
              reads; no Google library is linked. -->
         <meta-data

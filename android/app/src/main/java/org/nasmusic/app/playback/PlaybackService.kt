@@ -43,6 +43,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -126,7 +127,15 @@ class PlaybackService : MediaLibraryService() {
                 .setAudioAttributes(attributes, /* handleAudioFocus = */ false)
                 .build()
         }
-        library = AutoLibrary({ c.api }) { AiRadio.context(this) }
+        library = AutoLibrary(
+            api = { c.api },
+            hints = { AiRadio.context(this) },
+            downloads = {
+                c.db.downloads().all().filter { it.complete }.mapNotNull { c.library.decodeTrack(it.trackJson) }
+                    .sortedWith(compareBy({ it.artist.lowercase() }, { it.album.lowercase() }, { it.discNo ?: 0 }, { it.trackNo ?: 0 }))
+            },
+            paired = { c.secureStore.config.value != null },
+        )
 
         tracker = FeedbackTracker(player, c.events, c.contextCollector).also { it.attach() }
         player.addListener(object : Player.Listener {
@@ -139,6 +148,7 @@ class PlaybackService : MediaLibraryService() {
                 }
                 applyLevelling()
                 updateNowFormat()
+                grantNowPlayingArt(mediaItem)
                 loadArtworkData(player.currentMediaItemIndex)
                 loadArtworkData(player.currentMediaItemIndex + 1)
                 c.abRepeat.clear()
@@ -199,6 +209,11 @@ class PlaybackService : MediaLibraryService() {
                     if (last != null && spec != last) repointQueuedStreams(spec)
                     last = spec
                 }
+        }
+        // Android Auto keeps showing a folder that failed to load; ask it to reload once we're connected again.
+        scope.launch {
+            kotlinx.coroutines.flow.combine(c.router.route, c.secureStore.config) { r, cfg -> r to (cfg != null) }
+                .distinctUntilChanged().collect { reloadBrowseTree() }
         }
         handler.post(tick)
     }
@@ -457,7 +472,7 @@ class PlaybackService : MediaLibraryService() {
             mediaItems.flatMap { item ->
                 val e = runCatching { library.expand(item.mediaId) }.getOrNull()
                 if (e != null) listOfNotNull(e.tracks.getOrNull(e.startIndex)).map { resolve(MediaItems.fromTrack(it, e.source, e.mixId)) }
-                else listOf(resolve(item))
+                else listOf(resolve(item.buildUpon().setMediaId(AutoLibrary.trackIdOf(item.mediaId)).build()))
             }.toMutableList()
         }
 
@@ -477,35 +492,49 @@ class PlaybackService : MediaLibraryService() {
             }
             if (e != null && e.tracks.isNotEmpty()) {
                 val items = withContext(Dispatchers.IO) { e.tracks.map { resolve(MediaItems.fromTrack(it, e.source, e.mixId)) } }
-                if (e.radioQueueId != null) { c.queueSync.markRadio(e.radioQueueId); c.queueSync.setCurrent(e.radioQueueId); c.queueSync.refresh() }
-                else c.queueSync.created(e.queueName, e.tracks, e.startIndex)
-                MediaSession.MediaItemsWithStartPosition(items, e.startIndex, 0)
+                when {
+                    e.radioQueueId != null -> { c.queueSync.markRadio(e.radioQueueId); c.queueSync.setCurrent(e.radioQueueId); c.queueSync.refresh() }
+                    e.queueId != null -> c.queueSync.setCurrent(e.queueId)
+                    else -> c.queueSync.created(e.queueName, e.tracks, e.startIndex)
+                }
+                MediaSession.MediaItemsWithStartPosition(items, e.startIndex, e.startPositionMs)
             } else {
-                val items = withContext(Dispatchers.IO) { mediaItems.map { resolve(it) } }
+                // A browse id whose context couldn't be loaded (offline): still play that one song.
+                val items = withContext(Dispatchers.IO) {
+                    mediaItems.map { resolve(it.buildUpon().setMediaId(AutoLibrary.trackIdOf(it.mediaId)).build()) }
+                }
                 MediaSession.MediaItemsWithStartPosition(items, startIndex, startPositionMs)
             }
         }
 
         override fun onGetLibraryRoot(
             session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(LibraryResult.ofItem(library.root(), params))
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val out = library.onRoot(browserKey(browser), params)
+            val root = if (params?.isRecent == true) library.recentRoot() else library.root()
+            return Futures.immediateFuture(LibraryResult.ofItem(root, out))
+        }
 
         override fun onGetItem(
             session: MediaLibrarySession, browser: MediaSession.ControllerInfo, mediaId: String,
         ): ListenableFuture<LibraryResult<MediaItem>> = scope.future {
-            if (mediaId == AutoLibrary.ROOT) LibraryResult.ofItem(library.root(), null)
-            else runCatching { c.api.track(AutoLibrary.parsePlayId(mediaId)?.second ?: mediaId) }.getOrNull()
-                ?.let { LibraryResult.ofItem(MediaItems.fromTrack(it, PlaySource.LIBRARY), null) }
+            runCatching { library.item(mediaId) }.getOrNull()
+                ?.let { grantArt(browser, listOf(it)); LibraryResult.ofItem(it, null) }
                 ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
         }
 
         override fun onGetChildren(
             session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String, page: Int, pageSize: Int, params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
-            runCatching { library.children(parentId) }.fold(
-                { LibraryResult.ofItemList(paged(it, page, pageSize), params) },
-                { LibraryResult.ofError(SessionError.ERROR_IO) },
-            )
+            val all = runCatching {
+                if (parentId == AutoLibrary.RECENT_ROOT) library.recentChildren() else library.children(parentId, browserKey(browser))
+            }.getOrElse { e ->
+                android.util.Log.w("PlaybackService", "browse $parentId failed", e)
+                emptyList()
+            }
+            val items = paged(all, page, pageSize)
+            grantArt(browser, items)
+            LibraryResult.ofItemList(items, params)
         }
 
         override fun onSearch(
@@ -519,8 +548,31 @@ class PlaybackService : MediaLibraryService() {
         override fun onGetSearchResult(
             session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, page: Int, pageSize: Int, params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
-            LibraryResult.ofItemList(paged(runCatching { library.search(query) }.getOrDefault(emptyList()), page, pageSize), params)
+            val items = paged(runCatching { library.search(query) }.getOrDefault(emptyList()), page, pageSize)
+            grantArt(browser, items)
+            LibraryResult.ofItemList(items, params)
         }
+    }
+
+    private fun browserKey(browser: MediaSession.ControllerInfo) = browser.packageName
+
+    /** Media browsers (Android Auto, Automotive, watches) load art in their own process: let them read it. */
+    private fun grantArt(browser: MediaSession.ControllerInfo, items: List<MediaItem>) =
+        ArtProvider.grant(this, browser.packageName, items.map { it.mediaMetadata.artworkUri })
+
+    /** Now-playing art for System UI / Android Auto and any connected controller (the URI is in the session metadata). */
+    private fun grantNowPlayingArt(item: MediaItem?) {
+        val uri = item?.mediaMetadata?.artworkUri ?: return
+        val pkgs = ArtProvider.SYSTEM_READERS + (session?.connectedControllers?.map { it.packageName } ?: emptyList())
+        pkgs.distinct().forEach { ArtProvider.grant(this, it, listOf(uri)) }
+    }
+
+    /** After the server became reachable (or was paired), refresh the root and every folder that failed. */
+    private fun reloadBrowseTree() {
+        val s = session ?: return
+        val ids = library.failed.toList() + listOf(AutoLibrary.ROOT, AutoLibrary.FOR_YOU, AutoLibrary.CONTINUE)
+        library.failed.clear()
+        ids.distinct().forEach { runCatching { s.notifyChildrenChanged(it, 1, null) } }
     }
 
     private fun paged(all: List<MediaItem>, page: Int, size: Int): List<MediaItem> {
