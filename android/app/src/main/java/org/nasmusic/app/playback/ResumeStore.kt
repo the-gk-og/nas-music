@@ -37,6 +37,10 @@ data class ResumePosition(
 
 /** Pure rules for restoring playback (unit-tested). */
 object ResumeLogic {
+    /** A takeover within [windowMs] of this device claiming playback itself, while it plays, answers that claim. */
+    fun ownClaim(claimedAtMs: Long, nowMs: Long, playing: Boolean, windowMs: Long = 5_000): Boolean =
+        playing && claimedAtMs > 0 && nowMs - claimedAtMs in 0..windowMs
+
     /**
      * The (index, positionMs) to put the player at, given the restored queue's mediaIds. The saved index wins
      * when the item there is the saved one; otherwise the saved item is looked up (the queue file was written

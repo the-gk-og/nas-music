@@ -69,6 +69,13 @@ class ResumeTest {
         assertFalse(ResumeLogic.preferServer(local, null, "phone"))
     }
 
+    @Test fun theTakeoverAnsweringOurOwnPlayDoesNotReloadTheQueue() {
+        assertTrue(ResumeLogic.ownClaim(claimedAtMs = 10_000, nowMs = 11_000, playing = true))
+        assertFalse(ResumeLogic.ownClaim(10_000, 20_000, true)) // a later transfer from another device
+        assertFalse(ResumeLogic.ownClaim(10_000, 11_000, false))
+        assertFalse(ResumeLogic.ownClaim(0, 1_000, true))
+    }
+
     @Test fun storeRoundTripsAQueueAndASpokenItem() {
         val store = ResumeStore(tmp.newFolder("resume"))
         assertNull(store.load())

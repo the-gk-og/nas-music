@@ -113,6 +113,8 @@ class PlaybackService : MediaLibraryService() {
     private val skipSilenceOverride = mutableMapOf<String, Boolean>()
     private var lastSpokenSaveMs = 0L
     private var lastSpokenFlushMs = 0L
+    /** When this phone claimed playback itself (play pressed here): the takeover that answers is not a load. */
+    private var claimedAtMs = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -166,7 +168,10 @@ class PlaybackService : MediaLibraryService() {
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 // Pressing play on this phone makes it the Connect active device (§5 rule 1).
-                if (isPlaying && !applyingRemote) c.connect.claimPlayback()
+                if (isPlaying && !applyingRemote && !c.connect.isActiveHere) {
+                    claimedAtMs = System.currentTimeMillis()
+                    c.connect.claimPlayback()
+                }
                 // A user pause stops a fade; buffering (e.g. the seek into the next song's mix-in) doesn't.
                 if (!isPlaying && !player.playWhenReady) cancelCrossfade()
                 if (isPlaying) { handler.removeCallbacks(fastTick); handler.post(fastTick) }
@@ -951,7 +956,9 @@ class PlaybackService : MediaLibraryService() {
         try {
             when (m) {
                 // While casting this phone stays the active device; the speaker plays, not the phone.
-                is ConnectMessage.Takeover -> if (ext == null) takeover(m.state)
+                // A takeover answering our own claim: we already play what the user picked (e.g. the restored queue);
+                // loading the server's older state would jump to another song or restart the list.
+                is ConnectMessage.Takeover -> if (ext == null && !ResumeLogic.ownClaim(claimedAtMs, System.currentTimeMillis(), player.isPlaying)) takeover(m.state)
                 ConnectMessage.Release -> ext?.pause() ?: player.pause()
                 is ConnectMessage.Command -> command(m.action, m.args)
                 is ConnectMessage.QueuesChanged -> {

@@ -7,8 +7,15 @@ Podcasts · Audiobooks · Radio. They are deliberately kept apart from music:
   `audiobook_files`, `audiobook_chapters`, `audiobook_bookmarks`, `spoken_progress`, `web_stations`,
   `web_station_favourites`). Nothing is written to `events` / `user_tracks`, so the recommender, mixes,
   Wrapped, Last.fm/ListenBrainz scrobbling and smart downloads never see them.
-- Their own player: the web player's `SpokenBar` and Android's `SpokenService` (a second Media3 session
-  with speech audio attributes). Starting one pauses the other (audio focus / the web bar).
+- The SAME player as music (api 0.8): on Android they are items of the main `PlaybackService` (notification,
+  lock screen, watch, Bluetooth, Android Auto, Google Cast), on the web part of the player's Connect identity.
+  Connect sees them as `PlaybackState.media` ({kind, id}, book-wide positionMs) with the command `playSpoken`,
+  so other devices show and control them, transfer works, and server speakers can play them. They keep their
+  own behaviour: per-show / per-book speed, skip silence, chapters, book parts, a resume point per episode/book
+  synced through /spoken/progress (and saved by the server from the Connect state), mark played. Music-only
+  features (levelling, crossfade, DJ automix, listening events, scrobbling, the music queues) skip them.
+- Continue listening (GET /continue, Home's shelf, Android Auto) mixes episodes and books in progress with the
+  music queues left part-way; items can be dismissed.
 - Family mode hides shows, episodes and stations flagged explicit (`<itunes:explicit>`, the directory's
   flag, or Radio Browser tags like `explicit`/`adult`). Locked users get 404 on their streams too.
 
