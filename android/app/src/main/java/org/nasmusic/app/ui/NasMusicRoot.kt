@@ -297,6 +297,8 @@ fun MiniPlayer(c: AppContainer) {
     val s by c.player.state.collectAsStateWithLifecycle()
     LaunchedEffect(s.isPlaying) { while (s.isPlaying) { c.player.refresh(); kotlinx.coroutines.delay(1000) } }
     val item = s.item ?: return
+    // Podcasts / audiobooks / stations show SpokenMiniBar (skip ±, chapters, speed) instead.
+    if (org.nasmusic.app.spoken.SpokenMedia.isSpoken(item)) return
     var dx by remember { mutableFloatStateOf(0f) }
     var dy by remember { mutableFloatStateOf(0f) }
     Column(

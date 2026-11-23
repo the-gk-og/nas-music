@@ -9,11 +9,13 @@ import org.nasmusic.app.data.api.RadioRequest
 import org.nasmusic.app.data.api.RadioSeed
 import org.nasmusic.app.data.api.Track
 import org.nasmusic.app.data.api.VibeParseRequest
+import org.nasmusic.app.data.api.continueListening
 
 /**
  * Browse tree for Android Auto (and any other MediaBrowser client), built only from AndroidX Media3:
  *
  *   root ─ Play something for now (radio:moment, the AI smart shuffle; playable)
+ *        ├ Continue listening ─ continue:<queue|episode|book>:<id> (playable; resumes where it stopped)
  *        ├ Home (today's mixes) ─ mix:<id> ─ tracks
  *        ├ Playlists ─ playlist:<id> ─ tracks
  *        ├ Albums ─ album:<id> ─ tracks
@@ -40,12 +42,27 @@ class AutoLibrary(
         return when {
             parentId == ROOT -> listOf(
                 playable("radio:moment", "Play something for now", MediaMetadata.MEDIA_TYPE_RADIO_STATION),
+                folder(CONTINUE, "Continue listening", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
                 folder(HOME, "Home", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
                 folder(PLAYLISTS, "Playlists", MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
                 folder(ALBUMS, "Albums", MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
                 folder(ARTISTS, "Artists", MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS),
                 folder(RADIO, "Radio", MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS),
             )
+            parentId == CONTINUE -> a.continueListening(20).filter { it.type in CONTINUE_TYPES }.map { i ->
+                MediaItem.Builder().setMediaId("$CONTINUE_PREFIX${i.type}:${i.id}").setMediaMetadata(
+                    MediaMetadata.Builder().setTitle(i.title).setSubtitle(i.subtitle).setIsBrowsable(false).setIsPlayable(true)
+                        .setMediaType(
+                            when (i.type) {
+                                "episode" -> MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE
+                                "book" -> MediaMetadata.MEDIA_TYPE_AUDIO_BOOK
+                                else -> MediaMetadata.MEDIA_TYPE_PLAYLIST
+                            },
+                        )
+                        .apply { i.artUrl?.let { setArtworkUri(Uri.parse(org.nasmusic.app.net.RoutedCallFactory.virtual(if ('?' in it) it else "$it?size=256"))) } }
+                        .build(),
+                ).build()
+            }
             parentId == HOME -> a.mixesToday().map {
                 folder("mix:${it.id}", it.title, MediaMetadata.MEDIA_TYPE_PLAYLIST, subtitle = "${it.tracks.size} songs",
                     art = it.tracks.firstOrNull()?.track?.albumId)
@@ -149,6 +166,18 @@ class AutoLibrary(
 
     companion object {
         const val ROOT = "root"
+        const val CONTINUE = "continue"
+        const val CONTINUE_PREFIX = "continue:"
+        private val CONTINUE_TYPES = setOf("queue", "episode", "book")
+
+        /** `continue:<type>:<id>` → (type, id). */
+        fun parseContinueId(mediaId: String): Pair<String, String>? {
+            if (!mediaId.startsWith(CONTINUE_PREFIX)) return null
+            val rest = mediaId.removePrefix(CONTINUE_PREFIX)
+            val type = rest.substringBefore(':')
+            val id = rest.substringAfter(':', "")
+            return if (type in CONTINUE_TYPES && id.isNotEmpty()) type to id else null
+        }
         const val HOME = "home"
         const val PLAYLISTS = "playlists"
         const val ALBUMS = "albums"

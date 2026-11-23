@@ -114,6 +114,8 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
     val s by c.player.state.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { while (true) { c.player.refresh(); delay(250) } }
     val item = s.item ?: return Message("Nothing playing. Pick a song from Albums, Playlists or Search.")
+    // A podcast episode / audiobook / station: same player, its own controls (chapters, speed, skip silence).
+    if (org.nasmusic.app.spoken.SpokenMedia.isSpoken(item)) return SpokenNowPlaying(c)
     val trackId = item.mediaId
     val track = remember(item) { MediaItems.toTrack(item) }
     val extras = item.mediaMetadata.extras

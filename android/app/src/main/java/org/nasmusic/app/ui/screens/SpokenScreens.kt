@@ -3,6 +3,9 @@ package org.nasmusic.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material.icons.filled.SpeakerGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -508,12 +511,13 @@ private fun RadioTab(c: AppContainer) {
     }
 }
 
-/** Shown above the music mini player while a podcast / audiobook / station is loaded. */
+/** The mini player while a podcast / audiobook / station is the current item of the player (here or remote). */
 @Composable
 fun SpokenMiniBar(c: AppContainer) {
     val ui = LocalUi.current
     val scope = rememberCoroutineScope()
     val s by c.spoken.state.collectAsStateWithLifecycle()
+    LaunchedEffect(s.playing) { while (s.playing) { c.player.refresh(); kotlinx.coroutines.delay(1000) } }
     val item = s.item ?: return
     var expanded by remember { mutableStateOf(false) }
     var sleepMenu by remember { mutableStateOf(false) }
@@ -532,6 +536,7 @@ fun SpokenMiniBar(c: AppContainer) {
                     Text(if (s.live && s.nowPlaying != null) s.nowPlaying!! else item.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                     val sub = when {
                         s.error != null -> s.error!!
+                        s.remoteLabel != null -> s.remoteLabel!!
                         s.live -> if (s.nowPlaying != null) item.title else if (s.buffering) "Connecting…" else "Live"
                         s.chapterIndex >= 0 && chapters.size > 1 -> chapters[s.chapterIndex].title
                         else -> item.subtitle
@@ -588,6 +593,116 @@ fun SpokenMiniBar(c: AppContainer) {
                 }) { Icon(Icons.Default.Bookmark, null); Text("Bookmark") }
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = { c.spoken.close() }) { Icon(Icons.Default.Close, "Stop") }
+            }
+        }
+    }
+}
+
+/** Now Playing for a podcast episode / audiobook / station (the main player's current item). */
+@Composable
+fun SpokenNowPlaying(c: AppContainer) {
+    val ui = LocalUi.current
+    val scope = rememberCoroutineScope()
+    val s by c.spoken.state.collectAsStateWithLifecycle()
+    val np by c.player.state.collectAsStateWithLifecycle()
+    val item = s.item ?: return
+    val chapters = item.chapters
+    var sleepMenu by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when (item.kind) { "book" -> "Audiobook"; "station" -> "Internet radio"; else -> "Podcast" },
+                Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            IconButton(onClick = { ui.devicesOpen = true }) {
+                Icon(Icons.Default.SpeakerGroup, "Devices", tint = if (np.remote != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+        SpokenArt(item.artUrl.replace("size=256", "size=512"), when (item.kind) { "book" -> Icons.Default.MenuBook; "station" -> Icons.Default.Radio; else -> Icons.Default.Podcasts }, 280.dp)
+        Spacer(Modifier.size(16.dp))
+        Text(if (s.live && s.nowPlaying != null) s.nowPlaying!! else item.title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        Text(
+            when {
+                s.live && s.nowPlaying != null -> item.title
+                s.chapterIndex >= 0 && chapters.size > 1 -> chapters[s.chapterIndex].title
+                else -> item.subtitle
+            },
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
+            modifier = Modifier.clickable {
+                when (item.kind) { "episode" -> item.showId?.let { ui.go("podcast/$it") }; "book" -> ui.go("book/${item.id}") }
+            },
+        )
+        s.remoteLabel?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+        Spacer(Modifier.size(12.dp))
+        if (!s.live) {
+            var drag by remember(item.id) { mutableStateOf<Float?>(null) }
+            Slider(
+                value = drag ?: s.positionS.toFloat(), onValueChange = { drag = it },
+                onValueChangeFinished = { drag?.let { c.spoken.seekTo(it.toDouble()) }; drag = null },
+                valueRange = 0f..((item.durationS ?: 1.0).toFloat().coerceAtLeast(1f)), modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth()) {
+                Text(SpokenLogic.clock(drag?.toDouble() ?: s.positionS), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Text("-" + SpokenLogic.clock(((item.durationS ?: 0.0) - s.positionS) / s.speed.coerceAtLeast(0.25f)), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!s.live && chapters.size > 1) IconButton(onClick = { c.spoken.chapter(false) }) { Icon(Icons.Default.SkipPrevious, "Previous chapter") }
+            if (!s.live) IconButton(onClick = { c.spoken.skip(-15.0) }) { Icon(Icons.Default.Replay, "Back 15 seconds") }
+            FilledIconButton(onClick = { c.spoken.toggle() }, modifier = Modifier.size(64.dp)) {
+                Icon(if (s.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (s.playing) "Pause" else "Play", Modifier.size(36.dp))
+            }
+            if (!s.live) IconButton(onClick = { c.spoken.skip(30.0) }) { Icon(Icons.Default.Forward30, "Forward 30 seconds") }
+            if (!s.live && chapters.size > 1) IconButton(onClick = { c.spoken.chapter(true) }) { Icon(Icons.Default.SkipNext, "Next chapter") }
+        }
+        if (!s.live) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                SPEEDS.forEach { sp -> FilterChip(s.speed == sp, { c.spoken.setSpeed(sp) }, label = { Text("$sp×") }) }
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Skip silence", Modifier.weight(1f))
+                Switch(s.skipSilence, { c.spoken.setSkipSilence(it) })
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box {
+                TextButton(onClick = { sleepMenu = true }) {
+                    Text("Sleep: " + when {
+                        s.sleepEndOfChapter -> "end of chapter"
+                        s.sleepEndsAt != null -> "${((s.sleepEndsAt!! - System.currentTimeMillis()) / 60_000 + 1)} min"
+                        else -> "off"
+                    })
+                }
+                DropdownMenu(sleepMenu, { sleepMenu = false }) {
+                    DropdownMenuItem({ Text("Off") }, { c.spoken.setSleep(0); sleepMenu = false })
+                    listOf(5, 10, 15, 30, 45, 60, 90).forEach { m -> DropdownMenuItem({ Text("$m min") }, { c.spoken.setSleep(m); sleepMenu = false }) }
+                    if (chapters.size > 1) DropdownMenuItem({ Text("End of chapter") }, { c.spoken.setSleep(-1); sleepMenu = false })
+                }
+            }
+            if (item.kind == "book") TextButton(onClick = {
+                scope.launch { ui.toast = if (c.spoken.addBookmark(null)) "Bookmark added" else "Could not add bookmark" }
+            }) { Icon(Icons.Default.Bookmark, null); Text("Bookmark") }
+            Spacer(Modifier.weight(1f))
+            if (item.kind != "station") TextButton(onClick = {
+                c.spoken.markPlayed(item.kind, item.id, true); c.spoken.close(); ui.back()
+            }) { Text("Mark played") }
+        }
+        if (chapters.size > 1) {
+            Text("Chapters", style = MaterialTheme.typography.titleMedium, modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
+            chapters.forEachIndexed { i, ch ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { c.spoken.seekTo(ch.start) }.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(ch.title.ifBlank { "Chapter ${i + 1}" }, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontWeight = if (i == s.chapterIndex) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (i == s.chapterIndex) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                    Text(SpokenLogic.clock(ch.start), style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
     }

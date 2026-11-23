@@ -38,18 +38,35 @@ class QueueSync(private val api: () -> NasMusicApi, private val scope: Coroutine
         }
     }
 
-    fun setCurrent(id: String?) { _currentId.value = id }
+    fun setCurrent(id: String?) { createSeq++; pendingProgress = null; _currentId.value = id }
 
     /** Radio queues known to this device (from /radio or a queue flagged radio by the server). */
     private val radioIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     fun markRadio(id: String) { radioIds += id }
     fun isRadio(id: String?): Boolean = id != null && (id in radioIds || _queues.value.any { it.id == id && it.isRadio })
 
-    /** A list was played: create a server queue for it (replaces the oldest unused when 20 exist). */
-    fun created(name: String, tracks: List<Track>, startIndex: Int) = scope.launch {
-        runCatching { api().createQueue(NewQueue(name, tracks.map { it.id }, startIndex)) }
-            .onSuccess { _currentId.value = it.id; refresh() }
-            .onFailure { _currentId.value = null }
+    @Volatile private var createSeq = 0
+    /** Position reported while the new queue's id isn't known yet; sent once it is. */
+    @Volatile private var pendingProgress: Pair<Int, Long>? = null
+
+    /**
+     * A list was played: create a server queue for it (replaces the oldest unused when 20 exist). Until the
+     * server answers there is NO current queue, so the new list's position is never written onto the queue that
+     * played before (that made the old queue "resume" at the wrong track).
+     */
+    fun created(name: String, tracks: List<Track>, startIndex: Int): kotlinx.coroutines.Job {
+        val seq = ++createSeq
+        _currentId.value = null
+        pendingProgress = null
+        return scope.launch {
+            runCatching { api().createQueue(NewQueue(name, tracks.map { it.id }, startIndex)) }
+                .onSuccess { q ->
+                    if (seq != createSeq) return@onSuccess // another list was played meanwhile
+                    _currentId.value = q.id
+                    pendingProgress?.let { (i, p) -> pendingProgress = null; progress(i, p) }
+                    refresh()
+                }
+        }
     }
 
     suspend fun load(id: String): Queue? = runCatching { api().queue(id) }.getOrNull()
@@ -63,7 +80,10 @@ class QueueSync(private val api: () -> NasMusicApi, private val scope: Coroutine
     fun removed(position: Int) = mutate { removeFromQueue(it, position) }
     fun added(trackIds: List<String>, next: Boolean) =
         mutate { addToQueue(it, TrackIdsBody(trackIds, JsonPrimitive(if (next) "next" else "end"))) }
-    fun progress(index: Int, positionMs: Long) = mutate { patchQueue(it, QueuePatch(currentIndex = index, positionMs = positionMs)) }
+    fun progress(index: Int, positionMs: Long) {
+        if (_currentId.value == null) { pendingProgress = index to positionMs; return }
+        mutate { patchQueue(it, QueuePatch(currentIndex = index, positionMs = positionMs)) }
+    }
 
     fun addTo(queueId: String, trackIds: List<String>) = scope.launch {
         runCatching { api().addToQueue(queueId, TrackIdsBody(trackIds, JsonPrimitive("end"))) }; refresh()

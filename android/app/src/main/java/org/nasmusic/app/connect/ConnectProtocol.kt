@@ -33,6 +33,8 @@ data class PlaybackState(
     val castTo: String? = null,
     /** Set by the server: the active device is a server speaker still connecting/loading (not playing yet). */
     val connecting: Boolean = false,
+    /** api 0.8: a podcast episode / audiobook / station is playing instead of the music queue. */
+    val media: ConnectMedia? = null,
     val rev: Long = 0,
 ) {
     /** Position now: while playing it advances from positionAt at [speed]. */
@@ -42,6 +44,10 @@ data class PlaybackState(
         return positionMs + ((nowMs - at).coerceAtLeast(0) * speed).toLong()
     }
 }
+
+/** PlaybackState.media: kind is episode | book | station. */
+@Serializable
+data class ConnectMedia(val kind: String, val id: String)
 
 @Serializable
 data class ConnectDevice(

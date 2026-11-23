@@ -189,6 +189,10 @@ private fun HomeShelf(c: AppContainer, shelf: Shelf, onChanged: () -> Unit) {
         shelf.kind == "pinned" -> ShelfRow(c, shelf.items, onUnpin = { item ->
             scope.launch { runCatching { c.api.unpin(item.type, item.id) }; onChanged() }
         })
+        // One-tap resume (queues at their track + position, episodes/books at their position); long-press removes.
+        shelf.kind == "continue_listening" -> ShelfRow(c, shelf.items, onDismiss = { item ->
+            scope.launch { runCatching { c.api.dismissContinue(item.type, item.id) }; onChanged() }
+        })
         else -> ShelfRow(c, shelf.items)
     }
 }
