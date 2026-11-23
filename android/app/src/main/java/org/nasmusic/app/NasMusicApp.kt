@@ -19,6 +19,7 @@ class NasMusicApp : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         org.nasmusic.app.diag.CrashLog.install(this)
         container = AppContainer(this)
+        org.nasmusic.app.playback.MediaItems.artAuthority = org.nasmusic.app.playback.ArtProvider.authority(packageName)
         container.router.start()
         container.eq.start()
         container.contextCollector.start()

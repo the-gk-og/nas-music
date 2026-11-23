@@ -34,6 +34,18 @@ object MediaItems {
 
     fun artUrl(albumId: String, size: Int = 512) = RoutedCallFactory.virtual("art/$albumId?size=$size")
 
+    /**
+     * Authority of [ArtProvider] (`<applicationId>.art`), set at app start. When set, media items carry
+     * `content://` art URIs that other processes (Android Auto, System UI, watches) can read once granted;
+     * otherwise (unit tests) the app-internal URL.
+     */
+    @Volatile var artAuthority: String? = null
+
+    fun artUri(albumId: String, size: Int = 512): Uri? {
+        if (albumId.isBlank()) return null
+        return artAuthority?.let { ArtProvider.uri(it, albumId, size) } ?: Uri.parse(artUrl(albumId, size))
+    }
+
     fun streamUrl(trackId: String, kbps: Int) =
         RoutedCallFactory.virtual("stream/${Uri.encode(trackId)}?format=opus&bitrate=$kbps")
 
@@ -62,7 +74,7 @@ object MediaItems {
             .setTitle(t.title)
             .setArtist(t.artist)
             .setAlbumTitle(t.album)
-            .setArtworkUri(Uri.parse(artUrl(t.albumId)))
+            .setArtworkUri(artUri(t.albumId))
             .setTrackNumber(t.trackNo)
             .setDurationMs((t.durationS * 1000).toLong())
             .setIsPlayable(true)

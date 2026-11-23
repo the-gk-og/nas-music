@@ -35,6 +35,30 @@ yes | latest/bin/sdkmanager --licenses
 latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 ```
 
+## Android Auto
+
+Auto support is plain AndroidX Media3: `PlaybackService` is a `MediaLibraryService` (also bound through the
+legacy `android.media.browse.MediaBrowserService` action), the tree lives in `playback/AutoLibrary.kt`, and
+cover art is served to other processes by `playback/ArtProvider.kt` (`content://<applicationId>.art/album/<id>?size=256`,
+fetched with the app's pinned client, cached in `cacheDir/art`, read access granted per URI to the browser).
+Auto only accepts browsable root children, at most the limit it sends (usually 4), so the root it gets is
+For you · Library · Radio · Downloads; browsers without a limit get the flat 7-section root.
+
+Testing with the Desktop Head Unit (sideloaded APK):
+
+1. Phone: Android Auto settings → tap *Version* 10× → ⋮ → *Developer settings* → enable *Unknown sources*;
+   ⋮ → *Start head unit server*.
+2. PC: SDK Manager → *Android Auto Desktop Head Unit Emulator*; `adb forward tcp:5277 tcp:5277`;
+   `~/Android/Sdk/extras/google/auto/desktop-head-unit`.
+3. Check: nas-music appears in the media app list; tabs For you / Library / Radio / Downloads; Albums is a
+   grid with covers; tapping a song plays its album from that song (queue shows the album); For you →
+   *Play something for now* starts the smart shuffle; a *Continue listening* entry resumes at the saved
+   position; search (magnifier) shows Songs / Albums / Artists; voice (`m` in DHU, or "Hey Google, play
+   <artist> on nas-music") starts artist radio; now-playing and the lock screen show the cover.
+4. Offline: turn Wi-Fi and data off → Library rows say "Can't reach your music server", Downloads still
+   plays; turn the network back on → the open tab reloads by itself.
+5. If the tree is empty: `adb logcat -s MLSLegacyStub PlaybackService` (root / browse errors are logged there).
+
 ## Layout
 
 | Package | What |
