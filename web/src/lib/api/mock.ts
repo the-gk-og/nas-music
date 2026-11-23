@@ -40,7 +40,7 @@ interface MockUser {
   createdAt: string;
 }
 
-const iso = () => new Date().toISOString();
+const iso = (ms = Date.now()) => new Date(ms).toISOString();
 let seq = 0;
 const nid = (p: string) => `${p}${Date.now().toString(36)}${(seq++).toString(36)}`;
 
@@ -99,11 +99,65 @@ export class MockBackend {
       ...(parts[4] === 'import' && method === 'DELETE' ? { removed: 0 } : {}),
     };
   }
+  adminWants(method: string, path: string, qs: URLSearchParams, body: Record<string, unknown>, me: { id: string; username: string }) {
+    const all = () =>
+      [...this.toget.map((x) => ({ ...x, userId: me.id, username: me.username })), ...this.otherWants].map((x) => {
+        const a = this.wantMarks.get(x.id);
+        return { ...x, done: !!a, doneAt: a?.at ?? null, doneNote: a?.note ?? null, doneBy: a?.by ?? null, doneAuto: !!a?.auto, suggestDone: !a && (!!x.ownedId || x.status === 'got') };
+      });
+    const one = (id: string) => {
+      const it = all().find((x) => x.id === id);
+      if (!it) throw new HttpError(404, 'no such item');
+      return it;
+    };
+    if (path === '/admin/wants/check-found') {
+      const ids = body.ids as string[] | undefined;
+      const found = all().filter((x) => x.suggestDone && (!ids || ids.includes(x.id)));
+      for (const x of found) this.wantMarks.set(x.id, { at: iso(), note: 'Found in the library', by: me.username, auto: true });
+      return { checked: found.length };
+    }
+    const r = path.match(/^\/admin\/wants\/([^/]+)\/done$/);
+    if (r) {
+      one(r[1]);
+      if (method === 'DELETE') this.wantMarks.delete(r[1]);
+      else {
+        const note = String(body.note ?? '').trim() || null;
+        this.wantMarks.set(r[1], { at: this.wantMarks.get(r[1])?.at ?? iso(), note, by: me.username, auto: false });
+      }
+      return one(r[1]);
+    }
+    const items = all();
+    const users = [...new Map(items.map((x) => [x.userId, x.username])).entries()].map(([userId, username]) => {
+      const mine = items.filter((x) => x.userId === userId);
+      return { userId, username, open: mine.filter((x) => !x.done && x.status !== 'dismissed').length, done: mine.filter((x) => x.done).length, found: mine.filter((x) => x.suggestDone).length, total: mine.length };
+    });
+    const st = qs.get('status') ?? 'active';
+    const done = qs.get('done');
+    const q = (qs.get('q') ?? '').trim().toLowerCase();
+    return {
+      items: items.filter(
+        (x) =>
+          (st === 'all' || (st === 'active' ? x.status !== 'dismissed' : x.status === st)) &&
+          (!qs.get('userId') || x.userId === qs.get('userId')) &&
+          (!qs.get('type') || x.type === qs.get('type')) &&
+          (done === null || String(x.done) === done) &&
+          (!q || [x.title, x.artist, x.note ?? '', x.username].some((v) => v.toLowerCase().includes(q))),
+      ),
+      users,
+    };
+  }
   family = { enabled: false, hideProbable: true, hideUnknown: false, locked: false, hasPin: false };
   voiceTokens: { id: string; name: string; createdAt: string; lastUsed: string | null }[] = [];
   voicePrefs = new Map<string, { aliases: string[]; isDefault: boolean }>();
   pinsList: { type: PinType; id: string }[] = [];
   toget: ToGetItem[] = [];
+  // schema v8 admin want list: other users' items + the admin's check-offs
+  otherWants: (ToGetItem & { userId: string; username: string })[] = [
+    { id: 'tgo1', userId: 'u-sam', username: 'sam', type: 'album', title: 'Paper Lanterns', artist: 'Harbour Lights', year: 2024, status: 'want', source: 'search', note: 'the deluxe one', links: storeLinks('Harbour Lights', 'Paper Lanterns'), createdAt: iso(Date.now() - 3 * 864e5) },
+    { id: 'tgo2', userId: 'u-sam', username: 'sam', type: 'track', title: 'Night Bus', artist: 'Low Tide', year: 2021, status: 'got', ownedId: 't1_1', source: 'manual', note: null, links: storeLinks('Low Tide', 'Night Bus'), createdAt: iso(Date.now() - 9 * 864e5) },
+    { id: 'tgo3', userId: 'u-kid', username: 'kiddo', type: 'album', title: 'Bright Side', artist: 'The Kites', year: 2025, status: 'want', source: 'suggestion', note: null, links: storeLinks('The Kites', 'Bright Side'), createdAt: iso(Date.now() - 864e5) },
+  ];
+  wantMarks = new Map<string, { at: string; note: string | null; by: string; auto: boolean }>([['tgo1', { at: iso(Date.now() - 864e5), note: 'Ripped from CD', by: 'admin', auto: false }]]);
   catalog: CatalogItem[] = [];
   radioSeen = new Map<string, Set<string>>();
   radioSeeds = new Map<string, RadioSeed>();
@@ -697,7 +751,11 @@ export class MockBackend {
         return item;
       }
       const st = qs.get('status') ?? 'want';
-      return st === 'all' ? this.toget : this.toget.filter((x) => x.status === st);
+      const mark = (x: ToGetItem) => {
+        const a = this.wantMarks.get(x.id);
+        return { ...x, adminAdded: a ? { at: a.at, note: a.note } : null };
+      };
+      return (st === 'all' ? this.toget : this.toget.filter((x) => x.status === st)).map(mark);
     }
     if ((r = m(/^\/toget\/([^/]+)$/))) {
       const item = this.toget.find((x) => x.id === r![1]);
@@ -795,6 +853,7 @@ export class MockBackend {
     // admin
     if (path.startsWith('/admin/') && !me.isAdmin) throw new HttpError(403, 'Admins only');
     const A = this.admin;
+    if (path.startsWith('/admin/wants')) return this.adminWants(method, path, qs, body, me);
     if (path === '/admin/family') return this.users.map((u) => ({ userId: u.id, username: u.username, isAdmin: u.isAdmin, lockedBy: null, ...this.family }));
     if ((r = m(/^\/admin\/users\/([^/]+)\/family$/))) {
       const u = this.users.find((x) => x.id === r![1]);

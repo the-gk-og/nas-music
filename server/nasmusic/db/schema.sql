@@ -20,6 +20,7 @@
 -- Wrapped and scrobbling never see them. Older databases are upgraded by nasmusic.db.migrations. Also v7 adds
 -- track_dj (DJ automix analysis: beat grid, Camelot key, mix-in/mix-out points, energy curve). Older databases
 -- are upgraded by nasmusic.db.migrations.
+-- v8 adds toget_admin (the admin's check-off of users' want-list items).
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -337,6 +338,16 @@ CREATE TABLE IF NOT EXISTS toget (
     UNIQUE (user_id, type, match_key)
 );
 CREATE INDEX IF NOT EXISTS toget_user ON toget(user_id, status);
+
+-- v8: the admin's check-off of a want-list item ("added to the library"). A row = checked; un-check deletes it.
+-- Kept apart from toget.status, which is the user's own want/got/dismissed.
+CREATE TABLE IF NOT EXISTS toget_admin (
+    toget_id   TEXT PRIMARY KEY REFERENCES toget(id) ON DELETE CASCADE,
+    note       TEXT,
+    done_by    TEXT REFERENCES users(id) ON DELETE SET NULL,
+    done_at    TEXT NOT NULL,
+    auto       INTEGER NOT NULL DEFAULT 0   -- 1 = checked from the "found in library" suggestion
+);
 
 -- Cache of online-catalogue items seen in search results (shared; no user data).
 CREATE TABLE IF NOT EXISTS catalog_items (

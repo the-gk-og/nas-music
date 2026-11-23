@@ -5,6 +5,7 @@ import {
   appendNew,
   arrangeShelves,
   classifySwipe,
+  desktopPortrait,
   effectiveMotion,
   formFor,
   greeting,
@@ -29,6 +30,18 @@ describe('screen forms', () => {
     expect(tabletSidePane(1000, 700)).toBe(true);
     expect(tabletSidePane(800, 1100)).toBe(false);
     expect(tabletSidePane(1400, 900)).toBe(false);
+  });
+  it('keeps the desktop layout in a tall window with a mouse (portrait monitor)', () => {
+    expect(formFor(1080, 1920, true)).toBe('desktop');
+    expect(formFor(960, 1040, true)).toBe('desktop'); // half of a 1920x1080 screen
+    expect(formFor(1080, 960, true)).toBe('tablet'); // half-height: wider than tall
+    expect(formFor(1080, 1920, false)).toBe('tablet'); // touch tablet in portrait stays a tablet
+    expect(formFor(800, 1280, true)).toBe('tablet');
+    expect(formFor(375, 812, true)).toBe('phone');
+    expect(desktopPortrait(1440, 2560, true)).toBe(true);
+    expect(desktopPortrait(1200, 1900, false)).toBe(true);
+    expect(desktopPortrait(1920, 1080, true)).toBe(false);
+    expect(desktopPortrait(1080, 1920, false)).toBe(false);
   });
 });
 

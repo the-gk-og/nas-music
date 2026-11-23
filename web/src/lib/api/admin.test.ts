@@ -5,6 +5,7 @@ import {
   countAbove,
   etaText,
   filterLogs,
+  filterWants,
   groupChanges,
   qualityText,
   uptimeText,
@@ -14,6 +15,7 @@ import {
   type AutotagField,
   type AutotagGroup,
   type AutotagSuggestion,
+  type AdminWantItem,
   type LogEntry,
 } from './admin';
 
@@ -120,5 +122,29 @@ describe('tag fixing helpers', () => {
         bitsPerSample: null,
       }),
     ).toBe('MP3 · 48.0 kHz · 320 kbps');
+  });
+});
+
+describe('filterWants', () => {
+  const w = (id: string, o: Partial<AdminWantItem>): AdminWantItem => ({
+    id, type: 'album', title: 'T', artist: 'A', status: 'want', userId: 'u1', username: 'sam', done: false, suggestDone: false, ...o,
+  });
+  const items = [
+    w('1', { title: 'Paper Lanterns', note: 'deluxe' }),
+    w('2', { type: 'track', title: 'Night Bus', done: true }),
+    w('3', { userId: 'u2', username: 'kiddo', artist: 'The Kites' }),
+  ];
+  const ids = (f: Parameters<typeof filterWants>[1]) => filterWants(items, f).map((i) => i.id);
+  it('filters by user, type and done', () => {
+    expect(ids({})).toEqual(['1', '2', '3']);
+    expect(ids({ userId: 'u2' })).toEqual(['3']);
+    expect(ids({ type: 'track' })).toEqual(['2']);
+    expect(ids({ hideDone: true })).toEqual(['1', '3']);
+  });
+  it('searches title, artist, note and username', () => {
+    expect(ids({ q: 'DELUXE' })).toEqual(['1']);
+    expect(ids({ q: 'kites' })).toEqual(['3']);
+    expect(ids({ q: 'kiddo' })).toEqual(['3']);
+    expect(ids({ q: '  ' })).toEqual(['1', '2', '3']);
   });
 });

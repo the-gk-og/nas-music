@@ -119,11 +119,14 @@
     display: grid;
     gap: 10px;
     flex: 1;
+    /* don't stretch the rows over a tall window (icon and label drifted apart) */
+    align-content: start;
   }
   .tablet .tab {
     width: 72px;
     padding: 6px 0;
     gap: 4px;
+    align-content: center;
   }
   .tablet .tab :global(svg) {
     padding: 4px 16px;

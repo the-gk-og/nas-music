@@ -1,7 +1,7 @@
 // Admin console API (/api/v1/admin/*). Shapes are this client's proposal until api/openapi.yaml defines
 // them; everything admin goes through this one module so adopting the real contract touches one file.
 import type { ApiClient } from './client';
-import type { DeviceKind, ExplicitStatus, FamilyMode, MyDevice, Track } from '../types';
+import type { DeviceKind, ExplicitStatus, FamilyMode, MyDevice, ToGetItem, Track } from '../types';
 
 export interface DiskUsage {
   name: string;
@@ -264,12 +264,66 @@ export function adminApi(c: ApiClient) {
     deleteBackup: (id: string) => c.del<void>(`/admin/backups/${enc(id)}`),
     downloadBackup: (id: string) => c.downloadUrl(`/admin/backups/${enc(id)}/download`),
 
+    wants: (q: WantQuery = {}) => c.get<AdminWants>('/admin/wants', { ...q }),
+    checkWant: (id: string, note?: string | null) => c.put<AdminWantItem>(`/admin/wants/${enc(id)}/done`, { note: note ?? null }),
+    uncheckWant: (id: string) => c.del<AdminWantItem>(`/admin/wants/${enc(id)}/done`),
+    checkFoundWants: (ids?: string[]) => c.post<{ checked: number }>('/admin/wants/check-found', ids ? { ids } : {}),
+
     settings: () => c.get<AdminSettings>('/admin/settings'),
     saveSettings: (s: Partial<AdminSettings>) => c.put<SettingsSaveResult>('/admin/settings', s),
   };
 }
 
 export type AdminApi = ReturnType<typeof adminApi>;
+
+// ---- want list of every user (schema v8) ----
+
+export interface AdminWantItem extends ToGetItem {
+  userId: string;
+  username: string;
+  /** checked off by an admin ("added") */
+  done: boolean;
+  doneAt?: string | null;
+  doneNote?: string | null;
+  doneBy?: string | null;
+  doneAuto?: boolean;
+  /** not checked yet, but found in the library */
+  suggestDone: boolean;
+}
+
+export interface AdminWantUser {
+  userId: string;
+  username: string;
+  open: number;
+  done: number;
+  found: number;
+  total: number;
+}
+
+export interface AdminWants {
+  items: AdminWantItem[];
+  users: AdminWantUser[];
+}
+
+export interface WantQuery {
+  userId?: string;
+  type?: 'album' | 'track';
+  status?: 'active' | 'want' | 'got' | 'dismissed' | 'all';
+  done?: boolean;
+  q?: string;
+}
+
+/** Client-side filter, same rules as the server's (used for instant search while typing). */
+export function filterWants(items: AdminWantItem[], f: { userId?: string; type?: string; hideDone?: boolean; q?: string }): AdminWantItem[] {
+  const q = (f.q ?? '').trim().toLowerCase();
+  return items.filter(
+    (i) =>
+      (!f.userId || i.userId === f.userId) &&
+      (!f.type || i.type === f.type) &&
+      (!f.hideDone || !i.done) &&
+      (!q || [i.title, i.artist, i.note ?? '', i.username].some((s) => s.toLowerCase().includes(q))),
+  );
+}
 
 // ---- validation for the Settings section ----
 

@@ -60,7 +60,7 @@
   const abB = $derived(player.ab.b != null && s.duration ? (player.ab.b / s.duration) * 100 : null);
 </script>
 
-<div class="np" class:wide>
+<div class="np" class:wide class:tall={wide && appearance.portrait}>
   <div class="bg" aria-hidden="true">{#if bg}<img src={bg} alt="" />{/if}</div>
   <div class="top">
     <button class="icon-btn" aria-label="Minimise" title="Minimise" onclick={minimise}><ChevronDown size={28} /></button>
@@ -276,6 +276,37 @@
   }
   .wide .art {
     width: min(100%, 46vh);
+  }
+  /* desktop in a tall window: cover, controls and lyrics stacked, the cover as big as the height allows */
+  .tall .body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    justify-items: center;
+    align-items: start;
+    gap: 20px;
+    padding: 0 32px 12px;
+  }
+  .tall .stage,
+  .tall .controls,
+  .tall .side {
+    grid-column: 1;
+  }
+  .tall .stage {
+    width: 100%;
+    padding: 8px 0 0;
+  }
+  .tall .art {
+    width: min(100%, 40vh, 960px);
+  }
+  .tall .controls {
+    width: min(720px, 100%);
+  }
+  .tall .side {
+    grid-row: 3;
+    width: min(900px, 100%);
+    max-height: none;
+    height: 100%;
+    padding-top: 4px;
   }
   .upnext {
     display: flex;

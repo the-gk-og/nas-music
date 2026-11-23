@@ -453,3 +453,36 @@ def migrate_v6_to_v7(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
         raise
     log.warning("schema v6 -> v7 done")
     return True
+
+
+# ---------- v7 -> v8 (additive; other v8 features add their tables to V8_TABLES) ----------
+
+V8_TABLES = ("toget_admin",)
+
+
+def migrate_v7_to_v8(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """New tables for the v8 features (additive). Returns True if it migrated."""
+    if current_version(conn) != 7:
+        return False
+    if make_backup:
+        dest = backup(conn, "v7-backup")
+        if dest:
+            log.warning("schema v7 -> v8: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 7:
+            conn.execute("ROLLBACK")
+            return False
+        for t in V8_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (8)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v7 -> v8 done")
+    return True

@@ -523,3 +523,54 @@ def delete_report(rid: str, conn: Conn = Depends(db)):
     if not bugreports.delete(conn, rid):
         raise HTTPException(404, "no such report")
     return Response(status_code=204)
+
+
+# ---------- want list ("To get") of every user, with the admin's check-off (schema v8) ----------
+
+
+def _want(fn, *a, **k):
+    from nasmusic.app import toget
+
+    try:
+        return fn(*a, **k)
+    except toget.NotFound as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@router.get("/wants")
+def wants(userId: str | None = None, type: Literal["album", "track"] | None = None,
+          status: Literal["active", "want", "got", "dismissed", "all"] = "active", done: bool | None = None,
+          q: str | None = Query(None, max_length=200), conn: Conn = Depends(db)):
+    from nasmusic.app import toget
+
+    return {"items": toget.admin_list(conn, user_id=userId, type=type, status=status, done=done, q=q),
+            "users": toget.admin_summary(conn)}
+
+
+class WantCheck(BaseModel):
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.put("/wants/{item_id}/done")
+def check_want(item_id: str, body: WantCheck | None = None, me=Depends(admin_device), conn: Conn = Depends(db)):
+    from nasmusic.app import toget
+
+    return _want(toget.admin_check, conn, me.user_id, item_id, body.note if body else None)
+
+
+@router.delete("/wants/{item_id}/done")
+def uncheck_want(item_id: str, conn: Conn = Depends(db)):
+    from nasmusic.app import toget
+
+    return _want(toget.admin_uncheck, conn, item_id)
+
+
+class WantCheckFound(BaseModel):
+    ids: list[str] | None = Field(default=None, max_length=5000)
+
+
+@router.post("/wants/check-found")
+def check_found_wants(body: WantCheckFound | None = None, me=Depends(admin_device), conn: Conn = Depends(db)):
+    from nasmusic.app import toget
+
+    return {"checked": toget.admin_check_found(conn, me.user_id, body.ids if body else None)}

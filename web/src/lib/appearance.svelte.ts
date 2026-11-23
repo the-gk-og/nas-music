@@ -3,7 +3,7 @@
 // device" writes `device.<deviceId>.<key>` overrides instead.
 import { loadJson, saveJson } from './platform';
 import { session } from './session.svelte';
-import { HOME_SHELVES, accentColor, effectiveMotion, formFor, type Form, type Motion, type ShelfPrefs } from './v3';
+import { HOME_SHELVES, accentColor, desktopPortrait, effectiveMotion, formFor, type Form, type Motion, type ShelfPrefs } from './v3';
 
 export type ViewMode = 'grid' | 'list';
 export type PageStyle = 'big' | 'simple';
@@ -68,6 +68,8 @@ class Appearance {
   reducedMotion = $state(false);
   width = $state(typeof window !== 'undefined' ? window.innerWidth : 1280);
   height = $state(typeof window !== 'undefined' ? window.innerHeight : 800);
+  /** A mouse/trackpad is the primary pointer (desktop app, desktop browser). */
+  finePointer = $state(false);
   /** Per-section grid/list choice, remembered on this device. */
   views = $state<Record<string, ViewMode>>(loadJson('nm.views', {}));
   pageStyles = $state<Record<string, PageStyle>>(loadJson('nm.pageStyles', {}));
@@ -77,6 +79,9 @@ class Appearance {
     const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     this.reducedMotion = !!mq?.matches;
     mq?.addEventListener?.('change', (e) => (this.reducedMotion = e.matches));
+    const fine = window.matchMedia?.('(pointer: fine)');
+    this.finePointer = !!fine?.matches;
+    fine?.addEventListener?.('change', (e) => (this.finePointer = e.matches));
     window.addEventListener('resize', () => {
       this.width = window.innerWidth;
       this.height = window.innerHeight;
@@ -89,7 +94,12 @@ class Appearance {
   }
 
   get form(): Form {
-    return formFor(this.width);
+    return formFor(this.width, this.height, this.finePointer);
+  }
+
+  /** Desktop layout in a tall (portrait) window. */
+  get portrait(): boolean {
+    return desktopPortrait(this.width, this.height, this.finePointer);
   }
 
   view(section: string): ViewMode {

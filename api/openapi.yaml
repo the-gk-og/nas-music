@@ -73,6 +73,8 @@ info:
     `maxChunkBytes` (send `chunkBytes`, 4 MiB). The last chunk's reply has status done and the stored `upload`;
     the track appears in the library seconds later (UploadedFile.indexed). Uploads with visibility `private`
     are visible only to the uploader (hidden from everyone else everywhere, /stream 404). Job `upload_scan`.
+    Schema v8: admin want-list view (/admin/wants*): every user's To get items with the admin's check-off
+    ("added", optional note) and "found in the library" suggestions; ToGetItem.adminAdded shows the user that mark.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
     Times are ISO-8601 UTC strings. IDs are opaque strings.
 servers:
@@ -2855,6 +2857,59 @@ paths:
         '404': { description: not found }
     delete:
       responses: { '204': { description: deleted }, '404': { description: not found } }
+  /admin/wants:
+    get:
+      summary: |
+        Admin only (schema v8). Every user's To get items, newest first, plus per-user counts (`users`, unfiltered).
+        `status=active` (default) leaves out items the user dismissed. `done` filters on the admin's check-off;
+        `q` searches title, artist, note and username.
+      parameters:
+        - { name: userId, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string, enum: [album, track] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, want, got, dismissed, all], default: active } }
+        - { name: done, in: query, schema: { type: boolean } }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+      responses:
+        '200':
+          description: items and per-user counts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, users]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AdminWantItem' } }
+                  users: { type: array, items: { $ref: '#/components/schemas/AdminWantUser' } }
+        '403': { description: not an admin }
+  /admin/wants/{id}/done:
+    parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+    put:
+      summary: Admin only. Check the item off as added (optional note). Again = update the note, keep the time.
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { note: { type: [string, 'null'], maxLength: 500 } } } } }
+      responses:
+        '200':
+          description: the item
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminWantItem' } } }
+        '404': { description: not found }
+    delete:
+      summary: Admin only. Un-check the item.
+      responses:
+        '200':
+          description: the item
+          content: { application/json: { schema: { $ref: '#/components/schemas/AdminWantItem' } } }
+        '404': { description: not found }
+  /admin/wants/check-found:
+    post:
+      summary: |
+        Admin only. Check off the items found in the library (`suggestDone`), all of them or just `ids`, with the
+        note "Found in the library". Re-matches wanted items against the library first.
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { ids: { type: array, items: { type: string } } } } } }
+      responses:
+        '200':
+          description: how many were checked
+          content: { application/json: { schema: { type: object, required: [checked], properties: { checked: { type: integer } } } } }
   /uploads:
     get:
       summary: |
@@ -4317,6 +4372,42 @@ components:
         updatedAt: { type: string, format: date-time }
         gotAt: { type: [string, 'null'], format: date-time }
         links: { type: array, items: { type: object, properties: { name: { type: string }, url: { type: string } } } }
+        adminAdded:
+          description: Schema v8. The admin checked this item off as added to the library (null = not yet).
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [at]
+              properties:
+                at: { type: string, format: date-time }
+                note: { type: [string, 'null'] }
+    AdminWantItem:
+      description: Schema v8. A ToGetItem of any user, with the admin's check-off.
+      allOf:
+        - $ref: '#/components/schemas/ToGetItem'
+        - type: object
+          required: [userId, username, done, suggestDone]
+          properties:
+            userId: { type: string }
+            username: { type: string }
+            done: { type: boolean, description: checked off by an admin }
+            doneAt: { type: [string, 'null'], format: date-time }
+            doneNote: { type: [string, 'null'] }
+            doneBy: { type: [string, 'null'], description: username of the admin who checked it }
+            doneAuto: { type: boolean, description: checked via "found in the library" }
+            suggestDone:
+              type: boolean
+              description: not checked yet, but found in the library (a scan/upload matched it, or the user marked it got)
+    AdminWantUser:
+      type: object
+      required: [userId, username, open, done, found, total]
+      properties:
+        userId: { type: string }
+        username: { type: string }
+        open: { type: integer, description: not checked and not dismissed }
+        done: { type: integer }
+        found: { type: integer, description: not checked but found in the library }
+        total: { type: integer }
     DeviceKind:
       type: string
       enum: [android, web, desktop, watch, other]

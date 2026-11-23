@@ -380,7 +380,7 @@ def test_migration_v6_to_v7(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == db.SCHEMA_VERSION == 7
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     for t in ("upload_access", "uploads", "upload_sessions"):
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
     assert len(list(tmp_path.glob("nasmusic.db.v6-backup-*"))) == 1
