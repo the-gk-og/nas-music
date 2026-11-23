@@ -17,7 +17,7 @@ from nasmusic.auth import Device
 from nasmusic.core import ai_config, now_iso
 from nasmusic.db import family
 from nasmusic.library import art, lrclib, lyrics, overrides, queries
-from nasmusic.stream import clamp_bitrate, media_type
+from nasmusic.stream import DEFAULT_BITRATE, media_type, opus_label, original_label, snap_bitrate
 from nasmusic.stream.transcode import TranscodeError
 from nasmusic.sync import manifest as build_manifest
 from nasmusic.sync import smart_candidates
@@ -124,8 +124,11 @@ def family_guard(conn: Conn, uid: str, track_ids: list[str]) -> None:
 
 
 @router.get("/stream/{track_id}")
-def stream(track_id: str, format: Literal["opus", "flac"] = "opus", bitrate: int = Query(160, ge=1, le=1000),
+def stream(track_id: str, format: Literal["opus", "flac", "original"] = "opus",
+           bitrate: int = Query(DEFAULT_BITRATE, ge=1, le=1000),
            me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    """`flac`/`original`: the file as stored (lossless for FLAC sources). `opus`: transcoded at `bitrate`, snapped to
+    one of OPUS_BITRATES and cached per (track, bitrate). `X-Stream-Format` says what was sent, e.g. "FLAC 16/44.1"."""
     row = queries.track_file(conn, track_id)
     if row is None:
         _404()
@@ -133,17 +136,19 @@ def stream(track_id: str, format: Literal["opus", "flac"] = "opus", bitrate: int
     src = c.cfg.library_root / row["path"]
     if not src.is_file():
         _404("file missing")
-    if format == "flac":
+    if format in ("flac", "original"):
         # "flac" means the original file; non-FLAC sources are served as-is with their own type.
+        label = original_label(row["codec"], row["bits_per_sample"], row["sample_rate"], row["bitrate"])
         return FileResponse(src, media_type=media_type(row["path"]),
-                            headers={"Cache-Control": "private, max-age=86400"})
-    kbps = clamp_bitrate(bitrate)
+                            headers={"Cache-Control": "private, max-age=86400", "X-Stream-Format": label})
+    kbps = snap_bitrate(bitrate)
     try:
         out = c.opus.get(src, track_id, kbps, row["mtime"])
     except TranscodeError as e:
         log.error("transcode failed for %s: %s", track_id, e)
         raise HTTPException(500, "transcode failed") from e
-    return FileResponse(out, media_type="audio/ogg", headers={"Cache-Control": "private, max-age=86400"})
+    return FileResponse(out, media_type="audio/ogg",
+                        headers={"Cache-Control": "private, max-age=86400", "X-Stream-Format": opus_label(kbps)})
 
 
 @router.get("/art/{album_id}")

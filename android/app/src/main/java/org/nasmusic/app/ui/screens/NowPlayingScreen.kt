@@ -213,6 +213,15 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
                 modifier = Modifier.clickable(enabled = track.artistId.isNotBlank()) { ui.go("artist/${track.artistId}") })
             Text(track.album, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.clickable(enabled = track.albumId.isNotBlank()) { ui.go("album/${track.albumId}") })
+            // What this phone is actually playing: "FLAC 16/44.1", "Opus 128" (tap: streaming quality settings).
+            val fmt by c.nowFormat.collectAsStateWithLifecycle()
+            fmt?.takeIf { it.mediaId == trackId && !c.player.isRemote }?.let { f ->
+                Text(
+                    if (f.offline) "${f.label} · downloaded" else f.label,
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp).clickable { ui.go("settings") },
+                )
+            }
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = {

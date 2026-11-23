@@ -276,16 +276,30 @@ paths:
         '502': { description: GitHub unreachable or the profile has no parametric EQ }
   /stream/{trackId}:
     get:
-      summary: Audio bytes. Supports HTTP Range for seeking. Opus is transcoded with ffmpeg and cached on disk.
+      summary: |
+        Audio bytes. Supports HTTP Range for seeking. `flac` (alias `original`) sends the file as stored —
+        lossless for FLAC sources, the file's own codec otherwise. `opus` is transcoded with ffmpeg and cached on disk
+        per (track, bitrate). Clients pick the quality (e.g. lossless at home, Opus 128 away); see `X-Stream-Format`.
       parameters:
         - { name: trackId, in: path, required: true, schema: { type: string } }
-        - { name: format, in: query, schema: { type: string, enum: [opus, flac], default: opus } }
-        - { name: bitrate, in: query, schema: { type: integer, default: 160, description: kbps, opus only } }
+        - { name: format, in: query, schema: { type: string, enum: [opus, flac, original], default: opus } }
+        - name: bitrate
+          in: query
+          description: |
+            kbps, opus only. 1–1000 accepted (else 422); snapped to the nearest of 64, 96, 128, 160, 192, 256
+            (a tie goes up), so the cache keeps at most six variants per track, bounded by `opus_cache_gb`.
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 160 }
         - { name: token, in: query, schema: { type: string }, description: 'device token, for <audio> elements that cannot send headers' }
       responses:
-        '200': { description: full body (audio/ogg for opus, audio/flac for flac); Content-Length set }
-        '206': { description: partial content }
+        '200':
+          description: full body (audio/ogg for opus, the file's own type for flac/original); Content-Length set
+          headers:
+            X-Stream-Format:
+              description: 'what was sent, short, for "now playing": "Opus 128", "FLAC 16/44.1", "FLAC 24/96", "MP3 320". Exposed to CORS.'
+              schema: { type: string }
+        '206': { description: partial content (same X-Stream-Format header) }
         '404': { description: not found }
+        '422': { description: unknown format or bitrate out of range }
   /art/{albumId}:
     get:
       parameters:

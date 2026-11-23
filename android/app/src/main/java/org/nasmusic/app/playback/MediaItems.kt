@@ -34,8 +34,10 @@ object MediaItems {
 
     fun artUrl(albumId: String, size: Int = 512) = RoutedCallFactory.virtual("art/$albumId?size=$size")
 
-    fun streamUrl(trackId: String, kbps: Int) =
-        RoutedCallFactory.virtual("stream/${Uri.encode(trackId)}?format=opus&bitrate=$kbps")
+    fun streamUrl(trackId: String, kbps: Int) = streamUrl(trackId, StreamSpec(false, kbps))
+
+    fun streamUrl(trackId: String, spec: StreamSpec) =
+        RoutedCallFactory.virtual("stream/${Uri.encode(trackId)}?${spec.query}")
 
     /** A MediaItem without a URI: the service resolves it to a local file or a stream URL. */
     fun fromTrack(t: Track, source: PlaySource, mixId: String? = null, reason: String? = null, searchQuery: String? = null): MediaItem {

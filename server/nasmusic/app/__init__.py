@@ -144,7 +144,7 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
         CORSMiddleware, allow_origins=TAURI_ORIGINS + list(cfg.cors_origins), allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "Range", "X-Jam-Token", "CF-Access-Client-Id", "CF-Access-Client-Secret"],
-        expose_headers=["Content-Range", "Content-Length", "Accept-Ranges", "Content-Disposition"], max_age=600,
+        expose_headers=["Content-Range", "Content-Length", "Accept-Ranges", "Content-Disposition", "X-Stream-Format"], max_age=600,
     )
 
     @app.exception_handler(web.LoginRequired)

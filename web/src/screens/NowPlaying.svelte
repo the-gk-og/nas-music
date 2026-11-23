@@ -106,6 +106,9 @@
       <h2 class="ellipsis"><ExplicitBadge status={t.explicit} />{t.title}</h2>
       <button class="link ellipsis" onclick={() => ui.go('artist', t.artistId)}>{t.artist}</button>
       <button class="link ellipsis" onclick={() => ui.go('album', t.albumId)}>{t.album}</button>
+      {#if player.streamFormat && !player.isRemote}
+        <button class="link fmt" title="Streaming quality" onclick={() => ui.go('settings')}>{player.streamFormat}</button>
+      {/if}
     {:else}
       <h2>Nothing playing</h2>
       <div class="muted">Pick something in Albums, Playlists or Search.</div>
@@ -185,6 +188,11 @@
 </div>
 
 <style>
+  .fmt {
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+  }
   .topr {
     display: flex;
     align-items: center;

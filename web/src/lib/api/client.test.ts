@@ -19,6 +19,8 @@ describe('server addresses with custom ports (relay readiness)', () => {
     expect(c.base).toBe('https://music.whoactuallyneeds.men:8443/api/v1');
     expect(c.connectUrl).toBe('wss://music.whoactuallyneeds.men:8443/api/v1/connect?token=abc');
     expect(await c.streamSrc('t1')).toBe('https://music.whoactuallyneeds.men:8443/api/v1/stream/t1?format=opus&token=abc');
+    expect(await c.streamSrc('t1', 'opus', 96)).toBe('https://music.whoactuallyneeds.men:8443/api/v1/stream/t1?format=opus&bitrate=96&token=abc');
+    expect(await c.streamSrc('t1', 'flac', 96)).toBe('https://music.whoactuallyneeds.men:8443/api/v1/stream/t1?format=flac&token=abc');
     expect(await c.artSrc('al1', 256)).toBe('https://music.whoactuallyneeds.men:8443/api/v1/art/al1?size=256&token=abc');
     const lan = new ApiClient({ origin: 'http://192.168.68.2:8080', mode: 'bearer', token: 't', fetchImpl: (() => {}) as unknown as typeof fetch });
     expect(lan.connectUrl).toBe('ws://192.168.68.2:8080/api/v1/connect?token=t');

@@ -112,6 +112,10 @@ fun SettingsScreen(c: AppContainer) {
         Text("LAN certificate: ${cfg.certSha256.take(23)}…", style = MaterialTheme.typography.bodySmall)
 
         HorizontalDivider()
+        Section("Streaming quality")
+        org.nasmusic.app.ui.StreamQualitySettings(c)
+
+        HorizontalDivider()
         Section("Offline")
         OutlinedButton(onClick = { ui.go("downloads") }) { Text("Downloads (using %d MB)".format(usedMb)) }
         OutlinedButton(onClick = { ui.go("uploads") }) { Text("Upload music to the server") }
@@ -138,14 +142,10 @@ fun SettingsScreen(c: AppContainer) {
             }
         }
         Text("Download quality")
-        SingleChoiceSegmentedButtonRow {
-            val qs = org.nasmusic.app.sync.DownloadQuality.entries
-            qs.forEachIndexed { i, q ->
-                SegmentedButton(
-                    selected = settings.downloadQuality == q.key,
-                    onClick = { scope.launch { c.settings.setDownloadQuality(q.key) } },
-                    shape = SegmentedButtonDefaults.itemShape(i, qs.size),
-                ) { Text(if (q == org.nasmusic.app.sync.DownloadQuality.FLAC) "FLAC" else q.label) }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            org.nasmusic.app.sync.DownloadQuality.entries.forEach { q ->
+                androidx.compose.material3.FilterChip(settings.downloadQuality == q.key,
+                    { scope.launch { c.settings.setDownloadQuality(q.key) } }, label = { Text(q.label) })
             }
         }
         Text("For smart downloads and songs you download. Changing it re-downloads smart songs at the next sync.",

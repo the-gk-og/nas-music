@@ -20,7 +20,12 @@ data class AppSettings(
     /** Hour (0–23) the night sync window opens; it stays open for [SYNC_WINDOW_HOURS]. */
     val syncHour: Int = 3,
     val allowTunnelSync: Boolean = false,
+    /** Opus bitrate for offline-favourites (manifest) downloads. */
     val streamBitrate: Int = 160,
+    /** [org.nasmusic.app.playback.StreamQuality] keys for streaming on home Wi-Fi, mobile data and remote Wi-Fi. */
+    val streamQualityHome: String = "auto",
+    val streamQualityMobile: String = "auto",
+    val streamQualityRemote: String = "auto",
     /** v2: off by default — stream like Spotify; when on, favourites + mixes download overnight. */
     val offlineFavourites: Boolean = false,
     /** Smart downloads: keep a rolling offline set (favourites, this week's mixes, recent, AI picks). Off by default. */
@@ -46,6 +51,12 @@ data class AppSettings(
     val libraryViews: Map<String, String> = emptyMap(),
 ) {
     fun viewFor(chip: String) = libraryViews[chip] ?: defaultView
+    fun streamQuality(net: org.nasmusic.app.playback.NetworkKind): org.nasmusic.app.playback.StreamQuality =
+        org.nasmusic.app.playback.StreamQuality.from(when (net) {
+            org.nasmusic.app.playback.NetworkKind.HOME -> streamQualityHome
+            org.nasmusic.app.playback.NetworkKind.MOBILE -> streamQualityMobile
+            org.nasmusic.app.playback.NetworkKind.REMOTE -> streamQualityRemote
+        })
     companion object {
         const val SYNC_WINDOW_HOURS = 2
         /** Shelf ids as in the contract (`home.shelves`). */
@@ -68,6 +79,9 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     private val hour = intPreferencesKey("sync_hour")
     private val tunnelSync = booleanPreferencesKey("allow_tunnel_sync")
     private val bitrate = intPreferencesKey("stream_bitrate")
+    private val sqHome = stringPreferencesKey("stream_quality_home")
+    private val sqMobile = stringPreferencesKey("stream_quality_mobile")
+    private val sqRemote = stringPreferencesKey("stream_quality_remote")
     private val offline = booleanPreferencesKey("offline_favourites")
     private val smartKey = booleanPreferencesKey("smart_downloads")
     private val smartBudgetKey = stringPreferencesKey("smart_budget")
@@ -86,6 +100,9 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             syncHour = p[hour] ?: 3,
             allowTunnelSync = p[tunnelSync] ?: false,
             streamBitrate = p[bitrate] ?: 160,
+            streamQualityHome = p[sqHome] ?: "auto",
+            streamQualityMobile = p[sqMobile] ?: "auto",
+            streamQualityRemote = p[sqRemote] ?: "auto",
             offlineFavourites = p[offline] ?: false,
             smartDownloads = p[smartKey] ?: false,
             smartBudget = p[smartBudgetKey] ?: "gb:5",
@@ -136,5 +153,12 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     suspend fun setSmartBudget(key: String) = context.dataStore.edit { it[smartBudgetKey] = key }
     suspend fun setDownloadQuality(key: String) = context.dataStore.edit { it[qualityKey] = key }
     suspend fun setLyricsScale(s: Float) = context.dataStore.edit { it[lyricsScaleKey] = s.coerceIn(0.7f, 2f) }
+    suspend fun setStreamQuality(net: org.nasmusic.app.playback.NetworkKind, key: String) = context.dataStore.edit {
+        it[when (net) {
+            org.nasmusic.app.playback.NetworkKind.HOME -> sqHome
+            org.nasmusic.app.playback.NetworkKind.MOBILE -> sqMobile
+            org.nasmusic.app.playback.NetworkKind.REMOTE -> sqRemote
+        }] = key
+    }
     suspend fun setStreamBitrate(kbps: Int) = context.dataStore.edit { it[bitrate] = kbps }
 }

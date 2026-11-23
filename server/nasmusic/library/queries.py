@@ -199,7 +199,8 @@ def tracks_by_ids(conn: sqlite3.Connection, uid: str, ids: list[str], include_mi
 
 def track_file(conn: sqlite3.Connection, track_id: str) -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT id, path, mtime, flac_bytes, duration_s FROM tracks WHERE id = ? AND missing = 0", (track_id,)
+        "SELECT id, path, mtime, flac_bytes, duration_s, codec, bitrate, sample_rate, bits_per_sample FROM tracks "
+        "WHERE id = ? AND missing = 0", (track_id,)
     ).fetchone()
 
 

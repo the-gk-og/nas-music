@@ -106,3 +106,84 @@ def test_art_endpoint(client, conn):
     assert client.get(f"/api/v1/art/{loose}").status_code == 404
     assert client.get("/api/v1/art/nope").status_code == 404
 
+
+
+# ---------- quality selection ----------
+
+def test_snap_bitrate():
+    from nasmusic.stream import OPUS_BITRATES, snap_bitrate
+    assert OPUS_BITRATES == (64, 96, 128, 160, 192, 256)
+    for b in OPUS_BITRATES:
+        assert snap_bitrate(b) == b
+    assert snap_bitrate(1) == 64
+    assert snap_bitrate(24) == 64
+    assert snap_bitrate(100) == 96
+    assert snap_bitrate(112) == 128  # tie goes up
+    assert snap_bitrate(320) == 256
+    assert snap_bitrate(1000) == 256
+
+
+def test_labels():
+    from nasmusic.stream import opus_label, original_label
+    assert original_label("FLAC", 16, 44100, 900) == "FLAC 16/44.1"
+    assert original_label("FLAC", 24, 96000, None) == "FLAC 24/96"
+    assert original_label("FLAC", None, 48000, None) == "FLAC 48 kHz"
+    assert original_label("MP3", None, 44100, 320) == "MP3 320"
+    assert original_label("OPUS", None, 48000, 128) == "Opus 128"
+    assert original_label(None, None, None, None) == "Original"
+    assert opus_label(96) == "Opus 96"
+
+
+def test_stream_format_header_and_original_alias(client, conn):
+    tid = track_ids(conn)["Song 1"]
+    a = client.get(f"/api/v1/stream/{tid}?format=flac")
+    b = client.get(f"/api/v1/stream/{tid}?format=original")
+    assert a.status_code == b.status_code == 200
+    assert a.content == b.content
+    assert a.headers["x-stream-format"].startswith("FLAC")
+    assert b.headers["x-stream-format"] == a.headers["x-stream-format"]
+
+
+def test_stream_rejects_bad_params(client, conn):
+    tid = track_ids(conn)["Song 1"]
+    assert client.get(f"/api/v1/stream/{tid}?format=mp3").status_code == 422
+    assert client.get(f"/api/v1/stream/{tid}?format=opus&bitrate=0").status_code == 422
+    assert client.get(f"/api/v1/stream/{tid}?format=opus&bitrate=5000").status_code == 422
+    assert client.get(f"/api/v1/stream/{tid}?format=opus&bitrate=abc").status_code == 422
+
+
+def test_cache_keyed_by_snapped_bitrate(client, conn, app, cfg):
+    tid = track_ids(conn)["Song 2"]
+    cache: OpusCache = app.state.ctx.opus
+    r = client.get(f"/api/v1/stream/{tid}?format=opus&bitrate=128")
+    assert r.status_code == 200 and r.headers["x-stream-format"] == "Opus 128"
+    assert cache.transcodes == 1
+    # 130 and 120 snap to 128: same cache entry, no new transcode.
+    for odd in (130, 120):
+        r = client.get(f"/api/v1/stream/{tid}?format=opus&bitrate={odd}")
+        assert r.status_code == 200 and r.headers["x-stream-format"] == "Opus 128"
+    assert cache.transcodes == 1
+    # A different tier is its own entry; the first one stays.
+    r = client.get(f"/api/v1/stream/{tid}?format=opus&bitrate=256")
+    assert r.headers["x-stream-format"] == "Opus 256"
+    assert cache.transcodes == 2
+    names = sorted(p.name.split("_")[1] for p in (cfg.data_dir / "opus").glob(f"{tid}_*.opus"))
+    assert names == ["128", "256"]
+
+
+def test_default_stream_is_opus_160(client, conn, cfg):
+    tid = track_ids(conn)["Opening"]
+    r = client.get(f"/api/v1/stream/{tid}")
+    assert r.status_code == 200 and r.headers["x-stream-format"] == "Opus 160"
+    assert list((cfg.data_dir / "opus").glob(f"{tid}_160_*.opus"))
+
+
+def test_transcode_keeps_replaygain_tags(tmp_path, base_flac):
+    """ReplayGain/loudness come from the API's replayGain fields, but the transcode keeps the source tags too."""
+    src = tmp_path / "rg.flac"
+    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(base_flac), "-c", "copy",
+                    "-metadata", "REPLAYGAIN_TRACK_GAIN=-6.50 dB", str(src)], check=True)
+    out = OpusCache(tmp_path / "opus", 10**9).get(src, "rg", 96, src.stat().st_mtime)
+    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream_tags:format_tags", "-of", "json",
+                            str(out)], capture_output=True, text=True, check=True)
+    assert "-6.50 dB" in probe.stdout

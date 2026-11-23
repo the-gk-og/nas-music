@@ -42,6 +42,10 @@ class ServerRouter(
     private val mutex = Mutex()
     private val kicks = Channel<Unit>(Channel.CONFLATED)
 
+    private val _unmetered = MutableStateFlow(true)
+    /** Whether the active network is unmetered (Wi-Fi/ethernet); refreshed with the route. */
+    val unmetered: StateFlow<Boolean> = _unmetered.asStateFlow()
+
     val isOnline: Boolean get() = _route.value != Route.OFFLINE
 
     fun start() {
@@ -62,6 +66,7 @@ class ServerRouter(
         val networkAvailable = networkAvailable()
         val probe = if (cfg != null && networkAvailable) probeLan(cfg) else ProbeResult.UNREACHABLE
         _lanProbe.value = probe
+        _unmetered.value = isUnmetered()
         val r = RouteSelector.select(networkAvailable && cfg != null, probe, cfg?.hasTunnel == true)
         _route.value = r
         r

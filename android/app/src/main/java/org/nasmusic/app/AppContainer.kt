@@ -98,6 +98,8 @@ class AppContainer(val context: Context) {
         connect.onTakeover = { android.os.Handler(android.os.Looper.getMainLooper()).post { p.connect() } }
     }
     val abRepeat = AbRepeat()
+    /** Format of what this phone is playing ("FLAC 16/44.1", "Opus 128"); set by the playback service. */
+    val nowFormat = kotlinx.coroutines.flow.MutableStateFlow<org.nasmusic.app.playback.NowFormat?>(null)
     /** Messages from background parts (playback service, workers) to show as a snackbar. */
     val ui = UiMessages().also { u -> connect.onSpeakerError = { u.toast(it) } }
     val eq = EqRepository(context)

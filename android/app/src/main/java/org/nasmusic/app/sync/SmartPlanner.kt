@@ -6,9 +6,12 @@ import org.nasmusic.app.data.api.AudioFormat
 
 /** Smart-download quality. Opus bitrates are what /stream transcodes to; FLAC is the original file. */
 enum class DownloadQuality(val key: String, val format: AudioFormat, val kbps: Int, val label: String) {
+    OPUS_96("opus96", AudioFormat.OPUS, 96, "Opus 96"),
     OPUS_128("opus128", AudioFormat.OPUS, 128, "Opus 128"),
+    OPUS_160("opus160", AudioFormat.OPUS, 160, "Opus 160"),
     OPUS_192("opus192", AudioFormat.OPUS, 192, "Opus 192"),
-    FLAC("flac", AudioFormat.FLAC, 0, "FLAC (original)");
+    OPUS_256("opus256", AudioFormat.OPUS, 256, "Opus 256"),
+    FLAC("flac", AudioFormat.FLAC, 0, "Lossless");
 
     companion object {
         fun from(key: String?): DownloadQuality = entries.firstOrNull { it.key == key } ?: OPUS_128

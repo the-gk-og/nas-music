@@ -138,6 +138,7 @@ class PlaybackService : MediaLibraryService() {
                     return
                 }
                 applyLevelling()
+                updateNowFormat()
                 loadArtworkData(player.currentMediaItemIndex)
                 loadArtworkData(player.currentMediaItemIndex + 1)
                 c.abRepeat.clear()
@@ -187,6 +188,18 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         scope.launch { c.connect.events.collect { onConnect(it) } }
+        // Streaming quality: a changed setting or network applies from the next song (queued stream URLs are
+        // re-pointed; the playing song keeps its stream so there's no gap).
+        scope.launch {
+            var last: StreamSpec? = null
+            kotlinx.coroutines.flow.combine(c.router.route, c.router.unmetered, c.settings.settings) { r, _, _ -> r }
+                .collect { r ->
+                    if (r == org.nasmusic.app.net.Route.OFFLINE) return@collect
+                    val spec = currentSpec()
+                    if (last != null && spec != last) repointQueuedStreams(spec)
+                    last = spec
+                }
+        }
         handler.post(tick)
     }
 
@@ -780,12 +793,61 @@ class PlaybackService : MediaLibraryService() {
 
     // ---- Media ----
 
-    /** Local file if downloaded, else the stream URL. */
+    /** Local file if downloaded, else the stream URL in the quality for the current network. */
     private suspend fun resolve(item: MediaItem): MediaItem {
         val local = c.library.localPath(item.mediaId)?.let(::File)?.takeIf { it.exists() }
         val uri = local?.let(Uri::fromFile)
-            ?: Uri.parse(MediaItems.streamUrl(item.mediaId, c.settings.settings.value.streamBitrate))
+            ?: Uri.parse(MediaItems.streamUrl(item.mediaId, currentSpec()))
         return item.buildUpon().setUri(uri).build()
+    }
+
+    /** Streaming quality for the current network (home Wi-Fi / mobile data / remote Wi-Fi) and settings. */
+    private fun currentSpec(): StreamSpec {
+        val net = NetworkKind.of(c.router.route.value, c.router.unmetered.value)
+        return StreamQuality.resolve(c.settings.settings.value.streamQuality(net), net)
+    }
+
+    /** Point every queued stream (not the playing item, not downloaded files) at [spec]. */
+    private fun repointQueuedStreams(spec: StreamSpec) {
+        val cur = player.currentMediaItemIndex
+        val n = player.mediaItemCount
+        val items = (0 until n).map { player.getMediaItemAt(it) }
+        val updated = items.mapIndexed { i, item ->
+            val uri = item.localConfiguration?.uri?.toString()
+            if (i == cur || uri == null || StreamSpec.ofUrl(uri) == null) item
+            else MediaItems.streamUrl(item.mediaId, spec).takeIf { it != uri }?.let { item.buildUpon().setUri(it).build() } ?: item
+        }
+        if (updated == items) return
+        if (cur + 1 < n) player.replaceMediaItems(cur + 1, n, updated.subList(cur + 1, n))
+        if (cur > 0) player.replaceMediaItems(0, cur, updated.subList(0, cur))
+        android.util.Log.i(org.nasmusic.app.diag.CrashLog.TAG, "Stream quality now ${spec.label}; queue re-pointed")
+    }
+
+    private val originalLabels = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** The original file's format ("FLAC 16/44.1", "MP3 320") from /library/tracks/{id}/info, cached. */
+    private suspend fun originalLabel(id: String): String? = originalLabels[id]
+        ?: runCatching { c.api.trackInfo(id) }.getOrNull()
+            ?.let { FormatLabel.original(it.codec, it.bitsPerSample, it.sampleRate, it.bitrateKbps) }
+            ?.also { originalLabels[id] = it }
+
+    /** Publish what the current item actually is (stream quality or downloaded file) for Now Playing. */
+    private fun updateNowFormat() {
+        val item = player.currentMediaItem
+        val uri = item?.localConfiguration?.uri
+        if (item == null || uri == null) { c.nowFormat.value = null; return }
+        val id = item.mediaId
+        scope.launch {
+            val nf = if (uri.scheme == "file") {
+                val d = withContext(Dispatchers.IO) { c.db.downloads().completed(id) }
+                if (d != null && d.format != "flac") NowFormat(id, "Opus ${if (d.kbps > 0) d.kbps else 160}", offline = true)
+                else NowFormat(id, originalLabel(id) ?: "Original file", offline = true)
+            } else {
+                val spec = StreamSpec.ofUrl(uri.toString()) ?: run { c.nowFormat.value = null; return@launch }
+                NowFormat(id, if (spec.lossless) originalLabel(id) ?: spec.label else spec.label)
+            }
+            if (player.currentMediaItem?.mediaId == id) c.nowFormat.value = nf
+        }
     }
 
     /**
@@ -822,6 +884,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        c.nowFormat.value = null
         handler.removeCallbacks(tick)
         handler.removeCallbacks(fastTick)
         crossfader.release()

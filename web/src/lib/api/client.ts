@@ -243,9 +243,9 @@ export class ApiClient {
    * Audio URL for <audio src>. Cookie mode: plain URL. Bearer mode: `?token=` (needs server support — see
    * README "contract gaps"); `streamBlob` is the fallback when that fails.
    */
-  async streamSrc(trackId: string, format: 'opus' | 'flac' = 'opus'): Promise<string> {
+  async streamSrc(trackId: string, format: 'opus' | 'flac' = 'opus', kbps?: number): Promise<string> {
     if (this.media) return this.media.stream(trackId, format);
-    const url = `${this.base}/stream/${encodeURIComponent(trackId)}?format=${format}`;
+    const url = `${this.base}${this.streamPath(trackId, format, kbps)}`;
     if (this.mode === 'bearer' && this.token) return `${url}&token=${encodeURIComponent(this.token)}`;
     return url;
   }
@@ -261,8 +261,14 @@ export class ApiClient {
     return url;
   }
 
-  streamBlob(trackId: string, format: 'opus' | 'flac' = 'opus'): Promise<string> {
-    return this.blobUrl(`/stream/${encodeURIComponent(trackId)}?format=${format}`);
+  streamBlob(trackId: string, format: 'opus' | 'flac' = 'opus', kbps?: number): Promise<string> {
+    return this.blobUrl(this.streamPath(trackId, format, kbps));
+  }
+
+  /** `/stream/{id}?format=…[&bitrate=…]`; the server snaps the bitrate to 64/96/128/160/192/256. */
+  private streamPath(trackId: string, format: 'opus' | 'flac', kbps?: number): string {
+    const br = format === 'opus' && kbps ? `&bitrate=${kbps}` : '';
+    return `/stream/${encodeURIComponent(trackId)}?format=${format}${br}`;
   }
 
   suggestionPreviewSrc(id: string): Promise<string> {

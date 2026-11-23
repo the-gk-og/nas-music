@@ -16,6 +16,7 @@ import {
 } from './eq';
 import { EventQueue, PlaybackTracker, WEB_SIGNALS, buildContext, signalSetting, uuid, type PlayMeta, type SignalKey } from './events';
 import { APP_VERSION, defaultDeviceName, deviceKind, loadJson, preferredFormat, saveJson, storage } from './platform';
+import { loadQuality, netKind, originalLabel, resolveQuality, saveQuality, specLabel, type NetKind, type QualitySettings, type StreamSpec } from './quality';
 import {
   insertPosition,
   insertTracks,
@@ -127,6 +128,10 @@ export class Player {
 
   // ---- listening: crossfade, levelling, sleep timer (per device) ----
   listening = $state<ListeningSettings>(defaultListening());
+  /** Streaming quality at home / remote (applies from the next track). */
+  quality = $state<QualitySettings>(loadQuality());
+  /** What the current track is streaming as: "FLAC 16/44.1", "Opus 128"; null before anything loads. */
+  streamFormat = $state<string | null>(null);
   sleep = $state<SleepTimer | null>(null);
   /** Ticks while a sleep timer runs, so labels refresh. */
   sleepNow = $state(Date.now());
@@ -141,6 +146,9 @@ export class Player {
   private mix: GainNode | null = null;
   /** The other deck, loaded with the next track (cued at `startS`, the DJ mix-in point, or 0). */
   private preloaded: { id: string; el: HTMLAudioElement; startS: number } | null = null;
+  /** The quality each deck's source was requested in. */
+  private deckSpec = new WeakMap<HTMLAudioElement, StreamSpec>();
+  private originalLabels = new Map<string, string>();
   /** Per-deck low shelf (DJ bass swap). */
   private deckBass: BiquadFilterNode[] = [];
   /** A running DJ transition: mixing both decks, then easing the incoming tempo back to 1. */
@@ -186,6 +194,46 @@ export class Player {
       this.events.push(ctx ? { ...e, context: ctx } : e);
     });
     this.events = new EventQueue((evs) => session.api.sendEvents(evs));
+  }
+
+  // ================= streaming quality =================
+
+  /** Home (the server's LAN address / a private host) or remote (tunnel / public address). */
+  get netKind(): NetKind {
+    const here = typeof location !== 'undefined' ? location.origin : '';
+    return netKind(session.saved.origin, here, session.saved.lanUrl, session.saved.tunnelUrl);
+  }
+
+  /** The quality to request now; Safari (no Ogg Opus) always gets the original file. */
+  streamSpec(): StreamSpec {
+    const net = this.netKind;
+    return resolveQuality(this.quality[net], net, preferredFormat() === 'opus');
+  }
+
+  setQuality(net: NetKind, q: QualitySettings[NetKind]) {
+    this.quality = { ...this.quality, [net]: q };
+    saveQuality(this.quality);
+    // Applies from the next track: drop a next track preloaded in the old quality (unless it's mid-mix).
+    if (this.preloaded && !this.dj && !this.transitioning) this.preloaded = null;
+  }
+
+  /** Publish the current track's format; for the original file, look up its codec once (track info). */
+  private showFormat(trackId: string, spec: StreamSpec) {
+    if (spec.format === 'opus') {
+      this.streamFormat = specLabel(spec);
+      return;
+    }
+    const known = this.originalLabels.get(trackId);
+    this.streamFormat = known ?? specLabel(spec);
+    if (known || session.isMock) return;
+    session.api
+      .trackInfo(trackId)
+      .then((i) => {
+        const label = originalLabel(i.codec, i.bitsPerSample, i.sampleRate, i.bitrateKbps);
+        this.originalLabels.set(trackId, label);
+        if (this.current?.id === trackId && this.streamFormat === specLabel(spec)) this.streamFormat = label;
+      })
+      .catch(() => {});
   }
 
   // ================= derived =================
@@ -419,10 +467,12 @@ export class Player {
     if (!el || this.fadingOut?.el === el) return; // still fading out; try again on the next tick
     this.preloading = t.id;
     this.preloaded = null;
+    const spec = this.streamSpec();
     session.api
-      .streamSrc(t.id, preferredFormat())
+      .streamSrc(t.id, spec.format, spec.kbps)
       .then((src) => {
         if (this.preloading !== t.id || el === this.audio) return;
+        this.deckSpec.set(el, spec);
         this.preloading = null;
         el.pause();
         el.crossOrigin = session.api.mode === 'bearer' && !src.startsWith('blob:') && !src.startsWith('data:') ? 'anonymous' : null;
@@ -717,7 +767,8 @@ export class Player {
         const at = this.audio.currentTime;
         const wasPlaying = !this.audio.paused || this.playing;
         this.audio.crossOrigin = null;
-        this.audio.src = await session.api.streamBlob(t.id, preferredFormat());
+        const spec = this.deckSpec.get(this.audio) ?? this.streamSpec();
+        this.audio.src = await session.api.streamBlob(t.id, spec.format, spec.kbps);
         if (at) this.audio.currentTime = at;
         if (wasPlaying) await this.audio.play();
         return;
@@ -1066,6 +1117,7 @@ export class Player {
       if (pre.startS) pre.el.currentTime = 0; // cued for a DJ mix: a manual jump starts from the top
       const old = a;
       this.audio = a = pre.el;
+      this.showFormat(t.id, this.deckSpec.get(a) ?? this.streamSpec());
       this.retire(old, autoplay ? fadeS : 0);
       void this.topUpRadio();
       this.tracker.start(t, this.queue ? (this.queueMeta.get(this.queue.id) ?? {}) : {});
@@ -1095,8 +1147,11 @@ export class Player {
     this.error = null;
     this.ab = { a: null, b: null };
     this.updateMediaSession();
-    void session.api.streamSrc(t.id, preferredFormat()).then(async (src) => {
+    const spec = this.streamSpec();
+    this.showFormat(t.id, spec);
+    void session.api.streamSrc(t.id, spec.format, spec.kbps).then(async (src) => {
       if (token !== this.loadToken) return;
+      this.deckSpec.set(a, spec);
       a.crossOrigin = session.api.mode === 'bearer' && !src.startsWith('blob:') && !src.startsWith('data:') ? 'anonymous' : null;
       a.src = src;
       a.playbackRate = this.speed;

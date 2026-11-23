@@ -6,6 +6,8 @@
   import { ACCENTS, HOME_SHELVES, HOME_SHELF_TITLES, moveInList, type Motion } from '../lib/v3';
   import { WEB_SIGNALS, type SignalKey } from '../lib/events';
   import { player } from '../lib/player.svelte';
+  import { QUALITIES, resolveQuality, specLabel, type NetKind, type Quality } from '../lib/quality';
+  import { preferredFormat } from '../lib/platform';
   import type { LevellingMode } from '../lib/listening';
   import type { TransitionMode } from '../lib/automix';
   import { session } from '../lib/session.svelte';
@@ -137,6 +139,26 @@
       <div><div>Only on this device</div><div class="muted small">Keep these appearance settings here instead of syncing them to your other devices.</div></div>
       <input type="checkbox" class="switch" checked={appearance.localOnly} onchange={(e) => appearance.setLocalOnly(e.currentTarget.checked)} />
     </label>
+  </div>
+
+  <div class="section-title">Streaming quality</div>
+  <div class="pad form">
+    {#each [['home', 'At home', 'Using the server\'s home (LAN) address'], ['remote', 'Remote', 'Using the public / tunnel address']] as [k, label, hint]}
+      {@const net = k as NetKind}
+      <div class="opt">
+        <div>
+          <div>{label}{#if player.netKind === net}<span class="muted small"> · now</span>{/if}</div>
+          <div class="muted small">{hint}{#if player.quality[net] === 'auto'} · Auto = {specLabel(resolveQuality('auto', net))}{/if}</div>
+        </div>
+        <select aria-label="{label} quality" value={player.quality[net]} onchange={(e) => player.setQuality(net, e.currentTarget.value as Quality)}>
+          {#each QUALITIES as q}<option value={q.key}>{q.label}</option>{/each}
+        </select>
+      </div>
+    {/each}
+    <div class="muted small">
+      Lossless plays the original file; Opus is transcoded on the server and cached. Changes apply from the next song.
+      {#if preferredFormat() !== 'opus'}This browser can't play Opus, so it always gets the original file.{/if}
+    </div>
   </div>
 
   <div class="section-title">Playback</div>
