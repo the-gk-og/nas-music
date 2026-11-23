@@ -29,7 +29,14 @@ def to_dict(conn: sqlite3.Connection, r: sqlite3.Row) -> dict:
         "source": r["source"], "suggestionId": r["suggestion_id"], "ownedId": r["owned_id"],
         "createdAt": r["created_at"], "updatedAt": r["updated_at"], "gotAt": r["got_at"],
         "links": catalog.buy_links(r["artist"], r["title"]),
+        "adminAdded": admin_mark(conn, r["id"]),
     }
+
+
+def admin_mark(conn: sqlite3.Connection, item_id: str) -> dict | None:
+    """The admin's check-off (toget_admin), as the user sees it: {at, note} or None."""
+    a = conn.execute("SELECT note, done_at FROM toget_admin WHERE toget_id = ?", (item_id,)).fetchone()
+    return {"at": a["done_at"], "note": a["note"]} if a else None
 
 
 def list_items(conn: sqlite3.Connection, uid: str, status: str = "want") -> list[dict]:
@@ -125,3 +132,101 @@ def match_owned(conn: sqlite3.Connection) -> int:
                          (owned, now, now, r["id"]))
             changed += 1
     return changed
+
+
+# ---------- admin: every user's list, with check-off (toget_admin, schema v8) ----------
+
+def _admin_dict(conn: sqlite3.Connection, r: sqlite3.Row) -> dict:
+    d = to_dict(conn, r)
+    done = r["done_at"] is not None
+    d.update({
+        "userId": r["user_id"], "username": r["username"],
+        "done": done,
+        "doneAt": r["done_at"], "doneNote": r["done_note"], "doneBy": r["done_by_name"], "doneAuto": bool(r["done_auto"]),
+        # found in the library (scan/upload matched it, or the user marked it got) but not checked off yet
+        "suggestDone": not done and (r["owned_id"] is not None or r["status"] == "got"),
+    })
+    return d
+
+
+_ADMIN_SELECT = (
+    "SELECT t.*, u.username, a.done_at, a.note AS done_note, a.auto AS done_auto, "
+    "b.username AS done_by_name FROM toget t JOIN users u ON u.id = t.user_id "
+    "LEFT JOIN toget_admin a ON a.toget_id = t.id LEFT JOIN users b ON b.id = a.done_by")
+
+
+def admin_list(conn: sqlite3.Connection, *, user_id: str | None = None, type: str | None = None,
+               status: str = "active", done: bool | None = None, q: str | None = None) -> list[dict]:
+    """Every user's items. status: want/got/dismissed/all, or "active" (= not dismissed)."""
+    where, params = [], []
+    if user_id:
+        where.append("t.user_id = ?")
+        params.append(user_id)
+    if type:
+        where.append("t.type = ?")
+        params.append(type)
+    if status == "active":
+        where.append("t.status != 'dismissed'")
+    elif status != "all":
+        where.append("t.status = ?")
+        params.append(status)
+    if done is not None:
+        where.append("a.toget_id IS NOT NULL" if done else "a.toget_id IS NULL")
+    if q and q.strip():
+        like = "%" + q.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where.append("(lower(t.title) LIKE ? ESCAPE '\\' OR lower(t.artist) LIKE ? ESCAPE '\\' "
+                     "OR lower(COALESCE(t.note, '')) LIKE ? ESCAPE '\\' OR lower(u.username) LIKE ? ESCAPE '\\')")
+        params += [like] * 4
+    sql = _ADMIN_SELECT + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY t.created_at DESC, t.id"
+    return [_admin_dict(conn, r) for r in conn.execute(sql, params).fetchall()]
+
+
+def admin_get(conn: sqlite3.Connection, item_id: str) -> dict:
+    r = conn.execute(_ADMIN_SELECT + " WHERE t.id = ?", (item_id,)).fetchone()
+    if r is None:
+        raise NotFound("no such item")
+    return _admin_dict(conn, r)
+
+
+def admin_check(conn: sqlite3.Connection, admin_id: str, item_id: str, note: str | None = None,
+                auto: bool = False) -> dict:
+    """Check an item off ("added"). Checking again updates the note (and keeps the original time)."""
+    admin_get(conn, item_id)
+    note = (note or "").strip()[:500] or None
+    conn.execute(
+        "INSERT INTO toget_admin (toget_id, note, done_by, done_at, auto) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT (toget_id) DO UPDATE SET note = excluded.note, done_by = excluded.done_by, auto = excluded.auto",
+        (item_id, note, admin_id, now_iso(), 1 if auto else 0))
+    return admin_get(conn, item_id)
+
+
+def admin_uncheck(conn: sqlite3.Connection, item_id: str) -> dict:
+    admin_get(conn, item_id)
+    conn.execute("DELETE FROM toget_admin WHERE toget_id = ?", (item_id,))
+    return admin_get(conn, item_id)
+
+
+def admin_check_found(conn: sqlite3.Connection, admin_id: str, ids: list[str] | None = None) -> int:
+    """Check off every suggested item (found in the library, not checked yet), or just `ids` among them."""
+    match_owned(conn)  # pick up anything a scan has not matched yet
+    found = [d for d in admin_list(conn, done=False, status="all") if d["suggestDone"]]
+    if ids is not None:
+        wanted = set(ids)
+        found = [d for d in found if d["id"] in wanted]
+    for d in found:
+        admin_check(conn, admin_id, d["id"], "Found in the library", auto=True)
+    return len(found)
+
+
+def admin_summary(conn: sqlite3.Connection) -> list[dict]:
+    """Per user: open (not checked, not dismissed) / done / suggested counts."""
+    rows = conn.execute(
+        "SELECT u.id, u.username, "
+        "SUM(CASE WHEN a.toget_id IS NULL AND t.status != 'dismissed' THEN 1 ELSE 0 END) AS open, "
+        "SUM(CASE WHEN a.toget_id IS NOT NULL THEN 1 ELSE 0 END) AS done, "
+        "SUM(CASE WHEN a.toget_id IS NULL AND (t.owned_id IS NOT NULL OR t.status = 'got') THEN 1 ELSE 0 END) "
+        "AS found, COUNT(*) AS total "
+        "FROM toget t JOIN users u ON u.id = t.user_id LEFT JOIN toget_admin a ON a.toget_id = t.id "
+        "GROUP BY u.id ORDER BY lower(u.username)").fetchall()
+    return [{"userId": r["id"], "username": r["username"], "open": r["open"],
+             "done": r["done"], "found": r["found"], "total": r["total"]} for r in rows]

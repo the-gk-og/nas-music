@@ -721,6 +721,8 @@ export interface ToGetItem {
   updatedAt?: string;
   gotAt?: string | null;
   links?: { name: string; url: string }[];
+  /** schema v8: the admin checked it off as added to the library */
+  adminAdded?: { at: string; note?: string | null } | null;
 }
 
 export type PinType = 'album' | 'artist' | 'playlist' | 'mix' | 'queue' | 'smart_list' | 'smart_playlist' | 'genre' | 'folder';

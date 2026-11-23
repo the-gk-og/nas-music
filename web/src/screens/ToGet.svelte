@@ -52,6 +52,7 @@
           <b>{i.title}</b>
           <div class="muted small">{i.type === 'album' ? 'Album' : 'Song'} · {i.artist}{i.year ? ` · ${i.year}` : ''}</div>
           {#if i.note}<div class="small note">“{i.note}”</div>{/if}
+          {#if i.adminAdded}<div class="small added">Added to the library{i.adminAdded.note ? ` — ${i.adminAdded.note}` : ''}</div>{/if}
           <div class="links">
             {#if i.catalogId && i.hasPreview !== false}
               <button class="lk" onclick={() => samples.toggle(i.catalogId!)}>{#if samples.playing === i.catalogId}<Pause size={14} /> Stop{:else}<Play size={14} /> Sample{/if}</button>
@@ -104,6 +105,10 @@
   }
   .note {
     color: var(--fg-2);
+    margin-top: 2px;
+  }
+  .added {
+    color: var(--ok, #4caf50);
     margin-top: 2px;
   }
   .links {
