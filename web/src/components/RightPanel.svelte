@@ -1,6 +1,7 @@
 <script lang="ts">
   // Desktop right panel (§6): Queue / Lyrics / Devices.
   import { X } from '@lucide/svelte';
+  import { appearance } from '../lib/appearance.svelte';
   import { player } from '../lib/player.svelte';
   import { ui, type PanelId } from '../lib/ui.svelte';
   import Lyrics from '../screens/Lyrics.svelte';
@@ -15,7 +16,7 @@
   const track = $derived(player.shown.track);
 </script>
 
-<aside class="panel" aria-label="Side panel">
+<aside class="panel" class:stacked={appearance.portrait} aria-label="Side panel">
   <div class="tabs">
     {#each TABS as t (t.id)}
       <button class:on={ui.panel === t.id} onclick={() => (ui.panel = t.id)}>{t.label}</button>
@@ -44,6 +45,13 @@
     background: var(--bg-1);
     border-left: 1px solid var(--line);
     min-height: 0;
+  }
+  /* tall desktop window: a pane under the page, full width */
+  .panel.stacked {
+    width: auto;
+    height: clamp(260px, 36vh, 760px);
+    border-left: 0;
+    border-top: 1px solid var(--line);
   }
   .tabs {
     display: flex;

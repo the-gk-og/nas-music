@@ -4,10 +4,18 @@ import type { DeviceKind, RadioContext, RadioSeed, Shelf, VibeConstraint } from 
 // ---- screen forms (§6) ----
 export type Form = 'phone' | 'tablet' | 'desktop';
 
-export function formFor(width: number): Form {
+export function formFor(width: number, height = 0, finePointer = false): Form {
   if (width >= 1200) return 'desktop';
+  // A tall window with a mouse (portrait monitor, half-width window) keeps the desktop layout down to 900 px:
+  // the tablet rail + mini player is a touch layout and wastes a 1080x1920 screen.
+  if (finePointer && width >= 900 && height > width) return 'desktop';
   if (width >= 600) return 'tablet';
   return 'phone';
+}
+
+/** Desktop layout in a tall window: side panel stacked under the page, Now Playing stacked vertically. */
+export function desktopPortrait(width: number, height: number, finePointer = false): boolean {
+  return formFor(width, height, finePointer) === 'desktop' && height > width;
 }
 
 /** Tablet landscape shows Now Playing (or the Queue) as a side pane. */

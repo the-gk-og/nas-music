@@ -179,7 +179,7 @@
     {/if}
   {/snippet}
 
-  <div class="shell {form}" class:fullnow={fullNow}>
+  <div class="shell {form}" class:fullnow={fullNow} class:portrait={appearance.portrait}>
     {#if !(fullNow && form === 'phone')}<Nav />{/if}
     <main>
       <div class="content">
@@ -270,6 +270,29 @@
   }
   .shell.desktop.fullnow :global(.nav) {
     display: none;
+  }
+  /* desktop in a tall window: the side panel sits under the page instead of beside it */
+  .shell.desktop.portrait {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto auto;
+  }
+  .shell.desktop.portrait :global(.nav) {
+    grid-row: 1 / span 2;
+  }
+  .shell.desktop.portrait main {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .shell.desktop.portrait > :global(.panel) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .shell.desktop.portrait .playerbar {
+    grid-row: 3;
+  }
+  .shell.desktop.portrait.fullnow main {
+    grid-column: 1 / -1;
+    grid-row: 1 / span 2;
   }
   main {
     min-height: 0;
