@@ -26,6 +26,8 @@ class NasMusicApp : Application(), SingletonImageLoader.Factory {
         org.nasmusic.app.cast.NativeCast.init(container)   // Google Cast (full flavour); no-op in foss
         container.startServerInfoRefresh()
         container.startAppearancePush()
+        // Bug reports queued while offline: make sure they go out (WorkManager waits for a connection).
+        if (org.nasmusic.app.diag.BugReportQueue(this).pending().isNotEmpty()) org.nasmusic.app.diag.BugReportWorker.enqueue(this)
         org.nasmusic.app.widget.WidgetHub.start(this, container)   // home-screen widgets + quick-settings tiles
         // Streaming is the default; the nightly sync only exists while offline favourites, smart downloads
         // or a playlist/album kept offline needs it.
