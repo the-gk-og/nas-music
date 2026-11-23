@@ -121,7 +121,7 @@ PLAYER_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-i
 def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None = None) -> FastAPI:
     from nasmusic import web
     from nasmusic.app import (account_api, admin_api, api, automix_api, autotag_api, cast_api, collections_api,
-                              connect_api, discover_api, family_api, insights_api, jam_api, logbuffer,
+                              connect_api, continuing, discover_api, family_api, insights_api, jam_api, logbuffer,
                               scrobble_api, smart_api, spoken_api, tags_api, uploads_api, voice_api)
     from nasmusic.web import spa
 
@@ -134,7 +134,7 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
               tags_api.router, autotag_api.router, connect_api.router, cast_api.media_router, cast_api.router,
               family_api.router, family_api.admin, jam_api.public, jam_api.host, voice_api.public,
               voice_api.router, uploads_api.router, uploads_api.admin, smart_api.router, scrobble_api.router,
-              spoken_api.router, automix_api.router):
+              spoken_api.router, automix_api.router, continuing.router):
         app.include_router(r, prefix="/api/v1")
     app.include_router(web.router)
     app.include_router(spa.router_for(cfg, web.render_join))  # catch-all: must stay last

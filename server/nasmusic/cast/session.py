@@ -46,6 +46,19 @@ class CastHooks:
     # (uid, device_id, message, positionMs): couldn't connect / dropped. The session has already let go;
     # the Hub hands playback back to the device that picked the speaker.
     failed: Callable[[str, str, str, int], Awaitable[None]] | None = None
+    # v8, blocking: (uid, kind, id, position_s) -> SpokenMedia for a podcast episode / audiobook / station, or None.
+    # For a book it is the part that holds position_s.
+    spoken: Callable[[str, str, str, float], SpokenMedia | None] | None = None
+
+
+@dataclass
+class SpokenMedia:
+    """A spoken item loaded on a speaker: the media, and for books which part of the book it is."""
+
+    media: Media
+    start_s: float = 0.0          # where this part starts in the whole book (episodes/stations: 0)
+    end_s: float | None = None    # where it ends (books: the next part starts here; None = last/only part)
+    live: bool = False
 
 
 def _now_iso() -> str:
@@ -79,6 +92,8 @@ class SpeakerSession:
         self._loaded_at = 0.0
         self.connecting = False
         self._connect_task: asyncio.Task | None = None
+        self.spoken: dict | None = None             # Connect `media` ({kind, id}) when not playing the queue
+        self.spoken_part: SpokenMedia | None = None
 
     @property
     def device_id(self) -> str:
@@ -133,13 +148,17 @@ class SpeakerSession:
         self.repeat = state.get("repeat") if state.get("repeat") in REPEAT else "off"
         self.position_s = float(state.get("positionMs") or 0) / 1000
         self.media = None
+        self.spoken = state.get("media") if isinstance(state.get("media"), dict) else None
+        self.spoken_part = None
         self._bad = 0
         self.connecting = True
         try:
             async with asyncio.timeout(CONNECT_TIMEOUT_S):
-                if not self.track_id and self.queue_id:
+                if not self.spoken and not self.track_id and self.queue_id:
                     self.track_id = await asyncio.to_thread(self.hooks.queue_track, uid, self.queue_id, self.index)
-                if self.track_id:
+                if self.spoken:
+                    await self._load_spoken(self.position_s, bool(state.get("playing")))
+                elif self.track_id:
                     await self._load(self.position_s, bool(state.get("playing")))
                 else:
                     self.playing = False
@@ -203,7 +222,29 @@ class SpeakerSession:
     async def command(self, uid: str, action: str, args: dict) -> None:
         if self.owner != uid:
             return
-        if action == "play":
+        if action == "playSpoken":
+            self.spoken = {"kind": args.get("kind"), "id": args.get("id")}
+            self.queue_id, self.track_id, self.index = None, None, 0
+            await self._load_spoken(max(0.0, float(args.get("positionMs") or 0) / 1000), True)
+        elif self.spoken and action in ("play", "seek", "next", "prev"):
+            pos = self.position_s
+            if action == "play" and self.spoken_part is not None:
+                if self.spoken_part.live:
+                    await self._load_spoken(0.0, True)   # live radio: back to "now"
+                else:
+                    await self.r.play()
+                    self.playing = True
+            elif action == "play":
+                await self._load_spoken(pos, True)
+            else:
+                if action == "seek":
+                    pos = max(0.0, float(args.get("positionMs") or 0) / 1000)
+                elif action == "next":
+                    pos += 30.0
+                else:
+                    pos = max(0.0, pos - 15.0)
+                await self._seek_spoken(pos)
+        elif action == "play":
             if self.media is None or self.media.track_id != self.track_id:
                 await self._load(self.position_s, True)
             else:
@@ -212,7 +253,11 @@ class SpeakerSession:
         elif action == "pause":
             st = await self._status()
             await self.r.pause()
-            self.position_s = st.position_s or self.position_s
+            part = self.spoken_part if self.spoken else None
+            if part is not None and not part.live and st.position_s:
+                self.position_s = st.position_s + part.start_s
+            elif part is None:
+                self.position_s = st.position_s or self.position_s
             self.playing = False
         elif action == "seek":
             self.position_s = max(0.0, float(args.get("positionMs") or 0) / 1000)
@@ -236,8 +281,9 @@ class SpeakerSession:
             mode = args.get("mode", args.get("repeat"))
             self.repeat = mode if mode in REPEAT else "off"
         elif action == "playQueue":
+            self.spoken, self.spoken_part = None, None
             self.queue_id = str(args.get("queueId") or self.queue_id or "")
-            await self._goto(int(args.get("index") or 0), True)
+            await self._goto(int(args.get("index") or 0), True, float(args.get("positionMs") or 0) / 1000)
         else:  # setSpeed etc.: not supported on speakers
             return
         self._ensure_poll()
@@ -264,14 +310,51 @@ class SpeakerSession:
         self.media, self.position_s, self.playing = media, position_s, play
         self._loaded_at = time.monotonic()
 
-    async def _goto(self, index: int, play: bool) -> None:
+    async def _goto(self, index: int, play: bool, position_s: float = 0.0) -> None:
         if not self.queue_id or self.owner is None:
             return
         tid = await asyncio.to_thread(self.hooks.queue_track, self.owner, self.queue_id, index)
         if tid is None:
             return
         self.index, self.track_id = index, tid
-        await self._load(0.0, play)
+        await self._load(max(0.0, position_s), play)
+
+    # ---------- spoken (podcast episodes, audiobooks, internet radio) ----------
+
+    async def _load_spoken(self, position_s: float, play: bool) -> None:
+        """Load the spoken item at a book-wide position (books: the part holding it)."""
+        sp = self.spoken
+        if not sp or self.owner is None or self.hooks.spoken is None:
+            raise RuntimeError("this speaker can't play podcasts or audiobooks")
+        got = await asyncio.to_thread(self.hooks.spoken, self.owner, str(sp.get("kind")), str(sp.get("id")),
+                                      position_s)
+        if got is None:
+            raise RuntimeError("not found")
+        offset = 0.0 if got.live else max(0.0, position_s - got.start_s)
+        await self.r.load(got.media, offset, play)
+        self.spoken_part, self.media = got, got.media
+        self.position_s, self.playing = (0.0 if got.live else position_s), play
+        self._loaded_at = time.monotonic()
+
+    async def _seek_spoken(self, position_s: float) -> None:
+        part = self.spoken_part
+        if part is None or part.live:
+            return
+        if position_s < part.start_s or (part.end_s is not None and position_s >= part.end_s):
+            await self._load_spoken(position_s, self.playing)   # another part of the book
+            return
+        self.position_s = position_s
+        await self.r.seek(position_s - part.start_s)
+
+    async def _spoken_finished(self) -> None:
+        """A part/episode played to its end: next part of a book, else stop (no queue to advance)."""
+        part = self.spoken_part
+        if part is not None and part.end_s is not None:
+            await self._load_spoken(part.end_s, True)
+            return
+        self.playing = False
+        with contextlib.suppress(Exception):
+            await self.r.stop()
 
     async def _advance(self, step: int, play: bool, user: bool = False) -> None:
         """Next track (user=True: the next button, repeat-one doesn't apply)."""
@@ -315,6 +398,7 @@ class SpeakerSession:
             "shuffle": self.shuffle,
             "repeat": self.repeat,
             "speed": 1.0,
+            "media": dict(self.spoken) if self.spoken else None,
         }
         if self.volume is not None:
             partial["volume"] = self.volume
@@ -358,7 +442,10 @@ class SpeakerSession:
             await self.hooks.error(self.owner, f"{self.r.name}: {st.error}")
         if st.state == "finished":
             try:
-                await self._advance(+1, True)
+                if self.spoken:
+                    await self._spoken_finished()
+                else:
+                    await self._advance(+1, True)
             except Exception as e:  # noqa: BLE001
                 self.playing = False
                 if self.owner:
@@ -366,7 +453,8 @@ class SpeakerSession:
             await self._report(force=True)
             return
         if st.state in ("playing", "paused", "buffering"):
-            self.position_s = st.position_s
+            part = self.spoken_part if self.spoken else None
+            self.position_s = 0.0 if part is not None and part.live else st.position_s + (part.start_s if part else 0.0)
         playing = st.state in ("playing", "buffering")
         if st.state in ("playing", "paused") and playing != self.playing:
             # Paused/resumed on the speaker itself (its own buttons, the Google Home app, HA).

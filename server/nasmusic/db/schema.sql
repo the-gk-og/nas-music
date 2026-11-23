@@ -1,4 +1,4 @@
--- nas-music shared schema v7 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v8 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
@@ -19,7 +19,8 @@
 -- web_stations, web_station_favourites). These are deliberately apart from tracks/events: the recommender,
 -- Wrapped and scrobbling never see them. Older databases are upgraded by nasmusic.db.migrations. Also v7 adds
 -- track_dj (DJ automix analysis: beat grid, Camelot key, mix-in/mix-out points, energy curve). Older databases
--- are upgraded by nasmusic.db.migrations.
+-- are upgraded by nasmusic.db.migrations. v8 adds continue_dismissed (Continue listening items the user swiped
+-- away; an item comes back once it is played again after that).
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -1057,4 +1058,16 @@ CREATE TABLE IF NOT EXISTS web_station_favourites (
     added_at   TEXT NOT NULL,
     last_played_at TEXT,
     PRIMARY KEY (user_id, station_id)
+);
+
+-- ---------- v8: Continue listening ----------
+
+-- Items the user dismissed from the Continue listening shelf. kind: queue | episode | book. An item shows again
+-- when its own updated_at (queue / spoken_progress) is newer than dismissed_at.
+CREATE TABLE IF NOT EXISTS continue_dismissed (
+    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind         TEXT NOT NULL CHECK (kind IN ('queue','episode','book')),
+    item_id      TEXT NOT NULL,
+    dismissed_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, kind, item_id)
 );

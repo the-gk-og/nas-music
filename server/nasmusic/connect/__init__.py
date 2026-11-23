@@ -30,10 +30,14 @@ STATE_FIELDS = {
     "speed": (int, float),
     # The active phone is playing through a Google Cast session it started: the speaker's name, else None.
     "castTo": (str, type(None)),
+    # v8: a podcast episode / audiobook / internet radio station playing instead of the music queue:
+    # {"kind": "episode"|"book"|"station", "id": str} (queueId/trackId are then null; positionMs is book-wide).
+    "media": (dict, type(None)),
 }
 REPEAT = ("off", "all", "one")
+MEDIA_KINDS = ("episode", "book", "station")
 ACTIONS = ("play", "pause", "next", "prev", "seek", "setVolume", "setShuffle", "setRepeat", "playQueue",
-           "playTracks", "setSpeed")
+           "playTracks", "setSpeed", "playSpoken")
 MAX_MESSAGE = 256 * 1024
 HELLO_TIMEOUT_S = 15.0
 
@@ -45,7 +49,29 @@ def _now_iso() -> str:
 def default_state() -> dict:
     return {"activeDeviceId": None, "queueId": None, "index": 0, "trackId": None, "positionMs": 0,
             "positionAt": _now_iso(), "playing": False, "volume": 1.0, "shuffle": False, "repeat": "off",
-            "speed": 1.0, "castTo": None, "connecting": False, "rev": 0}
+            "speed": 1.0, "castTo": None, "media": None, "connecting": False, "rev": 0}
+
+
+def clean_media(v) -> dict | None:
+    """A valid `media` value ({kind, id}) or None."""
+    if not isinstance(v, dict):
+        return None
+    kind, ident = v.get("kind"), v.get("id")
+    if kind not in MEDIA_KINDS or not isinstance(ident, str) or not ident or len(ident) > 128:
+        return None
+    return {"kind": kind, "id": ident}
+
+
+def _apply_fields(state: dict, incoming: dict) -> None:
+    """Copy the known PlaybackState fields of a client/speaker report into `state` (type-checked)."""
+    for k, types in STATE_FIELDS.items():
+        v = incoming.get(k, ...)
+        if v is ... or (isinstance(v, bool) and bool not in types):
+            continue
+        if k == "media":
+            state["media"] = clean_media(v)
+        elif isinstance(v, types):
+            state[k] = v
 
 
 def position_now(state: dict) -> int:
@@ -137,11 +163,15 @@ class Hub:
     def __init__(self, load: Callable[[str], dict | None], save: Callable[[str, dict], None],
                  make_queue: Callable[[str, list[str], str, int], str] | None = None,
                  queue_track: Callable[[str, str, int], str | None] | None = None,
-                 grace_s: float = 15.0, persist_every_s: float = 3.0):
+                 grace_s: float = 15.0, persist_every_s: float = 3.0,
+                 queue_resume: Callable[[str, str], tuple[int, int] | None] | None = None):
         """`load(uid)` / `save(uid, state)` persist PlaybackState; `make_queue(uid, track_ids, name, index)`
         creates-or-replaces a named queue and returns its id; `queue_track(uid, queue_id, index)` returns the
-        track id at that index. The callables are blocking (run in a worker thread)."""
+        track id at that index; `queue_resume(uid, queue_id)` returns the queue's saved (index, positionMs), used
+        when a remote asks to play a queue without an index ("resume where it stopped"). The callables are
+        blocking (run in a worker thread)."""
         self._load, self._save, self._make_queue, self._queue_track = load, save, make_queue, queue_track
+        self._queue_resume = queue_resume
         self.grace_s, self.persist_every_s = grace_s, persist_every_s
         self.users: dict[str, UserHub] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
@@ -159,13 +189,11 @@ class Hub:
 
     def attach_speakers(self, registry) -> None:
         """Offer the registry's speakers as Connect devices to every user (see nasmusic.cast)."""
-        from nasmusic.cast import CastHooks
+        import dataclasses
 
         self.speakers = registry
-        hooks = registry.hooks
-        registry.hooks = CastHooks(
-            media=hooks.media, queue_track=hooks.queue_track, queue_len=hooks.queue_len,
-            report=self.speaker_report, lost=self.speaker_lost, error=self.speaker_error,
+        registry.hooks = dataclasses.replace(
+            registry.hooks, report=self.speaker_report, lost=self.speaker_lost, error=self.speaker_error,
             failed=self.speaker_failed)
         registry.on_change = self._broadcast_devices_all
 
@@ -312,12 +340,7 @@ class Hub:
         if u.state.get("activeDeviceId") != device_id:
             return False
         was = u.state.get("playing")
-        for k, types in STATE_FIELDS.items():
-            v = partial.get(k, ...)
-            if v is ... or (isinstance(v, bool) and bool not in types):
-                continue
-            if isinstance(v, types):
-                u.state[k] = v
+        _apply_fields(u.state, partial)
         u.state["connecting"] = False   # the first report means it connected and loaded
         await self._changed(uid, u, force_persist=bool(was) and not u.state.get("playing"))
         return True
@@ -499,12 +522,9 @@ class Hub:
             return
         incoming = msg.get("state") if isinstance(msg.get("state"), dict) else msg
         was_playing = u.state.get("playing")
-        for k, types in STATE_FIELDS.items():
-            v = incoming.get(k, ...)
-            if v is ... or (isinstance(v, bool) and bool not in types):
-                continue
-            if isinstance(v, types):
-                u.state[k] = v
+        _apply_fields(u.state, incoming)
+        if "media" not in incoming and ("trackId" in incoming or "queueId" in incoming):
+            u.state["media"] = None   # a client that doesn't know `media` is playing music
         if u.state.get("repeat") not in REPEAT:
             u.state["repeat"] = "off"
         if "castTo" not in incoming:  # clients that don't know the field (or stopped casting) aren't casting
@@ -566,14 +586,36 @@ class Hub:
         play = msg.get("play")
         await self._make_active(uid, u, target, None if play is None else bool(play), requester=conn)
 
+    async def resume_point(self, uid: str, queue_id: str, index) -> tuple[int, int]:
+        """(index, positionMs) to start a queue at: the given index from 0, or with no index where the queue
+        was left (its saved index and position)."""
+        if isinstance(index, int) and not isinstance(index, bool):
+            return max(0, index), 0
+        if self._queue_resume is not None:
+            got = await asyncio.to_thread(self._queue_resume, uid, queue_id)
+            if got is not None:
+                return max(0, int(got[0])), max(0, int(got[1]))
+        return 0, 0
+
     async def _play_extra(self, uid: str, action: str, args: dict) -> dict | None:
+        if action == "playSpoken":
+            media = clean_media(args)
+            if media is None:
+                return None
+            pos = args.get("positionMs")
+            return {"media": media, "queueId": None, "trackId": None, "index": 0,
+                    "positionMs": int(pos) if isinstance(pos, (int, float)) and pos >= 0 else 0}
         if action != "playQueue":
             return None
-        idx = int(args.get("index") or 0)
+        qid = str(args.get("queueId"))
+        idx, pos = await self.resume_point(uid, qid, args.get("index"))
+        given = args.get("positionMs")
+        if isinstance(given, (int, float)) and not isinstance(given, bool) and given > 0:
+            pos = int(given)
         track = None
         if self._queue_track is not None:
-            track = await asyncio.to_thread(self._queue_track, uid, str(args.get("queueId")), idx)
-        return {"queueId": args.get("queueId"), "index": idx, "trackId": track, "positionMs": 0}
+            track = await asyncio.to_thread(self._queue_track, uid, qid, idx)
+        return {"queueId": args.get("queueId"), "index": idx, "trackId": track, "positionMs": pos, "media": None}
 
     async def _on_command(self, uid: str, u: UserHub, conn: Conn, msg: dict) -> None:
         action, args = msg.get("action"), msg.get("args") if isinstance(msg.get("args"), dict) else {}
@@ -596,12 +638,20 @@ class Hub:
             self._emit(uid, "queues", qid)
             action, args = "playQueue", {"queueId": qid, "index": index}
 
+        if action == "playSpoken" and clean_media(args) is None:
+            await conn.send({"type": "error", "detail": "playSpoken needs kind (episode, book, station) and id"})
+            return
+        if action == "playQueue" and not isinstance(args.get("index"), int) and args.get("queueId"):
+            # No index = resume the queue where it was left; tell the player exactly where that is.
+            idx, pos = await self.resume_point(uid, str(args["queueId"]), None)
+            args = {**args, "index": idx, "positionMs": pos}
+
         active_id = u.state.get("activeDeviceId")
         target_id = msg.get("targetDeviceId") or active_id
         target = self._target(uid, u, target_id)
         if isinstance(target, SpeakerConn) and target_id != active_id:
             # Playing straight onto a speaker that isn't active yet: make it active with that queue.
-            if action in ("play", "playQueue"):
+            if action in ("play", "playQueue", "playSpoken"):
                 await self._make_active(uid, u, target, True, await self._play_extra(uid, action, args),
                                         requester=conn)
             else:
@@ -609,7 +659,7 @@ class Hub:
             return
         if target is None:
             # No reachable player: a play from a device that can play makes it the active device.
-            if action in ("play", "playQueue") and conn.can_play:
+            if action in ("play", "playQueue", "playSpoken") and conn.can_play:
                 await self._make_active(uid, u, conn, True, await self._play_extra(uid, action, args))
                 return
             await conn.send({"type": "error",

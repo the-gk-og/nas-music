@@ -241,7 +241,7 @@ def test_migration_v6_to_v7(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == 7
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     for t in migrations.V7_TABLES:
         assert migrations._table_exists(conn, t)
     assert not migrations.migrate_v6_to_v7(conn, db.schema_sql())

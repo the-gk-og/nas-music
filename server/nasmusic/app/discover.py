@@ -284,32 +284,16 @@ def _recently_played(conn: sqlite3.Connection, data_dir, uid: str, limit: int = 
 
 
 def _continue_listening(conn: sqlite3.Connection, data_dir, uid: str, playing_queue: str | None) -> list[dict]:
-    """Started but unfinished non-radio queues from the last 30 days (where you left off)."""
-    from datetime import UTC, datetime, timedelta
+    """Where you left off (v8: music queues, podcast episodes and audiobooks together; see app.continuing)."""
+    from nasmusic.app import continuing
 
-    from nasmusic.core import iso
-
-    since = iso(datetime.now(UTC) - timedelta(days=CONTINUE_DAYS))
-    out = []
-    for r in conn.execute(
-        "SELECT q.id, q.current_index, q.position_ms, (SELECT COUNT(*) FROM queue_tracks x WHERE x.queue_id = q.id) n "
-        "FROM queues q WHERE q.user_id = ? AND q.radio_seed IS NULL AND q.updated_at >= ? "
-        "ORDER BY q.updated_at DESC LIMIT 30", (uid, since)
-    ):
-        started = r["current_index"] > 0 or r["position_ms"] > 0
-        if not started or r["n"] < 2 or r["current_index"] >= r["n"] - 1 or r["id"] == playing_queue:
-            continue
-        item = _queue_item(conn, data_dir, uid, r["id"], progress=True)
-        if item:
-            out.append(item)
-        if len(out) >= 10:
-            break
-    return out
+    return continuing.items(conn, data_dir, uid, playing_queue, limit=12)
 
 
 def home(conn: sqlite3.Connection, cfg: Config, uid: str, me_device: str | None, hub) -> dict:
     data_dir = cfg.data_dir
-    playing_queue = ((hub.snapshot(uid) or {}).get("queueId") if hub else None)
+    snap = (hub.snapshot(uid) or {}) if hub else {}
+    playing_queue = snap.get("queueId") if snap.get("playing") and not snap.get("media") else None
     shelves = [
         shelf("start_radio", "start_radio", "Start radio",
               [{"type": "radio", "id": "moment", "title": "Play something for now",

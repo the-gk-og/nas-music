@@ -16,7 +16,7 @@ def test_v6_to_v7(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == db.SCHEMA_VERSION == 7
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     assert migrations._table_exists(conn, "track_dj")
     assert {"bpm", "downbeat_s", "mix_in_s", "mix_out_s", "camelot", "energy_curve"} <= migrations._columns(conn, "track_dj")
     assert conn.execute("SELECT username FROM users").fetchone()[0] == "owner"

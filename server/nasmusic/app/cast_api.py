@@ -75,6 +75,59 @@ def media_for(cfg: Config, key: bytes, track_id: str, base: str | None = None) -
     )
 
 
+def spoken_media_for(conn: sqlite3.Connection, cfg: Config, key: bytes, uid: str, kind: str, ident: str,
+                     position_s: float = 0.0, base: str | None = None):
+    """A podcast episode, the audiobook part holding `position_s`, or a live station, as a speaker's Media
+    (signed URLs, family mode respected), or None."""
+    from nasmusic.cast import SpokenMedia
+    from nasmusic.spoken import audiobooks, podcasts, stations
+
+    base = base or cfg.cast_base_url
+    if kind == "episode":
+        r = podcasts.episode_row(conn, uid, ident)
+        if r is None:
+            return None
+        ttl = _ttl(cfg, r["duration_s"] or 4 * 3600)
+        m = Media(track_id=f"episode:{r['id']}", title=r["title"], artist=r["ptitle"] or "", album=r["ptitle"] or "",
+                  duration_s=float(r["duration_s"] or 0), mime=r["enclosure_type"] or "audio/mpeg",
+                  art_url=_signed(base, key, "spokenart", "podcast", r["podcast_id"], ttl),
+                  url_for=lambda fmt: _signed(base, key, "spoken", "episode", r["id"], ttl))
+        return SpokenMedia(m)
+    if kind == "book":
+        b = conn.execute("SELECT * FROM audiobooks WHERE id = ? AND missing = 0", (ident,)).fetchone()
+        if b is None:
+            return None
+        parts = conn.execute("SELECT * FROM audiobook_files WHERE book_id = ? ORDER BY idx", (ident,)).fetchall()
+        if not parts:
+            return None
+        i = 0
+        for j, f in enumerate(parts):
+            if float(f["start_s"] or 0) <= position_s:
+                i = j
+        f = parts[i]
+        ttl = _ttl(cfg, f["duration_s"] or 0)
+        m = Media(track_id=f"book:{b['id']}:{f['idx']}", title=b["title"], artist=b["author"] or "",
+                  album=b["title"], duration_s=float(f["duration_s"] or 0), mime=audiobooks.media_type(f["path"]),
+                  art_url=_signed(base, key, "spokenart", "book", b["id"], ttl),
+                  url_for=lambda fmt: _signed(base, key, "spoken", "book", f"{b['id']}.{f['idx']}", ttl))
+        end = float(parts[i + 1]["start_s"]) if i + 1 < len(parts) else None
+        return SpokenMedia(m, start_s=float(f["start_s"] or 0), end_s=end)
+    if kind == "station":
+        got = stations.get(conn, uid, ident)
+        if got is None:
+            return None
+        st = got[0]
+        ttl = signing.MAX_TTL_S
+        mime = {"AAC": "audio/aac", "AAC+": "audio/aac", "OGG": "audio/ogg", "FLAC": "audio/flac"}.get(
+            st["codec"] or "", "audio/mpeg")
+        m = Media(track_id=f"station:{st['id']}", title=st["name"], artist="Internet radio", album="",
+                  duration_s=0.0, mime=mime,
+                  art_url=_signed(base, key, "spokenart", "station", st["id"], ttl) if st["favicon"] else None,
+                  url_for=lambda fmt: _signed(base, key, "spoken", "station", st["id"], ttl))
+        return SpokenMedia(m, live=True)
+    return None
+
+
 def make_registry(c: AppContext, **kw) -> SpeakerRegistry:
     cfg = c.cfg
     key = cast_key(c)
@@ -102,7 +155,15 @@ def make_registry(c: AppContext, **kw) -> SpeakerRegistry:
     async def _unbound(*a):  # replaced by Hub.attach_speakers
         return False
 
+    def spoken(uid: str, kind: str, ident: str, position_s: float):
+        conn = open_db(cfg)
+        try:
+            return spoken_media_for(conn, cfg, key, uid, kind, ident, position_s)
+        finally:
+            conn.close()
+
     hooks = CastHooks(
+        spoken=spoken,
         media=lambda tid: media_for(cfg, key, tid),
         queue_track=queue_track,
         queue_len=queue_len,
