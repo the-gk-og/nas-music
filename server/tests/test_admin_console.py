@@ -393,3 +393,25 @@ def test_bug_reports_expire(client, conn, app):
     conn.execute("UPDATE bug_reports SET created_at = '2000-01-01T00:00:00Z' WHERE id = ?", (rid,))
     assert client.get(f"{ADMIN}/reports").json() == []
     assert app.state.ctx.jobs.run("cleanup")["result"] == {"bugReportsDeleted": 1}
+
+
+def test_bug_report_as_the_android_app_sends_it(client, bob):
+    """The exact shape android/.../diag/BugReport.kt sends (≤ 1.5 MB after its own trimming), listed for admins."""
+    logs = "\n".join(f'11-24 10:00:00.000 1234 1234 I nas-music: "q" line {i} ' + "é" * 300 for i in range(2000))
+    crash = "===== crash-1764000000000.txt =====\ncrash at 2026-11-24T10:00:00Z\napp 0.7.0 (70) · Google Pixel 8\n" \
+            "thread main · screen now\njava.lang.IllegalStateException: boom\n\tat x.y(Z.kt:1)"
+    body = {"appVersion": "0.7.0 (70)", "platform": "Android 15 · Google Pixel 8", "logs": logs, "crash": crash,
+            "extra": {"screen": "now", "device": "Google Pixel 8", "sdk": "35", "flavor": "foss", "route": "LAN",
+                      "playing": "true"}}
+    raw = json.dumps(body, ensure_ascii=False).encode()
+    assert 1_000_000 < len(raw) < 1_500_000
+    r = bob.post(f"{API}/me/bug-report", content=raw, headers={"content-type": "application/json; charset=UTF-8"})
+    assert r.status_code == 200, r.text
+    rid = r.json()["id"]
+    x = next(y for y in client.get(f"{ADMIN}/reports").json() if y["id"] == rid)
+    assert x["title"] == "===== crash-1764000000000.txt =====" and x["hasCrash"] and x["platform"] == body["platform"]
+    full = client.get(f"{ADMIN}/reports/{rid}").json()
+    assert full["logs"] == logs and full["context"]["route"] == "LAN"
+    # The app before this fix sent `log` (no `logs`): the server says why, and the app now shows that message.
+    old = bob.post(f"{API}/me/bug-report", json={"log": "x", "description": "d"})
+    assert old.status_code == 422 and old.json()["detail"] == "invalid bug report"

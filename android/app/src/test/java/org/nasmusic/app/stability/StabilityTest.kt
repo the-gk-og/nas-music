@@ -40,12 +40,13 @@ class StabilityTest {
         val dir = Files.createTempDirectory("crashes").toFile()
         val f = File(dir, "crash-1.txt").apply { writeText("boom") }
         val body = BugReport.build("it crashed", "now", mapOf("route" to "LAN"), log, listOf(f))
-        val lines = body.log.lines()
+        val lines = body.logs.lines()
         assertEquals(2000, lines.size)
         assertEquals("line 501", lines.first())
         assertEquals("line 2500", lines.last())
-        assertEquals("boom", body.crashes.single().text)
-        assertEquals("now", body.screen)
+        assertEquals("===== crash-1.txt =====\nboom", body.crash)
+        assertEquals("now", body.extra!!["screen"])
+        assertEquals("LAN", body.extra!!["route"])
         dir.deleteRecursively()
     }
 
@@ -60,7 +61,7 @@ class StabilityTest {
             assertEquals("POST", req.method)
             assertEquals("/api/v1/me/bug-report", req.path)
             val body = req.body.readUtf8()
-            assertTrue(body.contains("\"description\":\"x\"") && body.contains("\"log\":\"a\\nb\"") && body.contains("\"appVersion\""))
+            assertTrue(body.contains("\"description\":\"x\"") && body.contains("\"logs\":\"a\\nb\"") && body.contains("\"appVersion\""))
         } finally {
             server.shutdown()
         }

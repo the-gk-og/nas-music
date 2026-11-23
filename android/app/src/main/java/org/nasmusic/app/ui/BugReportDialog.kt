@@ -22,6 +22,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.nasmusic.app.AppContainer
 import org.nasmusic.app.diag.BugReport
+import org.nasmusic.app.diag.BugReportQueue
+import org.nasmusic.app.diag.BugReportWorker
 import org.nasmusic.app.diag.CrashLog
 import retrofit2.HttpException
 
@@ -32,8 +34,12 @@ fun BugReportDialog(c: AppContainer, afterCrash: Boolean, onDismiss: () -> Unit)
     val scope = rememberCoroutineScope()
     var text by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val lastCrash = remember { if (afterCrash) CrashLog.newestCrash()?.let { f -> runCatching { f.readLines() }.getOrNull() } else null }
+    // Closing the after-crash prompt in any way means "asked": it won't come back until there's a new crash.
+    val close = { if (afterCrash) CrashLog.markCrashesSeen(); onDismiss() }
     AlertDialog(
-        onDismissRequest = { if (!sending) onDismiss() },
+        onDismissRequest = { if (!sending) close() },
         title = { Text(if (afterCrash) "nas-music crashed last time" else "Send bug report") },
         text = {
             Column {
@@ -42,11 +48,14 @@ fun BugReportDialog(c: AppContainer, afterCrash: Boolean, onDismiss: () -> Unit)
                         "Nothing goes anywhere else.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+                // "crash at <time>" then the exception line, e.g. "java.lang.IllegalStateException: …"
+                lastCrash?.getOrNull(3)?.let { Text(it.take(200), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                 OutlinedTextField(
                     text, { text = it }, label = { Text("What happened? (optional)") },
                     modifier = Modifier.fillMaxWidth().height(140.dp),
                 )
                 if (sending) CircularProgressIndicator()
+                error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
@@ -74,18 +83,31 @@ fun BugReportDialog(c: AppContainer, afterCrash: Boolean, onDismiss: () -> Unit)
                     sending = false
                     result.onSuccess {
                         CrashLog.markSent()
-                        ui.toast = "Bug report sent${it.id?.let { id -> " (#$id)" } ?: ""}. Thanks!"
+                        ui.toast = "Bug report sent${it.id?.let { id -> " (#${id.take(8)})" } ?: ""}. Thanks!"
                         onDismiss()
                     }.onFailure { e ->
-                        ui.toast = when ((e as? HttpException)?.code()) {
-                            404, 405 -> "Your server doesn't accept bug reports yet. Update the server."
-                            null -> "Couldn't reach the server. Try again when connected."
-                            else -> "Sending failed (HTTP ${(e as HttpException).code()})."
+                        val http = e as? HttpException
+                        if (http == null || BugReport.retryable(http.code())) {
+                            // Offline or server trouble: keep it and send it automatically later.
+                            val queued = withContext(Dispatchers.IO) {
+                                runCatching { BugReportQueue(c.context).add(body) }.isSuccess
+                            }
+                            if (queued) {
+                                BugReportWorker.enqueue(c.context)
+                                CrashLog.markSent()
+                                ui.toast = "Couldn't reach the server. The report will be sent automatically when you're back online."
+                                onDismiss()
+                            } else {
+                                error = "Couldn't reach the server (${e.message ?: e.javaClass.simpleName}). Try again when connected."
+                            }
+                        } else {
+                            val errBody = withContext(Dispatchers.IO) { runCatching { http.response()?.errorBody()?.string() }.getOrNull() }
+                            error = BugReport.failureMessage(http.code(), errBody)
                         }
                     }
                 }
             }) { Text("Send") }
         },
-        dismissButton = { TextButton(enabled = !sending, onClick = onDismiss) { Text(if (afterCrash) "Not now" else "Cancel") } },
+        dismissButton = { TextButton(enabled = !sending, onClick = close) { Text(if (afterCrash) "Not now" else "Cancel") } },
     )
 }
