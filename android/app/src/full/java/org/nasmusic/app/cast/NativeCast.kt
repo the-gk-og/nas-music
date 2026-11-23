@@ -200,6 +200,7 @@ object NativeCast {
 
     private fun handOffNow(c: AppContainer, session: CastSession) {
         val now = c.player.localSnapshot() ?: c.player.state.value
+        org.nasmusic.app.spoken.SpokenMedia.item(now.item)?.let { sp -> handOffSpoken(c, session, sp, now); return }
         val ids = now.queue.map { it.mediaId }.filter { it.isNotBlank() }
         if (ids.isEmpty()) return
         val index = now.index.coerceIn(0, ids.size - 1)
@@ -248,6 +249,43 @@ object NativeCast {
                     // Now the speaker plays: make this phone the Connect device, so other apps follow and control it.
                     if (st.isSuccess) c.connect.claimPlayback()
                 }
+            }
+        }
+    }
+
+    /** A podcast episode, audiobook (every part) or live station: signed by POST /cast/sign-spoken. */
+    private fun handOffSpoken(c: AppContainer, session: CastSession, sp: org.nasmusic.app.spoken.SpokenItem, now: org.nasmusic.app.playback.NowPlaying) {
+        val part = org.nasmusic.app.spoken.SpokenMedia.part(now.item)
+        val position = if (sp.live) 0L else now.positionMs
+        c.player.pauseLocal()
+        c.scope.launch {
+            val signed = runCatching { c.spokenApi.signSpoken(org.nasmusic.app.data.api.SpokenSignBody(sp.kind, sp.id)).items }.getOrElse {
+                c.ui.toast("Couldn't start casting: ${it.message}")
+                return@launch
+            }
+            if (signed.isEmpty()) return@launch
+            val items = signed.mapIndexed { i, s ->
+                val meta = MediaMetadata(MediaMetadata.MEDIA_TYPE_GENERIC).apply {
+                    putString(MediaMetadata.KEY_TITLE, sp.title)
+                    putString(MediaMetadata.KEY_SUBTITLE, sp.subtitle)
+                    s.artUrl?.let { addImage(WebImage(Uri.parse(it))) }
+                }
+                val info = MediaInfo.Builder(s.url)
+                    .setContentType(s.contentType)
+                    .setStreamType(if (s.live) MediaInfo.STREAM_TYPE_LIVE else MediaInfo.STREAM_TYPE_BUFFERED)
+                    .setMetadata(meta)
+                    .setCustomData(JSONObject().put("trackId", now.queue.getOrNull(s.part ?: i)?.mediaId ?: "").put("index", s.part ?: i))
+                    .build()
+                MediaQueueItem.Builder(info).setAutoplay(true).setPreloadTime(10.0).build()
+            }
+            withContext(Dispatchers.Main) {
+                val req = MediaLoadRequestData.Builder()
+                    .setQueueData(MediaQueueData.Builder().setItems(items).setStartIndex(part.coerceIn(0, items.size - 1))
+                        .setRepeatMode(MediaStatus.REPEAT_MODE_REPEAT_OFF).build())
+                    .setCurrentTime(position)
+                    .setAutoplay(true)
+                    .build()
+                session.remoteMediaClient?.load(req)?.addStatusListener { st -> if (st.isSuccess) c.connect.claimPlayback() }
             }
         }
     }

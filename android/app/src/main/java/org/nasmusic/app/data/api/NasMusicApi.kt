@@ -387,6 +387,13 @@ interface NasMusicApi {
     @DELETE("pins/{type}/{id}")
     suspend fun unpin(@Path("type") type: String, @Path("id") id: String): Response<Unit>
 
+    /** api 0.8: Continue listening (music queues left part-way + episodes/books in progress), newest first. */
+    @GET("continue")
+    suspend fun continueRaw(@Query("limit") limit: Int = 20): kotlinx.serialization.json.JsonElement
+
+    @DELETE("continue/{type}/{id}")
+    suspend fun dismissContinue(@Path("type") type: String, @Path("id") id: String): Response<Unit>
+
     /** In-app bug report (docs: Settings → Send bug report). */
     @POST("me/bug-report")
     suspend fun bugReport(@Body body: org.nasmusic.app.diag.BugReportBody): org.nasmusic.app.diag.BugReportResponse
@@ -473,6 +480,9 @@ suspend fun DiscoveryApi.releaseRadar(): ReleaseRadar {
 }
 
 suspend fun NasMusicApi.home(): ShelfFeed = LenientJson.feed(homeRaw())
+suspend fun NasMusicApi.continueListening(limit: Int = 20): List<ShelfItem> =
+    ((continueRaw(limit) as? kotlinx.serialization.json.JsonObject)?.get("items") as? kotlinx.serialization.json.JsonArray)
+        ?.mapNotNull { LenientJson.item(it) }.orEmpty()
 suspend fun NasMusicApi.forYou(): ShelfFeed = LenientJson.feed(forYouRaw())
 suspend fun NasMusicApi.globalSearch(q: String, scope: String = "all", limit: Int = 20): SearchResults = LenientJson.search(globalSearchRaw(q, scope, limit))
 suspend fun NasMusicApi.pins(): List<ShelfItem> = (pinsRaw() as? kotlinx.serialization.json.JsonArray)?.mapNotNull { LenientJson.item(it) }.orEmpty()

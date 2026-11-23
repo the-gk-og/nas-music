@@ -15,6 +15,7 @@ import org.nasmusic.app.data.api.RadioSeed
 import org.nasmusic.app.data.api.SearchResult
 import org.nasmusic.app.data.api.Track
 import org.nasmusic.app.data.api.VibeParseRequest
+import org.nasmusic.app.data.api.continueListening
 
 /**
  * Browse tree for Android Auto (and any other MediaBrowser client: Android Automotive, Wear, Bluetooth
@@ -27,6 +28,7 @@ import org.nasmusic.app.data.api.VibeParseRequest
  *   flat (no limit / ≥ 7):  For you · Continue listening · Playlists · Albums · Artists · Radio · Downloads
  *   compact (Auto, ≤ 6):    For you · Library (Playlists, Albums, Artists) · Radio · Downloads
  *
+ *   Continue listening ─ continue:<queue|episode|book>:<id> (playable; resumes where it stopped)
  *   For you    ─ "Play something for now" (radio:moment) · continue-listening queues · today's mixes
  *   Radio      ─ radio:moment, radio:random (playable)
  *   artist:<id>─ artist radio + album:<id> ─ tracks
@@ -92,7 +94,20 @@ class AutoLibrary(
         val a = api()
         return when {
             parentId == FOR_YOU -> forYou()
-            parentId == CONTINUE -> a.queues().let(::recentQueues).map(::queueItem)
+            parentId == CONTINUE -> a.continueListening(20).filter { it.type in CONTINUE_TYPES }.map { i ->
+                MediaItem.Builder().setMediaId("$CONTINUE_PREFIX${i.type}:${i.id}").setMediaMetadata(
+                    MediaMetadata.Builder().setTitle(i.title).setSubtitle(i.subtitle).setIsBrowsable(false).setIsPlayable(true)
+                        .setMediaType(
+                            when (i.type) {
+                                "episode" -> MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE
+                                "book" -> MediaMetadata.MEDIA_TYPE_AUDIO_BOOK
+                                else -> MediaMetadata.MEDIA_TYPE_PLAYLIST
+                            },
+                        )
+                        .apply { i.artUrl?.let { setArtworkUri(Uri.parse(org.nasmusic.app.net.RoutedCallFactory.virtual(if ('?' in it) it else "$it?size=256"))) } }
+                        .build(),
+                ).build()
+            }
             parentId == PLAYLISTS -> a.playlists().map {
                 folder("playlist:${it.id}", it.name, MediaMetadata.MEDIA_TYPE_PLAYLIST, subtitle = songs(it.trackCount),
                     playableStyle = LIST)
@@ -259,6 +274,17 @@ class AutoLibrary(
         const val FOR_YOU = "foryou"
         const val CONTINUE = "continue"
         const val LIBRARY = "library"
+        const val CONTINUE_PREFIX = "continue:"
+        private val CONTINUE_TYPES = setOf("queue", "episode", "book")
+
+        /** `continue:<type>:<id>` → (type, id). */
+        fun parseContinueId(mediaId: String): Pair<String, String>? {
+            if (!mediaId.startsWith(CONTINUE_PREFIX)) return null
+            val rest = mediaId.removePrefix(CONTINUE_PREFIX)
+            val type = rest.substringBefore(':')
+            val id = rest.substringAfter(':', "")
+            return if (type in CONTINUE_TYPES && id.isNotEmpty()) type to id else null
+        }
         const val PLAYLISTS = "playlists"
         const val ALBUMS = "albums"
         const val ARTISTS = "artists"

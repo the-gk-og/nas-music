@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.7.0
+  version: 0.8.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,6 +10,19 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    0.8.0 (schema v8): resume and Continue listening. (1) Podcast episodes, audiobooks and internet radio play
+    through the same player and Connect as music: PlaybackState gains `media` ({kind: episode|book|station, id};
+    queueId/trackId are then null and positionMs is the book-wide position), and Connect gains the command
+    `playSpoken {kind, id, positionMs?}`. Speakers play them too. The server stores the resume point of a
+    `media` episode/book from the Connect state (as well as clients writing /spoken/progress). Spoken items are
+    still not music: no /events, no scrobbling, never in queues/playlists/recommender/Wrapped. (2) Resume: the
+    Connect command `playQueue` WITHOUT `index` resumes the queue where it was left — the server fills in the
+    queue's saved `index` and `positionMs` before relaying it (players start that track at that position); with
+    an `index` it starts that track from the top. Saving Connect state also updates the queue's
+    currentIndex/positionMs/updatedAt. (3) GET /continue: one list (ShelfItems of type queue, episode, book with
+    `progress` and `updatedAt`) of music queues left part-way and episodes/books in progress, newest first;
+    DELETE /continue/{type}/{id} dismisses one until it is played again. Home's `continue_listening` shelf is the
+    same list, so it can now hold `episode` and `book` items too.
     0.7.0 (schema v7): smart playlists (/smart-playlists/*: rule-based, per user, evaluated and cached on the
     server, family-mode filtered; pinnable as `smart_playlist`, usable as a queue source and as a radio seed
     `{"type": "smart_playlist", "id"}`) and artist pages (/library/artists/{id}/page|info|tracks,
@@ -1358,6 +1371,12 @@ paths:
         `notification {notification}` (v7, a new Notification for this user, e.g. new music added), and (v5)
         `playlist {playlistId, rev, deleted}` — sent to every device of the owner and every member when a playlist
         changes (refetch it unless you already have that `rev`; `deleted: true` = deleted, or you lost access).
+        Command actions: play, pause, next, prev, seek {positionMs}, setVolume {volume}, setShuffle {on},
+        setRepeat {mode}, setSpeed {speed}, playTracks {trackIds, index, queueName}, playQueue {queueId, index?,
+        positionMs?} (no index = resume where the queue was left; the server adds the saved index + positionMs),
+        and (0.8.0) playSpoken {kind: episode|book|station, id, positionMs?} (a podcast episode / audiobook at a
+        book-wide position / live station; no positionMs = the item's saved resume point). On a spoken item,
+        next/prev on a speaker skip +30 s / -15 s.
         Clients must ignore message types they don't know. Speakers (`kind: speaker`, see /cast/speakers) are
         listed as devices too; the server plays on their behalf. The server sends WebSocket protocol pings every 20 s (keeps the Cloudflare tunnel open);
         clients still send `ping` every 25 s. A newer socket from the same device replaces the older one.
@@ -3505,6 +3524,33 @@ paths:
                 type: object
                 properties:
                   items: { type: array, items: { type: object, properties: { kind: { type: string }, id: { type: string }, applied: { type: boolean }, progress: { oneOf: [ { $ref: '#/components/schemas/SpokenProgress' }, { type: 'null' } ] } } } }
+  /continue:
+    get:
+      summary: |
+        0.8.0 Continue listening, everywhere: music queues left part-way (a playlist, album, mix or radio you
+        listened into and didn't finish; not the one playing right now) and podcast episodes / audiobooks in
+        progress, most recently played first. Items are ShelfItems of type `queue` (resume with Connect
+        `playQueue` without index, or locally at progress.index + progress.positionMs), `episode` or `book`
+        (resume at progress.positionMs). Dismissed items are left out until they are played again.
+      parameters: [ { name: limit, in: query, schema: { type: integer, default: 20, maximum: 50 } } ]
+      responses:
+        '200':
+          description: items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ShelfItem' } }
+  /continue/{type}/{id}:
+    parameters:
+      - { name: type, in: path, required: true, schema: { type: string, enum: [queue, episode, book] } }
+      - { name: id, in: path, required: true, schema: { type: string } }
+    delete:
+      summary: Dismiss an item from Continue listening (it comes back once it is played again).
+      responses:
+        '204': { description: dismissed }
   /spoken/continue:
     get:
       tags: [spoken]
@@ -4071,7 +4117,7 @@ components:
         `artUrl` is RELATIVE TO THE API BASE (/api/v1/), e.g. "art/<albumId>" or "catalog/<id>/cover"; null = no art.
       required: [type, id, title]
       properties:
-        type: { type: string, enum: [track, album, artist, playlist, mix, radio, queue, device, catalog, suggestion, toget, smart_list, smart_playlist, genre, folder, blend, wrapped] }
+        type: { type: string, enum: [track, album, artist, playlist, mix, radio, queue, device, catalog, suggestion, toget, smart_list, smart_playlist, genre, folder, blend, wrapped, episode, book] }
         id: { type: string }
         title: { type: string }
         subtitle: { type: [string, 'null'] }
@@ -4094,12 +4140,20 @@ components:
             nowPlaying: { oneOf: [ { $ref: '#/components/schemas/Track' }, { type: 'null' } ] }
         progress:
           type: object
-          description: continue_listening — where you left off
+          description: >-
+            continue_listening — where you left off. Queues: index/count/positionMs/queueId (resume = playQueue
+            without index). Episodes/books (0.8.0): positionMs (book-wide), durationMs and fraction (0..1, null
+            when the length is unknown).
           properties:
             index: { type: integer }
             count: { type: integer }
             positionMs: { type: integer }
             queueId: { type: [string, 'null'] }
+            durationMs: { type: [integer, 'null'] }
+            fraction: { type: [number, 'null'] }
+        updatedAt: { type: [string, 'null'], description: 'continue_listening (0.8.0): when it was last played' }
+        episode: { $ref: '#/components/schemas/Episode', description: 'type episode (0.8.0)' }
+        book: { $ref: '#/components/schemas/Audiobook', description: 'type book (0.8.0)' }
         catalog: { $ref: '#/components/schemas/CatalogItem' }
         suggestion: { $ref: '#/components/schemas/Suggestion' }
         toget: { $ref: '#/components/schemas/ToGetItem' }
@@ -4785,6 +4839,18 @@ components:
           description: >-
             set by the server (clients don't report it): the active device is a speaker that is still
             connecting/loading. `playing` is false until it has started.
+        media:
+          description: >-
+            0.8.0: a podcast episode, audiobook or live station is playing instead of the music queue (queueId and
+            trackId are null; positionMs is the position in the whole episode/book, 0 for a station). null or
+            omitted = music. A state report with trackId/queueId and no `media` clears it.
+          oneOf:
+            - { type: 'null' }
+            - type: object
+              required: [kind, id]
+              properties:
+                kind: { type: string, enum: [episode, book, station] }
+                id: { type: string }
         rev: { type: integer }
     ConnectDevice:
       type: object

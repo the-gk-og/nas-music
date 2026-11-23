@@ -5,6 +5,7 @@ import { session } from './session.svelte';
 import type { ShelfItem, Track } from './types';
 import { ui } from './ui.svelte';
 import { parseRadioId } from './v3';
+import { spoken } from './spokenPlayer.svelte';
 
 export function openItem(it: ShelfItem, siblings?: ShelfItem[]) {
   switch (it.type) {
@@ -23,8 +24,13 @@ export function openItem(it: ShelfItem, siblings?: ShelfItem[]) {
     case 'radio':
       return void player.startRadio(parseRadioId(it.id, it.seed), it.title);
     case 'queue':
+      // Resume where it stopped: no index = its saved song AND position.
       ui.go('queue');
       return void player.playQueue(it.progress?.queueId ?? it.id);
+    case 'episode':
+      return void spoken.playEpisode(it.id);
+    case 'book':
+      return void spoken.playBook(it.id);
     case 'device':
       // "Your devices": one tap = take over here.
       if (player.myDeviceId) player.transfer(player.myDeviceId);
@@ -102,5 +108,5 @@ export function radioFor(it: ShelfItem) {
 }
 
 export const isPlayable = (it: ShelfItem) =>
-  ['album', 'playlist', 'smart_playlist', 'mix', 'genre', 'artist', 'radio', 'queue', 'track'].includes(it.type) ||
+  ['album', 'playlist', 'smart_playlist', 'mix', 'genre', 'artist', 'radio', 'queue', 'track', 'episode', 'book'].includes(it.type) ||
   (it.type === 'blend' && it.blend?.status === 'joined' && (it.blend.trackCount ?? 0) > 0);

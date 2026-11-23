@@ -30,9 +30,24 @@ def make_hub(cfg: Config, **kw) -> Hub:
             conn.execute("INSERT INTO playback_state (user_id, state, updated_at) VALUES (?, ?, ?) "
                          "ON CONFLICT(user_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at",
                          (uid, json.dumps(state), now_iso()))
-            if state.get("queueId"):
-                conn.execute("UPDATE queues SET current_index = ?, position_ms = ? WHERE id = ? AND user_id = ?",
-                             (int(state.get("index") or 0), int(state.get("positionMs") or 0), state["queueId"], uid))
+            media = state.get("media") if isinstance(state.get("media"), dict) else None
+            if state.get("queueId") and not media:
+                conn.execute("UPDATE queues SET current_index = ?, position_ms = ?, updated_at = ? "
+                             "WHERE id = ? AND user_id = ?",
+                             (int(state.get("index") or 0), int(state.get("positionMs") or 0), now_iso(),
+                              state["queueId"], uid))
+            elif media and media.get("kind") in ("episode", "book"):
+                # Resume point on the server too (a speaker can't write /spoken/progress itself; clients also do).
+                _spoken_progress(conn, uid, state, media)
+        finally:
+            conn.close()
+
+    def queue_resume(uid: str, qid: str) -> tuple[int, int] | None:
+        conn = open_db(cfg)
+        try:
+            r = conn.execute("SELECT current_index, position_ms FROM queues WHERE id = ? AND user_id = ?",
+                             (qid, uid)).fetchone()
+            return (r[0], r[1]) if r else None
         finally:
             conn.close()
 
@@ -50,7 +65,22 @@ def make_hub(cfg: Config, **kw) -> Hub:
         finally:
             conn.close()
 
+    kw.setdefault("queue_resume", queue_resume)
     return Hub(load, save, make_queue, queue_track, **kw)
+
+
+def _spoken_progress(conn, uid: str, state: dict, media: dict) -> None:
+    from nasmusic.spoken import progress as prog
+
+    kind, ident = media["kind"], media["id"]
+    table, col = ("podcast_episodes", "id") if kind == "episode" else ("audiobooks", "id")
+    if conn.execute(f"SELECT 1 FROM {table} WHERE {col} = ?", (ident,)).fetchone() is None:
+        return
+    pos_s = round(int(state.get("positionMs") or 0) / 1000, 1)
+    if pos_s <= 0:
+        return
+    prog.put(conn, uid, state.get("activeDeviceId"), kind, ident, position_s=pos_s,
+             updated_at=state.get("positionAt"))
 
 
 def _token(ws: WebSocket) -> str | None:

@@ -71,6 +71,8 @@ class PlayerConnection(
     private val offline: OfflineSource = OfflineSource.NONE,
     /** Listening settings (DJ automix ordering). */
     private val listening: () -> ListeningSettings = { ListeningSettings() },
+    /** Podcasts / audiobooks / stations (to show what another device is playing). */
+    private val spokenApi: (() -> org.nasmusic.app.data.api.SpokenApi)? = null,
 ) {
     private var controller: MediaController? = null
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -84,6 +86,7 @@ class PlayerConnection(
     // Touched from the main thread and from flow collectors on Dispatchers.Default.
     private val trackCache = java.util.concurrent.ConcurrentHashMap<String, Track>()
     @Volatile private var remoteQueue: Pair<String, List<MediaItem>>? = null
+    private val spokenCache = java.util.concurrent.ConcurrentHashMap<String, org.nasmusic.app.spoken.SpokenItem>()
 
     init {
         scope.launch { combine(_local, _remote) { l, r -> r ?: l }.collect { _state.value = it } }
@@ -143,6 +146,10 @@ class PlayerConnection(
         val s = connect.state.value ?: return
         val dev = connect.activeDevice() ?: return
         val now = System.currentTimeMillis()
+        s.media?.let { m ->
+            _remote.value = remoteSpoken(s, m, now, dev)
+            return
+        }
         val track = s.trackId?.let { id -> trackCache[id] ?: run { fetchTrack(id); null } }
         val queue = remoteQueue?.takeIf { it.first == s.queueId }?.second ?: run { s.queueId?.let(::fetchQueue); emptyList() }
         _remote.value = NowPlaying(
@@ -160,6 +167,27 @@ class PlayerConnection(
             speed = s.speed,
             remote = RemoteInfo(dev.id, dev.name, s.castTo, dev.isSpeaker, dev.isSpeaker && s.connecting),
         )
+    }
+
+    /** Another device plays a podcast episode / audiobook / station: show it like the local player would. */
+    private fun remoteSpoken(s: org.nasmusic.app.connect.PlaybackState, m: org.nasmusic.app.connect.ConnectMedia, now: Long,
+                             dev: org.nasmusic.app.connect.ConnectDevice): NowPlaying {
+        val key = "${m.kind}:${m.id}"
+        val item = spokenCache[key] ?: run { fetchSpoken(m.kind, m.id); null }
+        val posS = s.positionAt(now) / 1000.0
+        val (part, offMs) = item?.let { org.nasmusic.app.spoken.SpokenMedia.startAt(it, posS) } ?: (0 to s.positionAt(now))
+        val mi = item?.let { org.nasmusic.app.spoken.SpokenMedia.mediaItems(it).getOrNull(part) }
+        return NowPlaying(
+            item = mi, isPlaying = s.playing, positionMs = offMs,
+            durationMs = ((item?.partDurations?.getOrNull(part) ?: item?.durationS ?: 0.0) * 1000).toLong(),
+            hasNext = false, hasPrevious = true, queue = listOfNotNull(mi), index = 0, volume = s.volume, speed = s.speed,
+            remote = RemoteInfo(dev.id, dev.name, s.castTo, dev.isSpeaker, dev.isSpeaker && s.connecting),
+        )
+    }
+
+    private fun fetchSpoken(kind: String, id: String) = scope.launch {
+        val api = spokenApi ?: return@launch
+        org.nasmusic.app.spoken.SpokenMedia.load(api(), kind, id)?.let { spokenCache["$kind:$id"] = it.first; refreshRemote() }
     }
 
     private fun fetchTrack(id: String) = scope.launch {
@@ -192,7 +220,8 @@ class PlayerConnection(
             item = c.currentMediaItem,
             isPlaying = c.isPlaying,
             positionMs = c.currentPosition,
-            durationMs = c.duration.coerceAtLeast(0),
+            // Restored after a restart the player isn't prepared yet: show the item's own length meanwhile.
+            durationMs = c.duration.takeIf { it > 0 } ?: (c.currentMediaItem?.mediaMetadata?.durationMs ?: 0L),
             hasNext = c.hasNextMediaItem(),
             hasPrevious = c.hasPreviousMediaItem(),
             queue = localQueueCache,
@@ -289,9 +318,18 @@ class PlayerConnection(
         queues.created(queueName, tracks, start)
     }
 
+    /**
+     * Play a saved queue. With [index] = that track from the top; without = resume where the queue was left
+     * (its saved track AND position — never the top of the list). As a remote, no index lets the server fill in
+     * the resume point it holds.
+     */
     fun playQueue(q: Queue, index: Int? = null) {
         if (connect.isRemote) {
-            connect.command("playQueue", mapOf("queueId" to JsonPrimitive(q.id), "index" to JsonPrimitive(index ?: q.currentIndex)))
+            val args = buildMap {
+                put("queueId", JsonPrimitive(q.id))
+                index?.let { put("index", JsonPrimitive(it)) }
+            }
+            connect.command("playQueue", args)
             return
         }
         scope.launch {
@@ -305,6 +343,54 @@ class PlayerConnection(
             }
             queues.setCurrent(q.id)
         }
+    }
+
+    /**
+     * Play a podcast episode / audiobook / station through the main player at book-wide second [posS] (or ask the
+     * active device to, as a remote). It is not a music queue: the server queue mirror is detached.
+     */
+    fun playSpoken(item: org.nasmusic.app.spoken.SpokenItem, posS: Double, localFile: (String) -> java.io.File? = { null }) {
+        if (connect.isRemote) {
+            spokenCache["${item.kind}:${item.id}"] = item
+            connect.command("playSpoken", mapOf(
+                "kind" to JsonPrimitive(item.kind), "id" to JsonPrimitive(item.id),
+                "positionMs" to JsonPrimitive((posS * 1000).toLong()),
+            ))
+            return
+        }
+        val items = org.nasmusic.app.spoken.SpokenMedia.mediaItems(item, localFile)
+        val (idx, off) = org.nasmusic.app.spoken.SpokenMedia.startAt(item, posS)
+        queues.setCurrent(null)
+        withController { c ->
+            c.setMediaItems(items, idx.coerceIn(0, items.size - 1), off)
+            c.prepare()
+            val e = ext
+            if (e != null) e.reload() else c.play()
+        }
+    }
+
+    /** Seek inside a spoken item by book-wide second (another part of a book when needed). */
+    fun seekSpoken(item: org.nasmusic.app.spoken.SpokenItem, posS: Double) {
+        val ms = (posS * 1000).toLong()
+        if (connect.isRemote) { connect.command("seek", mapOf("positionMs" to JsonPrimitive(ms))); return }
+        val (idx, off) = org.nasmusic.app.spoken.SpokenMedia.startAt(item, posS)
+        withController { c ->
+            if (item.kind == "book" && idx in 0 until c.mediaItemCount) c.seekTo(idx, off) else c.seekTo(off)
+        }
+    }
+
+    /** Skip silence (podcasts); a session command because a MediaController can't set it. Local only. */
+    fun setSkipSilence(on: Boolean) = withController {
+        it.sendCustomCommand(
+            androidx.media3.session.SessionCommand(PlaybackService.CMD_SKIP_SILENCE, android.os.Bundle.EMPTY),
+            android.os.Bundle().apply { putBoolean(PlaybackService.ARG_ON, on) },
+        )
+    }
+
+    /** Stop and empty the player (closing a podcast). As a remote: pause the active device. */
+    fun stopAndClear() {
+        if (connect.isRemote) { connect.command("pause"); return }
+        withController { it.stop(); it.clearMediaItems() }
     }
 
     /** Start a radio (docs/v3-ux.md §5) and play it here, or on the active device when remote. */

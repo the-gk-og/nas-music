@@ -782,6 +782,7 @@ export class MockBackend {
       }
       return this.pinsList.map((p) => this.item(p.type, p.id));
     }
+    if ((r = m(/^\/continue\/(queue|episode|book)\/([^/]+)$/)) && method === 'DELETE') return undefined;
     if ((r = m(/^\/pins\/([a-z_]+)\/([^/]+)$/)) && method === 'DELETE') {
       this.pinsList = this.pinsList.filter((p) => !(p.type === r![1] && p.id === decodeURIComponent(r![2])));
       return undefined;

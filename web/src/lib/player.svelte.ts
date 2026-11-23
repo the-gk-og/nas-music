@@ -4,6 +4,7 @@
 import { ApiError } from './api/client';
 import { mockBackend } from './api/mock';
 import { ConnectClient, extrapolatePosition, type ConnectStatus } from './connect';
+import { preferServer, resumeQueueId, resumeSpot } from './resume';
 import {
   PITCH_WORKLET_URL,
   buildEqGraph,
@@ -75,10 +76,39 @@ const GAPLESS_LEAD_MS = 15;
 /** Fade length when the sleep timer stops at the end of a track/album. */
 const SLEEP_TRACK_FADE_S = 6;
 
+/**
+ * Podcasts / audiobooks / internet radio (spokenPlayer.svelte.ts) plug into the player's Connect identity through
+ * this, so they work like music across devices: reported in PlaybackState.media, controlled by remotes,
+ * transferred, resumed. The music queue is untouched while a spoken item plays.
+ */
+export interface SpokenBridge {
+  /** A spoken item is loaded here (playing or paused). */
+  active(): boolean;
+  playing(): boolean;
+  media(): { kind: 'episode' | 'book' | 'station'; id: string } | null;
+  /** Book-wide position, seconds. */
+  position(): number;
+  speed(): number;
+  /** Load and (maybe) play an item at book-wide `positionS` (undefined = its saved resume point). */
+  load(kind: 'episode' | 'book' | 'station', id: string, positionS: number | undefined, play: boolean): Promise<void>;
+  play(): void;
+  pause(): void;
+  seek(positionS: number): void;
+  setSpeed(s: number): void;
+  /** Unload (music takes over). */
+  close(): void;
+  /** savedAt (ms) of the spoken item this browser had loaded, to compare with the music queue's. */
+  savedAt(): number | null;
+  restore(): Promise<void>;
+}
+
 interface LocalPrefs {
   queueId: string | null;
   index: number;
   positionS: number;
+  /** song at `index` when saved, and when (resume where you left off) */
+  trackId?: string | null;
+  savedAt?: number;
   volume: number;
   repeat: RepeatMode;
   shuffle: boolean;
@@ -118,6 +148,10 @@ export class Player {
   remoteTrack = $state<Track | null>(null);
   myDeviceId = $state<string | null>(null);
   private remoteNow = $state(Date.now());
+  /** Ticks every 500 ms (for extrapolating a remote device's position). */
+  get now(): number {
+    return this.remoteNow;
+  }
 
   // ---- EQ / output ----
   eq = $state<EqSettings>(defaultEq());
@@ -176,6 +210,10 @@ export class Player {
   private lastActivity = 0;
   private battery: { charging: boolean; level: number } | null = null;
   private started = false;
+  private lastLocalSave = 0;
+  private adoptChecked = false;
+  /** Set by spokenPlayer.svelte.ts. */
+  spoken: SpokenBridge | null = null;
 
   constructor() {
     this.tracker = new PlaybackTracker((e, details) => {
@@ -330,17 +368,27 @@ export class Player {
     void this.refreshOutputs();
 
     await this.refreshQueues();
-    const qid = prefs.queueId && this.queues.some((q) => q.id === prefs.queueId) ? prefs.queueId : this.queues[0]?.id;
+    // Resume exactly where you left off: the same queue, song and position (paused), never the top of the list.
+    const spokenNewer = (this.spoken?.savedAt() ?? 0) > (prefs.savedAt ?? 0);
+    const qid = resumeQueueId(this.queues, prefs);
     if (qid) {
       const q = await this.fetchQueue(qid);
       if (q) {
-        const idx = q.id === prefs.queueId ? prefs.index : q.index;
-        this.queue = { ...q, index: Math.min(idx, Math.max(0, q.tracks.length - 1)) };
+        const spot = resumeSpot(q, prefs);
+        this.queue = this.shuffle ? { ...q, index: spot.index, order: shuffleOrder(q.tracks.length, spot.index) } : { ...q, index: spot.index };
         this.viewQueue = this.queue;
-        if (this.current) this.loadCurrent(false, q.id === prefs.queueId ? prefs.positionS : 0);
+        if (this.current && !spokenNewer) this.loadCurrent(false, spot.positionS);
       }
     }
+    if (spokenNewer) await this.spoken?.restore();
     this.startConnect();
+    if (typeof window !== 'undefined') {
+      // Closing the tab / the desktop app: keep the exact spot (local + server).
+      window.addEventListener('pagehide', () => {
+        this.saveLocal();
+        void this.saveQueuePosition(true);
+      });
+    }
   }
 
   private setupAudio() {
@@ -383,6 +431,7 @@ export class Player {
       const { a: A, b: B } = this.ab;
       if (A != null && B != null && a.currentTime >= B) a.currentTime = A;
       if (this.playing && Date.now() - this.lastQueueSave > 15000) void this.saveQueuePosition(false);
+      if (this.playing && Date.now() - this.lastLocalSave > 5000) this.saveLocal();
     });
     a.addEventListener('ended', () => {
       if (!mine()) return;
@@ -926,7 +975,10 @@ export class Player {
       const q = await session.api.queue(id);
       const tracks = q.tracks ?? [];
       for (const t of tracks) this.trackCache.set(t.id, t);
-      return { id: q.id, name: q.name, slot: q.slot, tracks, index: Math.min(q.currentIndex, Math.max(0, tracks.length - 1)), radio: !!q.radio };
+      return {
+        id: q.id, name: q.name, slot: q.slot, tracks, index: Math.min(q.currentIndex, Math.max(0, tracks.length - 1)), radio: !!q.radio,
+        positionMs: q.positionMs, updatedAt: q.updatedAt,
+      };
     } catch {
       return null;
     }
@@ -952,6 +1004,7 @@ export class Player {
       this.connect?.command('playTracks', { trackIds: ids, index, queueName: name });
       return;
     }
+    this.spoken?.close();
     // If the same list is already the queue, just jump.
     if (this.queue && this.queue.tracks.length === tracks.length && this.queue.tracks.every((t, i) => t.id === ids[i])) {
       this.queueMeta.set(this.queue.id, meta);
@@ -1009,16 +1062,28 @@ export class Player {
     this.ab = { a: null, b: null };
   }
 
-  /** Switch to a saved queue and play from its current track. */
-  async playQueue(id: string, index?: number) {
+  /**
+   * Switch to a saved queue. With `index`: that song from the top. Without: resume where the queue was left —
+   * its saved song AND position (as a remote, the server fills in that spot for the active device).
+   */
+  async playQueue(id: string, index?: number, startS?: number) {
     if (this.isRemote) {
-      this.connect?.command('playQueue', { queueId: id, index: index ?? 0 });
+      this.connect?.command('playQueue', index == null ? { queueId: id } : { queueId: id, index });
+      return;
+    }
+    this.spoken?.close();
+    if (index == null && id === this.queue?.id && this.current) {
+      // Already loaded here: just carry on from where it is.
+      this.claim();
+      if (startS != null) this.seek(startS);
+      await this.play();
       return;
     }
     const q = id === this.queue?.id ? this.queue : await this.fetchQueue(id);
     if (!q) return;
-    this.setQueue({ ...q, index: index ?? q.index });
-    await this.playIndex(index ?? q.index);
+    const i = index ?? q.index;
+    this.setQueue({ ...q, index: i });
+    await this.playIndex(i, startS ?? (index == null ? (q.positionMs ?? 0) / 1000 : 0));
   }
 
   async playIndex(i: number, startS = 0) {
@@ -1457,10 +1522,13 @@ export class Player {
   }
 
   private saveLocal() {
+    this.lastLocalSave = Date.now();
     saveJson(LOCAL_KEY, {
       queueId: this.queue?.id ?? null,
       index: this.queue?.index ?? 0,
       positionS: this.position,
+      trackId: this.current?.id ?? null,
+      savedAt: this.spoken?.active() ? (loadJson<LocalPrefs | null>(LOCAL_KEY, null)?.savedAt ?? 0) : Date.now(),
       volume: this.volume,
       repeat: this.repeat,
       shuffle: this.shuffle,
@@ -1489,6 +1557,10 @@ export class Player {
         onState: (s) => {
           this.myDeviceId = this.connect?.deviceId ?? null;
           this.remoteState = s;
+          if (!this.adoptChecked) {
+            this.adoptChecked = true;
+            void this.adoptIfNewer(s);
+          }
           if (s.activeDeviceId && s.activeDeviceId !== this.myDeviceId) {
             void this.loadRemoteTrack(s.trackId);
             // As a remote, the Queue view follows the queue playing on the active device.
@@ -1516,7 +1588,7 @@ export class Player {
     this.stateTimer = setInterval(() => {
       this.remoteNow = Date.now();
       // §5: the active device reports state every 5 s while playing.
-      if (++ticks % 10 === 0 && this.playing && this.connect?.isActive) this.reportState();
+      if (++ticks % 10 === 0 && (this.playing || this.spoken?.playing()) && this.connect?.isActive) this.reportState();
     }, 500);
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => this.connect?.kick());
@@ -1556,7 +1628,53 @@ export class Player {
     }
   }
 
+  /**
+   * Another device played something more recently than this browser (the phone, then you open the web player):
+   * show that here, paused at its spot, instead of this browser's older one.
+   */
+  private async adoptIfNewer(s: PlaybackState) {
+    if (this.isRemote || this.playing || this.spoken?.playing()) return;
+    const local = Math.max(loadJson<LocalPrefs | null>(LOCAL_KEY, null)?.savedAt ?? 0, this.spoken?.savedAt() ?? 0) || null;
+    if (!preferServer(local, s, this.myDeviceId)) return;
+    if (s.media) {
+      await this.spoken?.load(s.media.kind, s.media.id, s.positionMs / 1000, false);
+      return;
+    }
+    if (!s.queueId) return;
+    const q = await this.fetchQueue(s.queueId);
+    if (!q || !q.tracks.length || this.playing) return;
+    const found = s.trackId ? q.tracks.findIndex((t) => t.id === s.trackId) : -1;
+    this.spoken?.close();
+    this.setQueue({ ...q, index: found >= 0 ? found : Math.min(s.index, q.tracks.length - 1) });
+    this.loadCurrent(false, s.positionMs / 1000);
+    this.saveLocal();
+  }
+
+  /** As a remote: ask the active device to play a podcast episode / audiobook / station. */
+  remotePlaySpoken(kind: 'episode' | 'book' | 'station', id: string, positionS?: number) {
+    this.connect?.command('playSpoken', positionS == null ? { kind, id } : { kind, id, positionMs: Math.round(positionS * 1000) });
+  }
+
+  /** A spoken item started or stopped here: become the active device when it starts, report the state. */
+  spokenChanged(started: boolean) {
+    if (started) {
+      if (this.playing) this.pause();
+      this.claim();
+    }
+    this.reportState();
+  }
+
   private buildState(): PlaybackState {
+    const sp = this.spoken;
+    const media = sp?.active() ? sp.media() : null;
+    if (sp && media) {
+      return {
+        activeDeviceId: this.myDeviceId, queueId: null, index: 0, trackId: null,
+        positionMs: media.kind === 'station' ? 0 : Math.round(sp.position() * 1000), positionAt: new Date().toISOString(),
+        playing: sp.playing(), volume: this.volume, shuffle: false, repeat: 'off', speed: sp.speed(), media,
+        rev: this.connect?.state?.rev ?? 0,
+      };
+    }
     const q = this.queue;
     return {
       activeDeviceId: this.myDeviceId,
@@ -1586,6 +1704,24 @@ export class Player {
 
   private async takeover(s: PlaybackState) {
     this.remoteState = this.connect?.state ?? s;
+    if (s.media) {
+      if (this.playing) this.pause();
+      const sp = this.spoken;
+      const pos = extrapolatePosition(s, Date.now()) / 1000;
+      const same = sp?.active() && sp.media()?.kind === s.media.kind && sp.media()?.id === s.media.id;
+      if (same && Date.now() - this.claimedAt < 5000) {
+        this.reportState();
+        return;
+      }
+      if (same) {
+        sp!.seek(pos);
+        if (s.playing) sp!.play();
+        else sp!.pause();
+      } else await sp?.load(s.media.kind, s.media.id, pos, s.playing);
+      ui.toast('Playing on this device');
+      return;
+    }
+    this.spoken?.close();
     // We just claimed it ourselves and are already playing the right thing.
     if (Date.now() - this.claimedAt < 5000 && (!s.trackId || s.trackId === this.current?.id)) {
       this.reportState();
@@ -1610,6 +1746,7 @@ export class Player {
 
   private release() {
     if (this.playing) this.tracker.finish(this.position);
+    this.spoken?.pause();
     this.audio?.pause();
     this.stopFading();
     this.remoteState = this.connect?.state ?? this.remoteState;
@@ -1617,6 +1754,34 @@ export class Player {
 
   /** Commands from a remote, executed here because we're the active device. */
   private async execute(action: CommandAction, args: Record<string, unknown>) {
+    const sp = this.spoken;
+    if (action === 'playSpoken') {
+      const kind = args.kind as 'episode' | 'book' | 'station';
+      if (!kind || typeof args.id !== 'string') return;
+      if (this.playing) this.pause();
+      return sp?.load(kind, args.id, typeof args.positionMs === 'number' ? args.positionMs / 1000 : undefined, true);
+    }
+    if (sp?.active()) {
+      // A podcast / audiobook / station is loaded: transport commands go to it (next/prev skip ±).
+      switch (action) {
+        case 'play':
+          return sp.play();
+        case 'pause':
+          return sp.pause();
+        case 'seek':
+          return sp.seek(Number(args.positionMs ?? 0) / 1000);
+        case 'next':
+          return sp.seek(sp.position() + 30);
+        case 'prev':
+          return sp.seek(Math.max(0, sp.position() - 15));
+        case 'setSpeed':
+          return sp.setSpeed(Number(args.speed));
+        case 'setVolume':
+          return this.setVolume(Number(args.volume));
+        default:
+          sp.close();
+      }
+    }
     switch (action) {
       case 'play':
         return this.play();
@@ -1640,7 +1805,12 @@ export class Player {
       case 'setSpeed':
         return this.setSpeed(Number(args.speed));
       case 'playQueue':
-        return this.playQueue(String(args.queueId), Number(args.index ?? 0));
+        // No index = resume where the queue was left (the server adds its saved index + positionMs).
+        return this.playQueue(
+          String(args.queueId),
+          typeof args.index === 'number' ? args.index : undefined,
+          typeof args.positionMs === 'number' ? args.positionMs / 1000 : undefined,
+        );
       case 'playTracks': {
         const ids = (args.trackIds as string[]) ?? [];
         const tracks = (await Promise.all(ids.map((id) => this.trackById(id)))).filter((t): t is Track => !!t);

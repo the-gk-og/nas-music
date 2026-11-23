@@ -23,8 +23,17 @@ data class Shelf(
 )
 
 @Serializable
-data class ShelfProgress(val index: Int = 0, val count: Int = 0, val positionMs: Long = 0, val queueId: String? = null) {
-    val fraction: Float get() = if (count > 0) ((index + 1f) / count).coerceIn(0f, 1f) else 0f
+data class ShelfProgress(
+    val index: Int = 0,
+    val count: Int = 0,
+    val positionMs: Long = 0,
+    val queueId: String? = null,
+    /** api 0.8 episodes/books: length and 0..1 progress (null = length unknown). */
+    val durationMs: Long? = null,
+    @kotlinx.serialization.SerialName("fraction") val listened: Double? = null,
+) {
+    val fraction: Float get() = listened?.toFloat()?.coerceIn(0f, 1f)
+        ?: if (count > 0) ((index + 1f) / count).coerceIn(0f, 1f) else 0f
 }
 
 @Serializable
@@ -67,6 +76,10 @@ data class ShelfItem(
     /** v5 blends shelf; status "new" = the "Start a blend" card */
     val blend: ShelfBlend? = null,
     val wrapped: ShelfWrapped? = null,
+    /** api 0.8 Continue listening: podcast episode / audiobook cards, and when the item was last played. */
+    val episode: Episode? = null,
+    val book: Audiobook? = null,
+    val updatedAt: String? = null,
 )
 
 @Serializable

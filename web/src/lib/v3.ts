@@ -146,7 +146,8 @@ export function accentColor(v: string | null | undefined): string {
 }
 
 /** Progress (0..1) for a "Continue listening" item. */
-export function progressFraction(p: { index?: number; count?: number } | null | undefined): number | null {
+export function progressFraction(p: { index?: number; count?: number; fraction?: number | null } | null | undefined): number | null {
+  if (p && typeof p.fraction === 'number') return Math.max(0, Math.min(1, p.fraction)); // episodes / books
   if (!p || !p.count) return null;
   return Math.max(0, Math.min(1, (p.index ?? 0) / p.count));
 }

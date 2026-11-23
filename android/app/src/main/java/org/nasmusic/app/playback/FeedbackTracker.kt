@@ -145,6 +145,8 @@ class FeedbackTracker(
     }
 
     private fun emit(type: EventType, item: MediaItem, positionMs: Long) {
+        // Podcasts, audiobooks and radio stations share the player but are never listening events.
+        if (org.nasmusic.app.spoken.SpokenMedia.isSpoken(item)) return
         val x = item.mediaMetadata.extras
         val source = x?.getString(MediaItems.EXTRA_SOURCE)
         if (type == EventType.PLAY || type == EventType.SKIP) sessionPosition++

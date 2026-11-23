@@ -93,6 +93,7 @@ class AppContainer(val context: Context) {
             toast = { ui.toast(it) },
         ),
         listening = { listening.settings.value },
+        spokenApi = { spokenApi },
     ).also { p ->
         // Binding a MediaController starts the playback service, which then applies the takeover.
         connect.onTakeover = { android.os.Handler(android.os.Looper.getMainLooper()).post { p.connect() } }
@@ -107,9 +108,13 @@ class AppContainer(val context: Context) {
     val sleep = org.nasmusic.app.playback.SleepTimerState()
     val contextCollector = ContextCollector(context, scope)
     val feeds = org.nasmusic.app.data.FeedRepository(api)
-    /** Podcasts, audiobooks, internet radio: a separate player/service, never part of music features. */
+    /**
+     * Podcasts, audiobooks, internet radio: played by the main player (Connect, Cast, notification, resume), but
+     * never part of music features (no events, scrobbles, recommender, Wrapped, music queues).
+     */
     val spoken: org.nasmusic.app.spoken.SpokenPlayer = org.nasmusic.app.spoken.SpokenPlayer(
-        context, { spokenApi }, org.nasmusic.app.spoken.SpokenDownloads(callFactory, File(context.filesDir, "spoken")),
+        player, { spokenApi }, org.nasmusic.app.spoken.SpokenDownloads(callFactory, File(context.filesDir, "spoken")),
+        org.nasmusic.app.spoken.SpokenProgressStore(context, { spokenApi }, scope),
     )
     val family = org.nasmusic.app.data.FamilyRepository { api }.also { f -> connect.onFamilyChanged = { f.changed(it) } }
     /** api 0.7 notifications: Connect pushes + catch-up on every (re)connect; NewMusicWorker polls in the background. */

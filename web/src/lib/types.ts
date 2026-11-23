@@ -467,6 +467,8 @@ export interface PlaybackState {
   castTo?: string | null;
   /** Set by the server: the active device is a speaker still connecting/loading (`playing` is false). */
   connecting?: boolean;
+  /** api 0.8: a podcast episode / audiobook / station plays instead of the music queue (positionMs is book-wide). */
+  media?: { kind: 'episode' | 'book' | 'station'; id: string } | null;
   rev: number;
 }
 
@@ -495,7 +497,8 @@ export type CommandAction =
   | 'setRepeat'
   | 'playQueue'
   | 'playTracks'
-  | 'setSpeed';
+  | 'setSpeed'
+  | 'playSpoken';
 
 export type ClientMessage =
   | { type: 'hello'; deviceName: string; kind: DeviceKind; canPlay: boolean; appVersion: string }
@@ -538,7 +541,9 @@ export type ItemType =
   | 'genre'
   | 'folder'
   | 'blend'
-  | 'wrapped';
+  | 'wrapped'
+  | 'episode'
+  | 'book';
 
 export interface RadioSeed {
   type: 'random' | 'track' | 'artist' | 'album' | 'playlist' | 'smart_playlist' | 'moment' | 'vibe';
@@ -626,7 +631,11 @@ export interface ShelfItem {
   seed?: RadioSeed;
   smartPlaylist?: SmartPlaylist;
   device?: { kind?: ConnectDevice['kind']; canPlay?: boolean; isActive?: boolean; playing?: boolean; nowPlaying?: Track | null };
-  progress?: { index?: number; count?: number; positionMs?: number; queueId?: string | null };
+  progress?: { index?: number; count?: number; positionMs?: number; queueId?: string | null; durationMs?: number | null; fraction?: number | null };
+  /** api 0.8 Continue listening */
+  updatedAt?: string | null;
+  episode?: { id: string; podcastId: string; title: string };
+  book?: { id: string; title: string };
   catalog?: CatalogItem;
   suggestion?: Suggestion;
   toget?: ToGetItem;

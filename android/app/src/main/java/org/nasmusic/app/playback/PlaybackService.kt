@@ -44,6 +44,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.guava.future
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,6 +66,8 @@ import org.nasmusic.app.data.api.Track
 import org.nasmusic.app.eq.BassShelfProcessor
 import kotlin.math.abs
 import org.nasmusic.app.eq.EqAudioProcessor
+import org.nasmusic.app.spoken.SpokenItem
+import org.nasmusic.app.spoken.SpokenMedia
 
 /**
  * Media3 playback in a foreground MediaLibraryService (a MediaSessionService that also serves a
@@ -93,6 +96,26 @@ class PlaybackService : MediaLibraryService() {
     private lateinit var library: AutoLibrary
     /** True while this service paused at the end of a track for the sleep timer. */
     private var sleepPausedAtEnd = false
+
+    // ---- resume where you left off ----
+    private lateinit var resume: ResumeStore
+    /** savedAt of the local snapshot restored at start (null = nothing restored). */
+    private var restoredSavedAt: Long? = null
+    private var restoreJob: kotlinx.coroutines.Job? = null
+    private var lastResumeSaveMs = 0L
+
+    // ---- podcasts / audiobooks / stations in this player ----
+    /** The current item is spoken: music-only behaviour (levelling, crossfade, DJ, queue mirror) is off. */
+    private var spokenMode = false
+    /** Music speed to go back to after a spoken item (which uses its own per-show/book speed). */
+    private var musicSpeed = 1f
+    private var spokenSpeedFor: String? = null
+    /** Skip silence chosen while this item plays (overrides the item's saved setting). */
+    private val skipSilenceOverride = mutableMapOf<String, Boolean>()
+    private var lastSpokenSaveMs = 0L
+    private var lastSpokenFlushMs = 0L
+    /** When this phone claimed playback itself (play pressed here): the takeover that answers is not a load. */
+    private var claimedAtMs = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -146,6 +169,7 @@ class PlaybackService : MediaLibraryService() {
                     if (player.hasNextMediaItem()) player.seekToNextMediaItem() else player.pause()
                     return
                 }
+                applyItemMode()
                 applyLevelling()
                 updateNowFormat()
                 grantNowPlayingArt(mediaItem)
@@ -155,13 +179,20 @@ class PlaybackService : MediaLibraryService() {
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 // Pressing play on this phone makes it the Connect active device (§5 rule 1).
-                if (isPlaying && !applyingRemote) c.connect.claimPlayback()
+                if (isPlaying && !applyingRemote && !c.connect.isActiveHere) {
+                    claimedAtMs = System.currentTimeMillis()
+                    c.connect.claimPlayback()
+                }
                 // A user pause stops a fade; buffering (e.g. the seek into the next song's mix-in) doesn't.
                 if (!isPlaying && !player.playWhenReady) cancelCrossfade()
                 if (isPlaying) { handler.removeCallbacks(fastTick); handler.post(fastTick) }
+                if (!isPlaying) { saveResume(); saveSpoken(flush = true) }
             }
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) errorRetries = 0
+                if (state == Player.STATE_ENDED) currentSpoken()?.takeIf { !it.live }?.let { sp ->
+                    c.spoken.progress.record(org.nasmusic.app.data.api.ProgressWrite(sp.kind, sp.id, positionS = sp.durationS, durationS = sp.durationS, played = true), flush = true)
+                }
                 if (state == Player.STATE_ENDED && c.sleep.timer.value != null) finishSleep(pauseNow = false)
             }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -172,6 +203,7 @@ class PlaybackService : MediaLibraryService() {
             }
             override fun onPositionDiscontinuity(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
                 if (reason == Player.DISCONTINUITY_REASON_SEEK && !crossfadeSeeking) cancelCrossfade()
+                onSpokenLeave(old, new, reason)
             }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) = recover(error)
         })
@@ -216,6 +248,203 @@ class PlaybackService : MediaLibraryService() {
                 .distinctUntilChanged().collect { reloadBrowseTree() }
         }
         handler.post(tick)
+        resume = ResumeStore(java.io.File(filesDir, "resume"))
+        restoreLocal()
+        scope.launch { adoptServerStateIfNewer() }
+    }
+
+    // ---- Resume exactly where you left off (app killed, swiped away, phone restarted) ----
+
+    /** Put the last queue back at the same track and position, paused (not prepared: no network until play). */
+    private fun restoreLocal() {
+        if (player.mediaItemCount > 0) return
+        restoreJob = scope.launch {
+            val (q, pos) = withContext(Dispatchers.IO) { resume.load() } ?: return@launch
+            val items = withContext(Dispatchers.IO) { snapshotItems(q) }
+            val at = ResumeLogic.restorePoint(items.map { it.mediaId }, pos) ?: return@launch
+            if (player.mediaItemCount > 0) return@launch // something started playing meanwhile
+            applyingRemote = true
+            try {
+                player.setMediaItems(items, at.first, at.second)
+                player.shuffleModeEnabled = pos?.shuffle ?: false
+                player.repeatMode = pos?.repeat ?: Player.REPEAT_MODE_OFF
+                player.playWhenReady = false
+            } finally {
+                applyingRemote = false
+            }
+            c.queueSync.setCurrent(if (q.spoken == null) q.queueId ?: pos?.queueId else null)
+            restoredSavedAt = pos?.savedAt
+            android.util.Log.i(org.nasmusic.app.diag.CrashLog.TAG, "Restored ${items.size} items at ${at.first}/${at.second} ms")
+        }
+    }
+
+    private suspend fun snapshotItems(q: ResumeQueue): List<MediaItem> {
+        val sp = q.spoken
+        return if (sp != null) SpokenMedia.mediaItems(sp, c.spoken.downloads::file)
+        else q.entries.map { e ->
+            resolve(MediaItems.fromTrack(e.track, PlaySource.entries.firstOrNull { it.wire == e.source } ?: PlaySource.LIBRARY, e.mixId))
+        }
+    }
+
+    /**
+     * Another device played something more recently than this phone's snapshot (e.g. the web player, then the
+     * phone opens): show that here, paused at its position, so the phone picks up where you actually stopped.
+     */
+    private suspend fun adoptServerStateIfNewer() {
+        restoreJob?.join()
+        val s = kotlinx.coroutines.withTimeoutOrNull(20_000) { c.connect.state.first { it != null } } ?: return
+        if (c.connect.isRemote || player.playWhenReady || ext != null) return
+        if (!ResumeLogic.preferServer(restoredSavedAt ?: resume.savedAt(), s, c.connect.myDeviceId.value)) return
+        applyingRemote = true
+        try {
+            val m = s.media
+            if (m != null) {
+                val (item, _) = SpokenMedia.load(c.spokenApi, m.kind, m.id) ?: return
+                loadSpoken(item, s.positionMs / 1000.0, play = false)
+            } else {
+                val qid = s.queueId ?: return
+                val q = c.queueSync.load(qid) ?: return
+                if (q.tracks.isEmpty() || player.playWhenReady) return
+                val items = withContext(Dispatchers.IO) { q.tracks.map { resolve(MediaItems.fromTrack(it, PlaySource.LIBRARY)) } }
+                val idx = s.trackId?.let { id -> q.tracks.indexOfFirst { it.id == id }.takeIf { it >= 0 } } ?: s.index
+                player.setMediaItems(items, idx.coerceIn(0, items.size - 1), s.positionMs.coerceAtLeast(0))
+                player.shuffleModeEnabled = s.shuffle
+                player.repeatMode = repeatMode(s.repeat)
+                player.playWhenReady = false
+                c.queueSync.setCurrent(qid)
+            }
+        } finally {
+            applyingRemote = false
+        }
+        android.util.Log.i(org.nasmusic.app.diag.CrashLog.TAG, "Picked up the newer state from another device")
+    }
+
+    /** Write where playback is (small, often). The queue itself is written when it changes ([saveResumeQueue]). */
+    private fun saveResume() {
+        if (player.mediaItemCount == 0) return
+        lastResumeSaveMs = System.currentTimeMillis()
+        val p = ResumePosition(
+            index = player.currentMediaItemIndex,
+            positionMs = player.currentPosition,
+            itemId = player.currentMediaItem?.mediaId,
+            shuffle = player.shuffleModeEnabled,
+            repeat = player.repeatMode,
+            savedAt = lastResumeSaveMs,
+            queueId = c.queueSync.currentId.value,
+        )
+        resume.savePosition(p)
+    }
+
+    private val saveQueueSoon = Runnable { saveResumeQueue() }
+
+    private fun saveResumeQueue() {
+        if (restoreJob?.isActive == true) return // don't overwrite the snapshot with the empty start-up player
+        val items = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+        val sp = items.firstOrNull()?.let(SpokenMedia::item)
+        val q = if (sp != null) ResumeQueue(spoken = sp)
+        else ResumeQueue(
+            entries = items.filterNot(SpokenMedia::isSpoken).map { mi ->
+                val x = mi.mediaMetadata.extras
+                ResumeEntry(MediaItems.toTrack(mi), x?.getString(MediaItems.EXTRA_SOURCE) ?: PlaySource.LIBRARY.wire, x?.getString(MediaItems.EXTRA_MIX_ID))
+            },
+            queueId = c.queueSync.currentId.value,
+        )
+        val pos = items.takeIf { it.isNotEmpty() }?.let {
+            ResumePosition(player.currentMediaItemIndex, player.currentPosition, player.currentMediaItem?.mediaId,
+                player.shuffleModeEnabled, player.repeatMode, System.currentTimeMillis(), c.queueSync.currentId.value)
+        }
+        scope.launch(Dispatchers.IO) {
+            if (items.isEmpty()) resume.clear() else { resume.saveQueue(q); pos?.let(resume::savePosition) }
+        }
+    }
+
+    /** A Continue listening entry as player items at its saved spot (queue: track + position; spoken: position). */
+    private suspend fun resumeItem(type: String, id: String): MediaSession.MediaItemsWithStartPosition? {
+        if (type == "queue") {
+            val q = c.queueSync.load(id) ?: return null
+            if (q.tracks.isEmpty()) return null
+            val items = withContext(Dispatchers.IO) { q.tracks.map { resolve(MediaItems.fromTrack(it, PlaySource.LIBRARY)) } }
+            c.queueSync.setCurrent(id)
+            return MediaSession.MediaItemsWithStartPosition(items, q.currentIndex.coerceIn(0, items.size - 1), q.positionMs)
+        }
+        val (item, pos) = SpokenMedia.load(c.spokenApi, type, id) ?: return null
+        val posS = c.spoken.progress.pending(type, id)?.let { w -> if (w.played == true) 0.0 else w.positionS } ?: pos
+        val (idx, off) = SpokenMedia.startAt(item, posS)
+        c.queueSync.setCurrent(null)
+        return MediaSession.MediaItemsWithStartPosition(SpokenMedia.mediaItems(item, c.spoken.downloads::file), idx, off)
+    }
+
+    // ---- Podcasts / audiobooks / stations ----
+
+    private fun currentSpoken(): SpokenItem? = SpokenMedia.item(player.currentMediaItem)
+
+    /** Book-wide position of the current spoken item, in seconds. */
+    private fun spokenPositionS(item: SpokenItem): Double =
+        SpokenMedia.bookPositionS(item, SpokenMedia.part(player.currentMediaItem), player.currentPosition)
+
+    /** Save the resume point of the spoken item playing (outbox; sent now when [flush]). */
+    private fun saveSpoken(flush: Boolean) {
+        val sp = currentSpoken() ?: return
+        if (sp.live || player.playbackState == Player.STATE_IDLE) return
+        lastSpokenSaveMs = System.currentTimeMillis()
+        c.spoken.progress.position(sp.copy(speed = player.playbackParameters.speed), spokenPositionS(sp), flush)
+        if (flush) lastSpokenFlushMs = lastSpokenSaveMs
+    }
+
+    /** Speed, skip silence and audio type follow the item: spoken items have their own, music gets its own back. */
+    private fun applyItemMode() {
+        val sp = currentSpoken()
+        if (sp != null) {
+            if (!spokenMode) { musicSpeed = userSpeed(); cancelCrossfade(); cancelDj() }
+            if (spokenSpeedFor != sp.id) {
+                spokenSpeedFor = sp.id
+                player.playbackParameters = PlaybackParameters(sp.speed.coerceIn(0.25f, 4f), 1f)
+            }
+            player.skipSilenceEnabled = skipSilenceOverride[sp.id] ?: sp.skipSilence
+            if (!spokenMode) player.setAudioAttributes(audioAttributes(speech = true), true)
+            spokenMode = true
+        } else if (spokenMode) {
+            spokenMode = false
+            spokenSpeedFor = null
+            player.skipSilenceEnabled = false
+            player.playbackParameters = PlaybackParameters(musicSpeed, 1f)
+            player.setAudioAttributes(audioAttributes(speech = false), true)
+        }
+    }
+
+    private fun audioAttributes(speech: Boolean) = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA)
+        .setContentType(if (speech) C.AUDIO_CONTENT_TYPE_SPEECH else C.AUDIO_CONTENT_TYPE_MUSIC).build()
+
+    /** Load a spoken item at book-wide second [posS] (Connect playSpoken / takeover / picking up another device). */
+    private fun loadSpoken(item: SpokenItem, posS: Double, play: Boolean) {
+        val items = SpokenMedia.mediaItems(item, c.spoken.downloads::file)
+        val (idx, off) = SpokenMedia.startAt(item, posS)
+        c.queueSync.setCurrent(null)
+        player.setMediaItems(items, idx.coerceIn(0, items.size - 1), off)
+        player.prepare()
+        if (play) player.play() else player.pause()
+    }
+
+    /** Seek a spoken item by book-wide milliseconds (a remote's seek). */
+    private fun seekSpoken(item: SpokenItem, ms: Long) {
+        val (idx, off) = SpokenMedia.startAt(item, ms.coerceAtLeast(0) / 1000.0)
+        if (item.kind == "book" && idx in 0 until player.mediaItemCount) player.seekTo(idx, off) else player.seekTo(off)
+    }
+
+    /** Leaving a spoken item (or a part of a book): save where it was; played to its end = played. */
+    private fun onSpokenLeave(old: Player.PositionInfo, new: Player.PositionInfo, reason: Int) {
+        val oldItem = old.mediaItem ?: return
+        val sp = SpokenMedia.item(oldItem) ?: return
+        if (sp.live || oldItem.mediaId == new.mediaItem?.mediaId) return
+        val sameBook = SpokenMedia.item(new.mediaItem)?.let { it.kind == sp.kind && it.id == sp.id } == true
+        if (sameBook) return
+        val ended = reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
+        val pos = SpokenMedia.bookPositionS(sp, SpokenMedia.part(oldItem), old.positionMs)
+        c.spoken.progress.record(
+            org.nasmusic.app.data.api.ProgressWrite(sp.kind, sp.id, positionS = if (ended) sp.durationS ?: pos else pos,
+                durationS = sp.durationS, played = if (ended) true else null),
+            flush = true,
+        )
     }
 
     // ---- Listening: levelling, crossfade, sleep timer ----
@@ -387,8 +616,9 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
-        // Crossfade
+        // Crossfade (never for podcasts / audiobooks / stations)
         if (next == null || crossfader.active || player.mediaItemCount < 2) return
+        if (SpokenMedia.isSpoken(cur) || SpokenMedia.isSpoken(next)) return
         if (c.abRepeat.loop.value != null) return
         val settings = c.listening.settings.value
         // DJ automix: from the outgoing mix-out point (sleep timer: plain transitions only)
@@ -449,7 +679,8 @@ class PlaybackService : MediaLibraryService() {
     private inner class LibraryCallback : MediaLibrarySession.Callback {
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
             val cmds = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-                .add(SessionCommand(CMD_SLEEP, android.os.Bundle.EMPTY)).build()
+                .add(SessionCommand(CMD_SLEEP, android.os.Bundle.EMPTY))
+                .add(SessionCommand(CMD_SKIP_SILENCE, android.os.Bundle.EMPTY)).build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailableSessionCommands(cmds).build()
         }
 
@@ -461,7 +692,28 @@ class PlaybackService : MediaLibraryService() {
                 c.ui.toast(if (c.sleep.timer.value != null) "Sleep timer: 30 min" else "Sleep timer off")
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
+            if (customCommand.customAction == CMD_SKIP_SILENCE) {
+                val on = args.getBoolean(ARG_ON, false)
+                currentSpoken()?.let { skipSilenceOverride[it.id] = on }
+                player.skipSilenceEnabled = on && spokenMode
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
             return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
+        }
+
+        /**
+         * System playback resumption (a Bluetooth/headset play press or the "resume" media card after a restart,
+         * with nothing loaded): the saved queue at its track and position.
+         */
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession, controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
+            restoreJob?.join()
+            val (q, pos) = withContext(Dispatchers.IO) { resume.load() } ?: throw UnsupportedOperationException("nothing to resume")
+            val items = withContext(Dispatchers.IO) { snapshotItems(q) }
+            val at = ResumeLogic.restorePoint(items.map { it.mediaId }, pos) ?: throw UnsupportedOperationException("nothing to resume")
+            c.queueSync.setCurrent(if (q.spoken == null) q.queueId ?: pos?.queueId else null)
+            MediaSession.MediaItemsWithStartPosition(items, at.first, at.second)
         }
 
         override fun onAddMediaItems(
@@ -484,9 +736,12 @@ class PlaybackService : MediaLibraryService() {
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
             val single = mediaItems.singleOrNull()
+            // Android Auto "Continue listening": resume that queue / episode / book where it stopped.
+            single?.mediaId?.let(AutoLibrary::parseContinueId)?.let { (type, id) -> resumeItem(type, id)?.let { return@future it } }
             val query = single?.requestMetadata?.searchQuery
             val e = when {
                 single == null -> null
+                SpokenMedia.isSpoken(single) -> null
                 single.mediaId.isEmpty() && query != null -> library.voice(query)
                 else -> runCatching { library.expand(single.mediaId) }.getOrNull()
             }
@@ -592,8 +847,10 @@ class PlaybackService : MediaLibraryService() {
             maybeExtendRadio()
             if (player.isPlaying && now - lastProgressMs > 15_000) {
                 lastProgressMs = now
-                c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)
+                if (!spokenMode) c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)
             }
+            if (player.isPlaying && now - lastResumeSaveMs > 5_000) saveResume()
+            if (player.isPlaying && spokenMode && now - lastSpokenSaveMs > 5_000) saveSpoken(flush = now - lastSpokenFlushMs > 30_000)
             handler.postDelayed(this, 250)
         }
     }
@@ -681,9 +938,18 @@ class PlaybackService : MediaLibraryService() {
         ) {
             sendState()
         }
-        if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED) && !player.isPlaying) {
+        if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED) && !player.isPlaying && !spokenMode) {
             c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)
         }
+        if (events.contains(Player.EVENT_TIMELINE_CHANGED)) {
+            handler.removeCallbacks(saveQueueSoon)
+            handler.postDelayed(saveQueueSoon, 400)
+        }
+        if (events.containsAny(
+                Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED, Player.EVENT_REPEAT_MODE_CHANGED,
+                Player.EVENT_POSITION_DISCONTINUITY,
+            )
+        ) saveResume()
     }
 
     /** Home-screen widgets and the quick-settings tile follow this phone's player (Cast overlay applied). */
@@ -716,6 +982,21 @@ class PlaybackService : MediaLibraryService() {
                 volume = mixer.user,
             ),
         )
+        val sp = currentSpoken()
+        if (sp != null) {
+            val part = cast?.index ?: SpokenMedia.part(player.currentMediaItem)
+            val posMs = if (sp.live) 0L else ((sp.partStarts.getOrNull(part) ?: 0.0) * 1000).toLong() + (cast?.positionMs ?: player.currentPosition)
+            c.connect.reportState(
+                PlaybackState(
+                    queueId = null, index = 0, trackId = null, positionMs = posMs, positionAt = Instant.now().toString(),
+                    playing = cast?.isPlaying ?: player.isPlaying, volume = cast?.volume ?: mixer.user,
+                    shuffle = false, repeat = "off", speed = player.playbackParameters.speed,
+                    castTo = if (cast != null) ext?.name ?: "a Cast speaker" else null,
+                    media = org.nasmusic.app.connect.ConnectMedia(sp.kind, sp.id),
+                ),
+            )
+            return
+        }
         c.connect.reportState(
             PlaybackState(
                 queueId = c.queueSync.currentId.value,
@@ -740,7 +1021,9 @@ class PlaybackService : MediaLibraryService() {
         try {
             when (m) {
                 // While casting this phone stays the active device; the speaker plays, not the phone.
-                is ConnectMessage.Takeover -> if (ext == null) takeover(m.state)
+                // A takeover answering our own claim: we already play what the user picked (e.g. the restored queue);
+                // loading the server's older state would jump to another song or restart the list.
+                is ConnectMessage.Takeover -> if (ext == null && !ResumeLogic.ownClaim(claimedAtMs, System.currentTimeMillis(), player.isPlaying)) takeover(m.state)
                 ConnectMessage.Release -> ext?.pause() ?: player.pause()
                 is ConnectMessage.Command -> command(m.action, m.args)
                 is ConnectMessage.QueuesChanged -> {
@@ -756,8 +1039,21 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private suspend fun takeover(s: PlaybackState) {
+        val m = s.media
+        if (m != null) {
+            val cur = currentSpoken()
+            val posS = s.positionAt(System.currentTimeMillis()) / 1000.0
+            if (cur != null && cur.kind == m.kind && cur.id == m.id) seekSpoken(cur, (posS * 1000).toLong())
+            else {
+                val (item, _) = SpokenMedia.load(c.spokenApi, m.kind, m.id) ?: return
+                loadSpoken(item, posS, play = false)
+            }
+            player.playbackParameters = PlaybackParameters(s.speed.coerceIn(0.25f, 4f), 1f)
+            if (s.playing) player.play() else player.pause()
+            return
+        }
         val qid = s.queueId
-        if (qid != null && qid != c.queueSync.currentId.value) {
+        if (qid != null && (qid != c.queueSync.currentId.value || spokenMode)) {
             val q = c.queueSync.load(qid) ?: return
             setTracks(q.tracks, s.index, s.positionAt(System.currentTimeMillis()))
             c.queueSync.setCurrent(qid)
@@ -785,8 +1081,19 @@ class PlaybackService : MediaLibraryService() {
                 else -> Unit
             }
         }
+        val sp = currentSpoken()
+        if (sp != null && !sp.live) when (action) {
+            // On a podcast/book: next/prev skip forward 30 s / back 15 s; seek is book-wide.
+            "next" -> { seekSpoken(sp, (spokenPositionS(sp) * 1000).toLong() + 30_000); return }
+            "prev" -> { seekSpoken(sp, (spokenPositionS(sp) * 1000).toLong() - 15_000); return }
+            "seek" -> { long("positionMs")?.let { seekSpoken(sp, it) }; return }
+        }
         when (action) {
-            "play" -> player.play()
+            "play" -> {
+                if (sp?.live == true) player.seekToDefaultPosition() // live radio: back to "now"
+                if (player.playbackState == Player.STATE_IDLE) player.prepare()
+                player.play()
+            }
             "pause" -> player.pause()
             "next" -> player.seekToNext()
             "prev" -> player.seekToPrevious()
@@ -798,9 +1105,21 @@ class PlaybackService : MediaLibraryService() {
             "playQueue" -> {
                 val id = a["queueId"]?.jsonPrimitive?.contentOrNull ?: return
                 val q = c.queueSync.load(id) ?: return
-                setTracks(q.tracks, a["index"]?.jsonPrimitive?.intOrNull ?: q.currentIndex, 0)
+                // No index = resume where the queue was left: its saved track AND position (the server also sends
+                // positionMs). An explicit index starts that track from the top.
+                val index = a["index"]?.jsonPrimitive?.intOrNull
+                val pos = long("positionMs") ?: if (index == null) q.positionMs else 0L
+                setTracks(q.tracks, index ?: q.currentIndex, pos)
                 c.queueSync.setCurrent(id)
                 ext?.reload() ?: player.play()
+            }
+            "playSpoken" -> {
+                val kind = a["kind"]?.jsonPrimitive?.contentOrNull ?: return
+                val id = a["id"]?.jsonPrimitive?.contentOrNull ?: return
+                val (item, saved) = SpokenMedia.load(c.spokenApi, kind, id) ?: return
+                val posS = long("positionMs")?.let { it / 1000.0 } ?: saved
+                loadSpoken(item, posS, play = ext == null)
+                ext?.reload()
             }
             "playTracks" -> {
                 val ids = a["trackIds"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull }.orEmpty()
@@ -847,6 +1166,11 @@ class PlaybackService : MediaLibraryService() {
 
     /** Local file if downloaded, else the stream URL in the quality for the current network. */
     private suspend fun resolve(item: MediaItem): MediaItem {
+        if (SpokenMedia.isSpoken(item)) {
+            if (item.localConfiguration != null) return item
+            val sp = SpokenMedia.item(item) ?: return item
+            return SpokenMedia.mediaItems(sp, c.spoken.downloads::file).getOrNull(SpokenMedia.part(item)) ?: item
+        }
         val local = c.library.localPath(item.mediaId)?.let(::File)?.takeIf { it.exists() }
         val uri = local?.let(Uri::fromFile)
             ?: Uri.parse(MediaItems.streamUrl(item.mediaId, currentSpec()))
@@ -930,7 +1254,15 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
 
+    companion object {
+        /** Custom session command: skip silence on/off for the spoken item playing (`ARG_ON`). */
+        const val CMD_SKIP_SILENCE = "org.nasmusic.skip_silence"
+        const val ARG_ON = "on"
+    }
+
     override fun onTaskRemoved(rootIntent: Intent?) {
+        saveResume()
+        saveSpoken(flush = true)
         val p = session?.player
         if (p == null || !p.playWhenReady || p.mediaItemCount == 0) stopSelf()
     }
@@ -940,7 +1272,9 @@ class PlaybackService : MediaLibraryService() {
         handler.removeCallbacks(tick)
         handler.removeCallbacks(fastTick)
         crossfader.release()
-        c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)
+        if (::resume.isInitialized) { handler.removeCallbacks(saveQueueSoon); saveResume() }
+        saveSpoken(flush = true)
+        if (!spokenMode) c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)
         tracker?.release()
         org.nasmusic.app.widget.WidgetHub.publishLocal(null)
         session?.run {

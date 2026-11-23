@@ -33,6 +33,8 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -89,6 +91,8 @@ fun iconFor(type: String): ImageVector = when (type) {
     "radio" -> Icons.Default.Radio
     "mix" -> Icons.Default.AutoAwesome
     "queue" -> Icons.AutoMirrored.Filled.QueueMusic
+    "episode" -> Icons.Default.Podcasts
+    "book" -> Icons.Default.MenuBook
     "toget", "suggestion", "catalog" -> Icons.Default.ShoppingBag
     "device" -> Icons.Default.Devices
     "genre" -> Icons.Default.Sell
@@ -116,10 +120,13 @@ fun openShelfItem(c: AppContainer, ui: UiController, scope: CoroutineScope, item
         "suggestion" -> ui.go("discover")
         "catalog" -> item.catalog?.ownedId?.takeIf { item.catalog.owned }?.let { ui.go("${if (item.catalog.type == "artist") "artist" else "album"}/$it") } ?: ui.go("search")
         "device" -> c.player.transferHere()
+        // Resume where it stopped: no index = its saved track AND position.
         "queue" -> scope.launch {
             val id = item.progress?.queueId ?: item.queue?.id ?: item.id
             c.queueSync.load(id)?.let { c.player.playQueue(it) }; ui.go("now")
         }
+        "episode" -> { c.spoken.playEpisode(item.id); ui.go("now") }
+        "book" -> { c.spoken.playBook(item.id); ui.go("now") }
         "mix" -> scope.launch {
             runCatching { c.api.mix(item.id) }.onSuccess { m ->
                 c.player.play(m.tracks.map { it.track }, 0, PlaySource.MIX, m.title, m.id, m.tracks.map { it.reason })
@@ -143,7 +150,10 @@ private val PINNABLE = setOf("album", "artist", "playlist", "mix", "queue", "sma
 /** A YouTube-Music-style card: art + title + subtitle. Long-press → Pin to Home / Start radio. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ShelfCard(c: AppContainer, item: ShelfItem, width: Dp = 140.dp, siblings: List<ShelfItem> = emptyList(), onUnpin: (() -> Unit)? = null) {
+fun ShelfCard(
+    c: AppContainer, item: ShelfItem, width: Dp = 140.dp, siblings: List<ShelfItem> = emptyList(), onUnpin: (() -> Unit)? = null,
+    onDismiss: (() -> Unit)? = null,
+) {
     val ui = LocalUi.current
     val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
@@ -167,6 +177,7 @@ fun ShelfCard(c: AppContainer, item: ShelfItem, width: Dp = 140.dp, siblings: Li
                     scope.launch { ui.toast = if (runCatching { c.api.pin(NewPin(item.type, item.id)) }.isSuccess) "Pinned to Home" else "Couldn't pin" }
                 })
             }
+            if (onDismiss != null) DropdownMenuItem({ Text("Remove from Continue listening") }, { menu = false; onDismiss() })
             radioSeedFor(item)?.let { seed ->
                 DropdownMenuItem({ Text("Start radio") }, { menu = false; scope.launch { if (c.player.startRadio(seed)) ui.go("now") } })
             }
@@ -188,10 +199,15 @@ fun ShelfHeader(title: String, action: (@Composable () -> Unit)? = null) {
 }
 
 @Composable
-fun ShelfRow(c: AppContainer, items: List<ShelfItem>, cardWidth: Dp = 140.dp, onUnpin: ((ShelfItem) -> Unit)? = null) {
+fun ShelfRow(
+    c: AppContainer, items: List<ShelfItem>, cardWidth: Dp = 140.dp, onUnpin: ((ShelfItem) -> Unit)? = null,
+    onDismiss: ((ShelfItem) -> Unit)? = null,
+) {
     LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         // Index in the key: servers may repeat an item in a shelf, and duplicate keys crash LazyRow.
-        itemsIndexed(items, key = { i, it -> "$i:${it.type}:${it.id}" }) { _, it -> ShelfCard(c, it, cardWidth, items, onUnpin?.let { f -> { f(it) } }) }
+        itemsIndexed(items, key = { i, it -> "$i:${it.type}:${it.id}" }) { _, it ->
+            ShelfCard(c, it, cardWidth, items, onUnpin?.let { f -> { f(it) } }, onDismiss?.let { f -> { f(it) } })
+        }
     }
 }
 

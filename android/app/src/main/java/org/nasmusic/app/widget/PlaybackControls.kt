@@ -72,7 +72,7 @@ object PlaybackControls {
     /** Nothing loaded in the player but a remembered song: pick the last queue back up where it stopped. */
     private suspend fun resume(ctx: Context) {
         val c = ctx.container
-        val q = (c.queueSync.currentId.value ?: c.queueSync.queues.value.firstOrNull()?.id)?.let { c.queueSync.load(it) }
+        val q = (c.queueSync.currentId.value ?: c.queueSync.queues.value.maxByOrNull { it.updatedAt.orEmpty() }?.id)?.let { c.queueSync.load(it) }
         if (q == null || q.tracks.isEmpty()) { playSomethingForNow(ctx); return }
         c.queueSync.setCurrent(q.id)
         c.player.playQueue(q)

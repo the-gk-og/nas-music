@@ -12,6 +12,9 @@ export interface QueueModel {
   order?: number[] | null;
   /** v3 radio queue: endless, topped up from the server. */
   radio?: boolean;
+  /** Where the server last saw it (resume a queue that isn't this browser's own). */
+  positionMs?: number;
+  updatedAt?: string;
 }
 
 export const MAX_QUEUES = 20;

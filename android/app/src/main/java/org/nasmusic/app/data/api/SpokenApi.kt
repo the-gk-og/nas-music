@@ -211,6 +211,26 @@ data class ProgressList(val items: List<SpokenProgress> = emptyList())
 @Serializable
 data class ContinueItem(val kind: String, val episode: Episode? = null, val book: Audiobook? = null, val progress: SpokenProgress)
 
+/** POST /cast/sign-spoken (Google Cast from the phone): signed URLs for an episode, a book's parts or a station. */
+@Serializable
+data class SpokenSignBody(val kind: String, val id: String, val part: Int? = null)
+
+@Serializable
+data class SpokenSigned(
+    val url: String,
+    val artUrl: String? = null,
+    val contentType: String = "audio/mpeg",
+    val title: String = "",
+    val subtitle: String? = null,
+    val durationS: Double? = null,
+    val startS: Double? = null,
+    val part: Int? = null,
+    val live: Boolean = false,
+)
+
+@Serializable
+data class SpokenSignList(val items: List<SpokenSigned> = emptyList())
+
 @Serializable
 data class ContinueList(val items: List<ContinueItem> = emptyList())
 
@@ -243,4 +263,5 @@ interface SpokenApi {
     @GET("spoken/progress") suspend fun progress(@Query("since") since: String? = null): ProgressList
     @PUT("spoken/progress") suspend fun putProgress(@Body body: ProgressBatch): ProgressResults
     @GET("spoken/continue") suspend fun continueListening(): ContinueList
+    @POST("cast/sign-spoken") suspend fun signSpoken(@Body body: SpokenSignBody): SpokenSignList
 }

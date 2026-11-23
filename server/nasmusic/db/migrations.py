@@ -457,7 +457,7 @@ def migrate_v6_to_v7(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
 
 # ---------- v7 -> v8 (additive; other v8 features add their tables to V8_TABLES) ----------
 
-V8_TABLES = ("toget_admin",)
+V8_TABLES = ("toget_admin", "continue_dismissed")
 
 
 def migrate_v7_to_v8(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:

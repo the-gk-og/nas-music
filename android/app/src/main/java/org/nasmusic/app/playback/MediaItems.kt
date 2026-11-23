@@ -113,5 +113,6 @@ object MediaItems {
     private fun Bundle.dbl(k: String): Double? = if (containsKey(k)) getDouble(k) else null
 
     /** What the listening rules (crossfade, levelling, sleep timer) need from a queue entry. */
-    fun facts(item: MediaItem?): TrackFacts? = item?.let { TrackFacts.of(toTrack(it)) }
+    fun facts(item: MediaItem?): TrackFacts? =
+        item?.takeUnless { org.nasmusic.app.spoken.SpokenMedia.isSpoken(it) }?.let { TrackFacts.of(toTrack(it)) }
 }
