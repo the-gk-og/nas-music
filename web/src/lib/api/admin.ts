@@ -123,8 +123,34 @@ export interface Backup {
   id: string;
   createdAt: string;
   bytes: number;
-  kind?: 'manual' | 'scheduled' | string;
+  kind?: 'manual' | 'scheduled' | 'migration' | 'prune' | 'prerestore' | string;
   note?: string | null;
+}
+
+export interface OffsiteBackup {
+  name: string;
+  kind: string;
+  bytes: number;
+  createdAt: string;
+}
+
+export interface OffsiteStatus {
+  configured: boolean;
+  destination: string | null;
+  kind: 'folder' | 'rclone' | null;
+  keep: number;
+  includeConfig: boolean;
+  last: { at: string; ok: boolean; error: string | null; name: string | null } | null;
+  items: OffsiteBackup[];
+  error: string | null;
+}
+
+export interface RestoreResult {
+  restored: string;
+  source: 'local' | 'offsite';
+  schemaFrom: number;
+  schemaTo: number;
+  safetyBackup: string;
 }
 
 export interface AdminSettings {
@@ -263,6 +289,9 @@ export function adminApi(c: ApiClient) {
     createBackup: (note?: string) => c.post<Backup>('/admin/backups', { note }),
     deleteBackup: (id: string) => c.del<void>(`/admin/backups/${enc(id)}`),
     downloadBackup: (id: string) => c.downloadUrl(`/admin/backups/${enc(id)}/download`),
+    offsiteBackups: () => c.get<OffsiteStatus>('/admin/backups/offsite'),
+    copyBackupOffsite: (id: string) => c.post<{ name: string; destination: string; configCopied: boolean; pruned: number }>(`/admin/backups/${enc(id)}/offsite`, {}),
+    restoreBackup: (id: string, source: 'local' | 'offsite' = 'local') => c.post<RestoreResult>(`/admin/backups/${enc(id)}/restore`, { source }),
 
     wants: (q: WantQuery = {}) => c.get<AdminWants>('/admin/wants', { ...q }),
     checkWant: (id: string, note?: string | null) => c.put<AdminWantItem>(`/admin/wants/${enc(id)}/done`, { note: note ?? null }),

@@ -71,6 +71,15 @@ opus_cache_gb = 20                 # LRU limit for transcoded Opus files
 # podcast_itunes_search = true     # iTunes Search API for discovery (no key; only finds feed URLs)
 # radio_browser_url = "https://all.api.radio-browser.info"  # community station directory
 
+# ---- Off-site backups (deploy/docker/README.md "Backups") ----
+# The database is backed up every night at 04:15 into the data folder. Set this to also copy each nightly backup
+# (gzipped) somewhere else: a folder on ANOTHER disk or dataset mounted into the container, or an rclone remote
+# ("name:path", configured in /data/rclone.conf). Restore from Admin > Backups, or `nasmusic restore`.
+# backup_copy_to = "/backup"
+# backup_keep = 14                 # nightly copies kept there
+# backup_include_config = true     # also copy config.toml + the HTTPS certificate (default: yes for a folder,
+#                                  # no for an rclone remote, since config.toml holds tokens)
+
 # ---- Radio DJ voice (spoken intros between songs in AI radio and mixes; users switch it on in Settings) ----
 # Needs the image built with the djvoice extra (the default). The voice downloads on first use from
 # huggingface.co/rhasspy/piper-voices into <data_dir>/dj-voices (about 60 MB). Each voice has its own licence.

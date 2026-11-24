@@ -956,6 +956,18 @@ export class MockBackend {
       }
       return A.backups;
     }
+    if (path === '/admin/backups/offsite') return A.offsite;
+    if ((r = m(/^\/admin\/backups\/([^/]+)\/offsite$/)) && method === 'POST') {
+      const name = r[1] + '.db.gz';
+      A.offsite.items.unshift({ name, kind: 'manual', bytes: 16e6, createdAt: iso() });
+      A.offsite.last = { at: iso(), ok: true, error: null, name };
+      return { name, destination: A.offsite.destination, configCopied: true, pruned: 0 };
+    }
+    if ((r = m(/^\/admin\/backups\/([^/]+)\/restore$/)) && method === 'POST') {
+      const safety = { id: 'b' + Date.now(), createdAt: iso(), bytes: 49e6, kind: 'prerestore' };
+      A.backups.unshift(safety);
+      return { restored: r[1], source: body.source ?? 'local', schemaFrom: 8, schemaTo: 8, safetyBackup: safety.id };
+    }
     if ((r = m(/^\/admin\/backups\/([^/]+)$/)) && method === 'DELETE') {
       A.backups = A.backups.filter((b) => b.id !== r![1]);
       return undefined;

@@ -2919,6 +2919,54 @@ paths:
         '200':
           description: created
           content: { application/json: { schema: { $ref: '#/components/schemas/Backup' } } }
+  /admin/backups/offsite:
+    get:
+      summary: |
+        Admin only. Off-site copies (config backup_copy_to: another folder or an rclone remote). The nightly
+        `backup` job (04:15) makes a local copy and, when configured, gzips it there and keeps the newest
+        backup_keep. Listing an rclone remote can take a few seconds; a listing failure is in `error`.
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/OffsiteStatus' } } }
+  /admin/backups/{id}/offsite:
+    post:
+      summary: Admin only. Copy this local backup off-site now (and prune old off-site copies).
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: copied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  destination: { type: string }
+                  configCopied: { type: boolean }
+                  pruned: { type: integer }
+        '400': { description: no destination configured, or a pre-upgrade copy }
+        '404': { description: no such backup }
+        '502': { description: the destination could not be written }
+  /admin/backups/{id}/restore:
+    post:
+      summary: |
+        Admin only. Replace the database with this backup: a local one (id from GET /admin/backups) or, with
+        source=offsite, an off-site one (name from GET /admin/backups/offsite). The file is checked first
+        (integrity, a nas-music database, not from a newer schema); a `prerestore` safety backup of the current
+        database is taken; an older schema is migrated up. Applies at once, no restart. Devices paired after the
+        backup was made are signed out (possibly including the caller).
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { source: { type: string, enum: [local, offsite], default: local } } } } }
+      responses:
+        '200':
+          description: restored
+          content: { application/json: { schema: { $ref: '#/components/schemas/RestoreResult' } } }
+        '404': { description: no such backup }
+        '409': { description: from a newer server, or a backup/restore is running }
+        '422': { description: damaged or not a nas-music database }
+        '502': { description: the off-site copy could not be fetched }
   /admin/backups/{id}:
     get:
       deprecated: true
@@ -4326,10 +4374,43 @@ components:
       properties:
         id: { type: string, description: also the file name }
         name: { type: string }
-        kind: { type: string, enum: [manual, migration, prune] }
+        kind: { type: string, enum: [manual, scheduled, migration, prune, prerestore] }
         note: { type: [string, 'null'] }
         bytes: { type: integer }
         createdAt: { type: string, format: date-time }
+    OffsiteBackup:
+      type: object
+      properties:
+        name: { type: string, description: 'e.g. nasmusic-scheduled-20261124T041500Z.db.gz; the id for restore' }
+        kind: { type: string, enum: [manual, scheduled, prune, prerestore] }
+        bytes: { type: integer, description: compressed size }
+        createdAt: { type: string, format: date-time }
+    OffsiteStatus:
+      type: object
+      properties:
+        configured: { type: boolean, description: backup_copy_to is set in config.toml }
+        destination: { type: [string, 'null'], description: 'a folder ("/backup") or an rclone remote ("b2:bucket/path")' }
+        kind: { type: [string, 'null'], enum: [folder, rclone, null] }
+        keep: { type: integer, description: copies kept there (backup_keep) }
+        includeConfig: { type: boolean, description: config.toml + TLS certificate are mirrored into config/ there }
+        last:
+          type: [object, 'null']
+          description: outcome of the last off-site copy
+          properties:
+            at: { type: string, format: date-time }
+            ok: { type: boolean }
+            error: { type: [string, 'null'] }
+            name: { type: [string, 'null'] }
+        items: { type: array, items: { $ref: '#/components/schemas/OffsiteBackup' } }
+        error: { type: [string, 'null'], description: why the destination could not be listed }
+    RestoreResult:
+      type: object
+      properties:
+        restored: { type: string }
+        source: { type: string, enum: [local, offsite] }
+        schemaFrom: { type: integer }
+        schemaTo: { type: integer }
+        safetyBackup: { type: string, description: local backup of the database as it was; restoring it undoes this }
     NowPlayingRow:
       type: object
       properties:
