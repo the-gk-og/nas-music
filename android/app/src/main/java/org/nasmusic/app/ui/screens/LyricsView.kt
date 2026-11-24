@@ -155,7 +155,7 @@ private fun SyncedLyrics(lyrics: Lyrics, positionMs: Long, onSeek: (Long) -> Uni
             )
             val words = line.words
             Text(
-                if (instrumental) "♪"
+                if (instrumental) androidx.compose.ui.text.AnnotatedString("♪")
                 else if (active && !words.isNullOrEmpty()) karaoke(words, LyricsTimeline.currentWordIndex(words, positionMs), colors.primary, colors.onSurface.copy(alpha = 0.5f))
                 else androidx.compose.ui.text.AnnotatedString(line.text),
                 style = if (active) MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
