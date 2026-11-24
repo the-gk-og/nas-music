@@ -120,6 +120,10 @@ class Config:
     podcastindex_api_secret: str | None = None
     podcast_itunes_search: bool = True          # iTunes Search API for podcast discovery (no key)
     radio_browser_url: str = "https://all.api.radio-browser.info"
+    # ---- off-site backups (nasmusic/app/backups.py, deploy/docker/README.md "Backups") ----
+    backup_copy_to: str | None = None           # a folder on another disk/dataset ("/backup") or rclone "remote:path"
+    backup_keep: int = 14                       # nightly copies kept there
+    backup_include_config: bool | None = None   # also copy config.toml + TLS cert; default: folder yes, rclone no
     # ---- radio DJ voice (nasmusic/djvoice): spoken intros between songs in AI radio and mixes ----
     dj_voice_enabled: bool = True               # users still switch it on themselves (setting dj.voice)
     dj_voice: str = "en_GB-cori-medium"         # a Piper voice name (rhasspy/piper-voices), downloaded on first use
@@ -214,7 +218,7 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
     for key in ("tunnel_url", "cf_access_client_id", "cf_access_client_secret", "admin_password_hash",
                 "lastfm_api_key", "lastfm_api_secret", "acoustid_api_key", "lan_public_url", "cast_media_url",
                 "homeassistant_url", "homeassistant_token", "snapcast_host", "podcastindex_api_key",
-                "podcastindex_api_secret"):
+                "podcastindex_api_secret", "backup_copy_to"):
         if vals.get(key) == "":
             vals[key] = None
     if vals.get("tunnel_url"):
@@ -230,4 +234,18 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
         raise ConfigError("upload_max_file_mb must be positive and upload_quota_gb not negative")
     if cfg.podcast_keep_last < 0 or cfg.podcast_storage_gb < 0 or cfg.podcast_poll_minutes < 5:
         raise ConfigError("podcast_keep_last/podcast_storage_gb must be >= 0 and podcast_poll_minutes >= 5")
+    if cfg.backup_keep < 1:
+        raise ConfigError("backup_keep must be at least 1")
+    if cfg.backup_copy_to is not None:
+        dest = str(cfg.backup_copy_to).strip()
+        if dest.startswith("~") or (not dest.startswith("/") and ":" not in dest):
+            raise ConfigError('backup_copy_to must be an absolute folder ("/backup") or an rclone remote ("name:path")')
+        if dest.startswith("/"):
+            d = Path(os.path.abspath(dest))
+            lib = Path(os.path.abspath(cfg.library_root))
+            if d == lib or lib in d.parents:
+                raise ConfigError("backup_copy_to must not be inside library_root (the library is read-only)")
+            if d == Path(os.path.abspath(cfg.data_dir)) or Path(os.path.abspath(cfg.data_dir)) in d.parents:
+                raise ConfigError("backup_copy_to must be on another disk or dataset, not inside data_dir")
+        cfg.backup_copy_to = dest
     return cfg

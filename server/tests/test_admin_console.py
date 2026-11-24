@@ -19,7 +19,8 @@ ENDPOINTS = [("get", "/status"), ("get", "/jobs"), ("post", "/jobs/scan/run"), (
              ("get", "/library/failed"), ("post", "/library/failed/retry"), ("post", "/library/failed/x/retry"),
              ("get", "/health"), ("get", "/health/missing"), ("post", "/health/missing/fix"), ("get", "/server"),
              ("delete", "/opus-cache"), ("get", "/logs"), ("get", "/logs/stream"), ("get", "/backups"),
-             ("post", "/backups"), ("get", "/backups/x/download"), ("get", "/now-playing"), ("get", "/settings"),
+             ("post", "/backups"), ("get", "/backups/x/download"), ("get", "/backups/offsite"),
+             ("post", "/backups/x/offsite"), ("post", "/backups/x/restore"), ("get", "/now-playing"), ("get", "/settings"),
              ("put", "/settings"), ("get", "/reports"), ("get", "/reports/x"), ("patch", "/reports/x"),
              ("get", "/users/x/devices"), ("get", "/users/x/detail")]
 
@@ -63,7 +64,8 @@ def test_status_shape(client, app):
     assert all(d["usedBytes"] <= d["totalBytes"] for d in s["disks"])
     assert s["library"]["tracks"] == 5 and s["library"]["missing"] == 0 and s["library"]["lastScan"]["ok"]
     a = s["analysis"]
-    assert (a["done"], a["total"], a["failed"]) == (0, 5, 0) and "etaS" in a and "modelVersion" in a
+    # The scan chains an analysis run in a background thread, so some tracks may already be done here.
+    assert a["total"] == 5 and 0 <= a["done"] + a["failed"] <= 5 and "etaS" in a and "modelVersion" in a
     scan = {j["name"]: j for j in s["jobs"]}["scan"]
     assert scan["state"] == "idle" and scan["ok"] is True and scan["finishedAt"] and "nextRunAt" in scan
     assert s["lyrics"]["lrclibEnabled"] is True
@@ -98,7 +100,7 @@ def test_run_job_conflict_and_history(client, app, conn):
 
 def test_backup_job(client, app):
     rec = app.state.ctx.jobs.run("backup")
-    assert rec["ok"] and rec["result"]["kind"] == "manual"
+    assert rec["ok"] and rec["result"]["kind"] == "scheduled"
     assert any(b["id"] == rec["result"]["name"] for b in client.get(f"{ADMIN}/backups").json())
 
 
@@ -137,6 +139,7 @@ def test_analysis_eta(client, conn):
 
 def test_health_checks_list(client, conn, cfg, app, base_flac):
     make_flac(base_flac, cfg.library_root / "Dupes" / "a.flac", title="Song 1", artist="Artist One", album="Other")
+    app.state.ctx.jobs.chain = False  # no background analysis after the scan (it would race the unanalysed count)
     app.state.ctx.jobs.run("scan")
     checks = {c["id"]: c for c in client.get(f"{ADMIN}/health").json()}
     assert list(checks) == ["missing", "duplicates", "missing_tags", "missing_art", "unanalysed", "orphan_cache",

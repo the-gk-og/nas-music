@@ -149,7 +149,8 @@ The nas-music server log has one line per voice command (`voice <user> (<token n
 
 or with Home Assistant's intent instead of text: `{"intent": "NasPlay", "slots": {"query": "pop radio"}}`
 (intents: NasPlay, NasPause, NasResume, NasNext, NasPrevious, NasVolume, NasVolumeUp, NasVolumeDown,
-NasNowPlaying, and HA's HassMediaPause/Unpause/Next/Previous, HassSetVolume). Answer:
+NasNowPlaying, NasAddToPlaylist with slot `playlist` (adds the playing song, "add this to Gym"), and HA's
+HassMediaPause/Unpause/Next/Previous, HassSetVolume). Answer:
 
 ```json
 {"ok": true, "intent": "play", "speech": "Playing Pop radio on Elijah bedroom display.",

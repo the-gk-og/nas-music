@@ -132,6 +132,8 @@ dependencies {
     // Home-screen widgets (Jetpack Glance, Apache-2.0).
     implementation(libs.glance.appwidget)
     implementation(libs.glance.material3)
+    // Offline speech-to-text for voice commands (Vosk, Apache-2.0; pulls JNA as an aar). No Google code.
+    implementation(libs.vosk.android)
 
     // Google Cast SDK: `full` flavour ONLY. Never add Google Play Services to `implementation`.
     "fullImplementation"(libs.play.services.cast.framework)

@@ -16,6 +16,8 @@ from nasmusic.config import Config
 DOCKER_WEB = Path("/opt/nasmusic/web")
 REPO_WEB = Path(__file__).resolve().parents[3] / "web" / "dist"
 RESERVED = ("api/", "admin", "favicon.ico")
+# Installable web app (PWA): the manifest needs its own type; Python doesn't know the extension everywhere.
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 
 def web_root(cfg: Config) -> Path | None:

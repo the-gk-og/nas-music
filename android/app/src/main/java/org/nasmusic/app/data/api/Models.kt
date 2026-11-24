@@ -148,6 +148,30 @@ data class VoiceDevice(
 @Serializable
 data class VoiceDevices(val devices: List<VoiceDevice> = emptyList())
 
+/** 0.9.1: the app's mic button (POST /me/voice/command); speech is recognised on the phone. */
+@Serializable
+data class AppVoiceCommand(val text: String, val trackId: String? = null, val dryRun: Boolean? = null)
+
+@Serializable
+data class VoiceRef(val id: String, val name: String)
+
+@Serializable
+data class VoiceItem(val kind: String, val id: String? = null, val title: String)
+
+@Serializable
+data class VoiceResult(
+    val ok: Boolean,
+    val intent: String,
+    val speech: String,
+    val device: VoiceRef? = null,
+    val item: VoiceItem? = null,
+    val queueId: String? = null,
+    /** The app does it itself: play [queueId], or pause / resume / next / previous / volume on its own player. */
+    val local: Boolean = false,
+    val volume: Float? = null,
+    val volumeStep: Float? = null,
+)
+
 @Serializable
 data class VoiceDevicePrefs(val id: String? = null, val aliases: List<String>? = null, val isDefault: Boolean? = null)
 

@@ -329,3 +329,72 @@ def test_v6_to_v7(tmp_path):
     assert not migrations.migrate_v6_to_v7(conn, db.schema_sql())
     db.init(conn)
     assert len(list(tmp_path.glob("*-backup-*"))) == 1
+
+
+# ---------- the app's own mic button (POST /me/voice/command) + add to playlist ----------
+
+
+@pytest.mark.parametrize("text, query", [
+    ("add this to Gym", "gym"), ("Add this song to my gym playlist", "gym"),
+    ("save this to the playlist called road trip", "road trip"), ("put this on my Chill playlist", "chill"),
+    ("add to gym", "gym"), ("please add this one to Workout", "workout"),
+])
+def test_parse_add_to_playlist(text, query):
+    it = parse(text)
+    assert (it.name, it.query) == ("add_to_playlist", query)
+    assert from_slots("NasAddToPlaylist", {"playlist": "Gym"}).query == "gym"
+
+
+def test_app_voice_plays_here_and_controls_locally(client, conn):
+    ids = track_ids(conn)
+    client.post(f"{API}/playlists", json={"name": "Pop", "trackIds": [ids["Song 2"], ids["Opening"]]})
+    # Device tokens only: a voice token is not accepted here.
+    r = client.post(f"{API}/me/voice/command", json={"text": "play my pop playlist"}).json()
+    assert r["ok"] and r["local"] is True and r["device"]["id"] == client.device_id, r
+    assert r["speech"] == "Playing your playlist Pop."
+    q = client.get(f"{API}/queues/{r['queueId']}").json()
+    assert [t["id"] for t in q["tracks"]] == [ids["Song 2"], ids["Opening"]]
+    # Transport and volume with no room named: the app does it on its own player.
+    assert client.post(f"{API}/me/voice/command", json={"text": "skip"}).json() == {
+        "ok": True, "intent": "next", "speech": "Skipping.", "local": True,
+        "device": {"id": client.device_id, "name": "alice's android"}}
+    r = client.post(f"{API}/me/voice/command", json={"text": "turn it up"}).json()
+    assert r["local"] and r["volumeStep"] == 0.1
+    r = client.post(f"{API}/me/voice/command", json={"text": "volume 40 percent"}).json()
+    assert r["local"] and r["volume"] == 0.4 and r["speech"] == "Volume 40 percent."
+    assert client.post(f"{API}/me/voice/command", json={"text": "what's playing"}).json()["local"] is True
+    r = client.post(f"{API}/me/voice/command", json={"text": "pause in the garage"}).json()
+    assert r["ok"] is False and r["speech"] == "I couldn't find a speaker called garage."
+    assert client.post(f"{API}/me/voice/command", json={}).status_code == 400
+
+
+def test_app_voice_plays_on_a_named_speaker(client, conn, speakers):
+    bedroom, _ = speakers
+    ids = track_ids(conn)
+    client.post(f"{API}/playlists", json={"name": "Pop", "trackIds": [ids["Song 2"], ids["Opening"]]})
+    r = client.post(f"{API}/me/voice/command", json={"text": "play the Pop playlist in the bedroom"}).json()
+    assert r["ok"] and "local" not in r and r["device"]["id"] == "spk:fake:bed", r
+    wait_for(lambda: bedroom.calls and bedroom.calls[0][:2] == ("load", ids["Song 2"]))
+
+
+def test_add_to_playlist(client, voice, conn, bob):
+    ids = track_ids(conn)
+    gym = client.post(f"{API}/playlists", json={"name": "Gym", "trackIds": [ids["Opening"]]}).json()
+    r = client.post(f"{API}/me/voice/command", json={"text": "add this to gym", "trackId": ids["Song 2"]}).json()
+    assert r == {"ok": True, "intent": "add_to_playlist", "speech": "Added Song 2 to Gym.",
+                 "item": {"kind": "playlist", "id": gym["id"], "title": "Gym"}}
+    tracks = client.get(f"{API}/playlists/{gym['id']}").json()["tracks"]
+    assert [t["id"] for t in tracks] == [ids["Opening"], ids["Song 2"]]
+    r = client.post(f"{API}/me/voice/command", json={"text": "add this to my gym playlist", "trackId": ids["Song 2"]})
+    assert r.json()["speech"] == "Song 2 is already in Gym."
+    r = client.post(f"{API}/me/voice/command", json={"text": "add this to gym"}).json()
+    assert r["ok"] is False and r["speech"] == "Nothing is playing to add."
+    r = client.post(f"{API}/me/voice/command", json={"text": "add this to zumba", "trackId": ids["Song 2"]}).json()
+    assert r["ok"] is False and r["speech"] == "I couldn't find a playlist called zumba."
+    # Home Assistant can do it too (for the song that's playing; nothing is, here).
+    r = voice.post(f"{API}/voice/command", json={"intent": "NasAddToPlaylist", "slots": {"playlist": "Gym"}}).json()
+    assert r["ok"] is False and r["speech"] == "Nothing is playing to add."
+    # A playlist shared view-only can't be added to.
+    client.post(f"{API}/playlists/{gym['id']}/members", json={"userId": bob.user_id, "role": "viewer"})
+    r = bob.post(f"{API}/me/voice/command", json={"text": "add this to gym", "trackId": ids["Closing"]}).json()
+    assert r["ok"] is False and r["speech"] == "You can only listen to Gym, not add to it."

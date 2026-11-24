@@ -49,18 +49,29 @@ class VoiceCommand(BaseModel):
     area: str | None = Field(default=None, max_length=100)
     areaDevices: list[Short] | None = Field(default=None, max_length=30)
     language: str | None = Field(default=None, max_length=20)
+    trackId: str | None = Field(default=None, max_length=100)
     dryRun: bool = False
 
 
-@public.post("/voice/command")
-async def voice_command(body: VoiceCommand, request: Request, caller: store.VoiceCaller = Depends(voice_caller)):
-    c: AppContext = request.app.state.ctx
+def _notify_playlist(c: AppContext, conn: sqlite3.Connection, p: service.Plan, dry: bool) -> None:
+    """A voice "add this to Gym" changed a playlist: tell everyone who can see it (as the playlists API does)."""
+    if p.intent != "add_to_playlist" or not p.ok or dry or not p.item or not c.hub:
+        return
+    from nasmusic.app import playlists as pl
+
+    pid = p.item["id"]
+    row = conn.execute("SELECT rev FROM playlists WHERE id = ?", (pid,)).fetchone()
+    if row:
+        c.hub.notify_playlist(pl.audience(conn, pid), pid, row[0])
+
+
+async def _command(c: AppContext, uid: str, body: VoiceCommand, requester: RemoteConn,
+                   caller: dict | None = None) -> service.Plan:
     if not (body.text or body.intent):
         raise HTTPException(400, "text or intent required")
     if body.slots and len(body.slots) > 20:
         raise HTTPException(400, "too many slots")
     hub = c.hub
-    uid = caller.user_id
     await hub.ensure_speakers()
     live = await hub.devices_now(uid)
     state = await hub.state_now(uid)
@@ -72,15 +83,36 @@ async def voice_command(body: VoiceCommand, request: Request, caller: store.Voic
     def work():
         conn = open_db(c.cfg)
         try:
-            return service.plan(conn, c.cfg, uid, payload, live, state)
+            p = service.plan(conn, c.cfg, uid, payload, live, state, caller)
+            _notify_playlist(c, conn, p, body.dryRun)
+            return p
         finally:
             conn.close()
 
     p = await asyncio.to_thread(work)
     if not body.dryRun:
-        p = await service.run(hub, p, uid, RemoteConn(f"voice:{caller.token_id}", caller.token_name))
+        p = await service.run(hub, p, uid, requester)
+    return p
+
+
+@public.post("/voice/command")
+async def voice_command(body: VoiceCommand, request: Request, caller: store.VoiceCaller = Depends(voice_caller)):
+    c: AppContext = request.app.state.ctx
+    p = await _command(c, caller.user_id, body, RemoteConn(f"voice:{caller.token_id}", caller.token_name))
     log.info("voice %s (%s): %r -> %s ok=%s", caller.username, caller.token_name, body.text or body.intent, p.intent,
              p.ok)
+    return p.response()
+
+
+@router.post("/me/voice/command")
+async def app_voice_command(body: VoiceCommand, request: Request, me: Device = Depends(device)):
+    """The app's own mic button (speech recognised on the phone): the same commands, with this device as
+    "here". Answers `local` when the app should do it itself (play the returned queue, pause, skip...)."""
+    c: AppContext = request.app.state.ctx
+    caller = {"id": me.id, "name": me.name, "kind": me.kind}
+    p = await _command(c, me.user_id, body, RemoteConn(f"voice-app:{me.id}", f"{me.name} (voice)"), caller)
+    log.info("app voice %s (%s): %r -> %s ok=%s local=%s", me.username, me.name, body.text or body.intent, p.intent,
+             p.ok, p.local)
     return p.response()
 
 

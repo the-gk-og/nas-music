@@ -108,6 +108,9 @@ info:
     are visible only to the uploader (hidden from everyone else everywhere, /stream 404). Job `upload_scan`.
     Schema v8: admin want-list view (/admin/wants*): every user's To get items with the admin's check-off
     ("added", optional note) and "found in the library" suggestions; ToGetItem.adminAdded shows the user that mark.
+    0.9.1: the app's own mic button. POST /me/voice/command (device token) takes the same commands as
+    /voice/command, recognised on the phone, with the calling device as "here"; `local` answers mean the app
+    does it itself. New intent add_to_playlist ("add this to Gym") on both, for the playing (or `trackId`) song.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
     Times are ISO-8601 UTC strings. IDs are opaque strings.
 servers:
@@ -904,6 +907,7 @@ paths:
                   items: { type: string, maxLength: 200 }
                   description: media_player entity ids (or names) in that area
                 language: { type: string, maxLength: 20 }
+                trackId: { type: string, maxLength: 100, description: '0.9.1. add_to_playlist: the song to add (default: what is playing)' }
                 dryRun: { type: boolean, default: false, description: resolve only; play nothing }
       responses:
         '200':
@@ -911,6 +915,35 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/VoiceResult' } } }
         '400': { description: neither text nor intent }
         '401': { description: missing, invalid or revoked voice token }
+  /me/voice/command:
+    post:
+      tags: [voice]
+      summary: |
+        0.9.1. The app's mic button: a voice command recognised on the phone (offline speech-to-text), run as the
+        caller with the calling device as "here". Same sentences as /voice/command, plus "add this to {playlist}".
+        Play goes to the named room, else the device this app is controlling (the Connect active device), else
+        this device. Answers `local: true` when the app should do it itself: play `queueId` (already created and
+        filled), pause / resume / next / previous / volume (`volume` absolute or `volumeStep` relative) on its own
+        player (which routes to whatever it controls), or answer now_playing from what it shows. Anything aimed at
+        another named room runs through Connect as for Home Assistant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, maxLength: 500, description: 'e.g. "play something chill", "add this to Gym"' }
+                intent: { type: string, maxLength: 60 }
+                slots: { type: object, additionalProperties: true }
+                language: { type: string, maxLength: 20 }
+                trackId: { type: string, maxLength: 100, description: the song the app is playing (for add_to_playlist) }
+                dryRun: { type: boolean, default: false }
+      responses:
+        '200':
+          description: result
+          content: { application/json: { schema: { $ref: '#/components/schemas/VoiceResult' } } }
+        '400': { description: neither text nor intent }
   /me/voice/tokens:
     get:
       tags: [voice]
@@ -3174,6 +3207,54 @@ paths:
         '200':
           description: created
           content: { application/json: { schema: { $ref: '#/components/schemas/Backup' } } }
+  /admin/backups/offsite:
+    get:
+      summary: |
+        Admin only. Off-site copies (config backup_copy_to: another folder or an rclone remote). The nightly
+        `backup` job (04:15) makes a local copy and, when configured, gzips it there and keeps the newest
+        backup_keep. Listing an rclone remote can take a few seconds; a listing failure is in `error`.
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/OffsiteStatus' } } }
+  /admin/backups/{id}/offsite:
+    post:
+      summary: Admin only. Copy this local backup off-site now (and prune old off-site copies).
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: copied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  destination: { type: string }
+                  configCopied: { type: boolean }
+                  pruned: { type: integer }
+        '400': { description: no destination configured, or a pre-upgrade copy }
+        '404': { description: no such backup }
+        '502': { description: the destination could not be written }
+  /admin/backups/{id}/restore:
+    post:
+      summary: |
+        Admin only. Replace the database with this backup: a local one (id from GET /admin/backups) or, with
+        source=offsite, an off-site one (name from GET /admin/backups/offsite). The file is checked first
+        (integrity, a nas-music database, not from a newer schema); a `prerestore` safety backup of the current
+        database is taken; an older schema is migrated up. Applies at once, no restart. Devices paired after the
+        backup was made are signed out (possibly including the caller).
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { source: { type: string, enum: [local, offsite], default: local } } } } }
+      responses:
+        '200':
+          description: restored
+          content: { application/json: { schema: { $ref: '#/components/schemas/RestoreResult' } } }
+        '404': { description: no such backup }
+        '409': { description: from a newer server, or a backup/restore is running }
+        '422': { description: damaged or not a nas-music database }
+        '502': { description: the off-site copy could not be fetched }
   /admin/backups/{id}:
     get:
       deprecated: true
@@ -4223,7 +4304,7 @@ components:
       required: [ok, intent, speech]
       properties:
         ok: { type: boolean }
-        intent: { type: string, enum: [play, pause, resume, next, previous, volume, now_playing, unknown] }
+        intent: { type: string, enum: [play, pause, resume, next, previous, volume, now_playing, add_to_playlist, unknown] }
         speech: { type: string, description: 'what to say back, e.g. "Playing Pop radio on Elijah bedroom display."' }
         device:
           type: object
@@ -4238,6 +4319,9 @@ components:
             id: { type: [string, 'null'] }
             title: { type: string }
         queueId: { type: string }
+        local: { type: boolean, description: '0.9.1, /me/voice/command only: the app does it itself (see there)' }
+        volume: { type: number, minimum: 0, maximum: 1, description: 'local volume: set this level' }
+        volumeStep: { type: number, description: 'local volume: change by this much (+0.1 / -0.1)' }
     VoiceToken:
       type: object
       required: [id, name, createdAt, lastUsed]
@@ -4581,10 +4665,43 @@ components:
       properties:
         id: { type: string, description: also the file name }
         name: { type: string }
-        kind: { type: string, enum: [manual, migration, prune] }
+        kind: { type: string, enum: [manual, scheduled, migration, prune, prerestore] }
         note: { type: [string, 'null'] }
         bytes: { type: integer }
         createdAt: { type: string, format: date-time }
+    OffsiteBackup:
+      type: object
+      properties:
+        name: { type: string, description: 'e.g. nasmusic-scheduled-20261124T041500Z.db.gz; the id for restore' }
+        kind: { type: string, enum: [manual, scheduled, prune, prerestore] }
+        bytes: { type: integer, description: compressed size }
+        createdAt: { type: string, format: date-time }
+    OffsiteStatus:
+      type: object
+      properties:
+        configured: { type: boolean, description: backup_copy_to is set in config.toml }
+        destination: { type: [string, 'null'], description: 'a folder ("/backup") or an rclone remote ("b2:bucket/path")' }
+        kind: { type: [string, 'null'], enum: [folder, rclone, null] }
+        keep: { type: integer, description: copies kept there (backup_keep) }
+        includeConfig: { type: boolean, description: config.toml + TLS certificate are mirrored into config/ there }
+        last:
+          type: [object, 'null']
+          description: outcome of the last off-site copy
+          properties:
+            at: { type: string, format: date-time }
+            ok: { type: boolean }
+            error: { type: [string, 'null'] }
+            name: { type: [string, 'null'] }
+        items: { type: array, items: { $ref: '#/components/schemas/OffsiteBackup' } }
+        error: { type: [string, 'null'], description: why the destination could not be listed }
+    RestoreResult:
+      type: object
+      properties:
+        restored: { type: string }
+        source: { type: string, enum: [local, offsite] }
+        schemaFrom: { type: integer }
+        schemaTo: { type: integer }
+        safetyBackup: { type: string, description: local backup of the database as it was; restoring it undoes this }
     NowPlayingRow:
       type: object
       properties:
