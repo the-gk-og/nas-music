@@ -187,3 +187,25 @@ def test_transcode_keeps_replaygain_tags(tmp_path, base_flac):
     probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream_tags:format_tags", "-of", "json",
                             str(out)], capture_output=True, text=True, check=True)
     assert "-6.50 dB" in probe.stdout
+
+
+def _mean_volume_db(path) -> float:
+    out = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
+                         capture_output=True, text=True, check=True).stderr
+    return float(out.split("mean_volume:")[1].split("dB")[0])
+
+
+def test_karaoke_turns_down_the_centre(client, conn, app, cfg, tmp_path):
+    """The test tone is identical in both channels (dead centre, like a lead vocal): karaoke drops it ~20 dB."""
+    tid = track_ids(conn)["Song 1"]
+    normal = client.get(f"/api/v1/stream/{tid}?format=opus&bitrate=128")
+    kara = client.get(f"/api/v1/stream/{tid}?format=flac&bitrate=128&karaoke=true")
+    assert kara.status_code == 200 and kara.headers["content-type"] == "audio/ogg"
+    assert kara.headers["x-stream-format"] == "Opus 128 karaoke"
+    (tmp_path / "n.opus").write_bytes(normal.content)
+    (tmp_path / "k.opus").write_bytes(kara.content)
+    drop = _mean_volume_db(tmp_path / "n.opus") - _mean_volume_db(tmp_path / "k.opus")
+    assert 15 < drop < 30
+    # cached apart from the normal Opus file
+    assert list((cfg.data_dir / "karaoke").glob(f"{tid}_128_*.opus"))
+    assert client.get(f"/api/v1/stream/{tid}?karaoke=true&bitrate=128").content == kara.content

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, Pencil, Timer, Type, X } from '@lucide/svelte';
+  import { ChevronDown, MicVocal, Pencil, Timer, Type, X } from '@lucide/svelte';
   import { ApiError } from '../lib/api/client';
   import {
     currentLineIndex,
@@ -136,6 +136,20 @@
     </div>
     {#if lyrics?.synced}
       <button class="icon-btn" class:on={timingOpen || offset !== 0} aria-label="Lyrics timing" aria-expanded={timingOpen} onclick={() => (timingOpen = !timingOpen)}><Timer size={20} /></button>
+    {/if}
+    {#if !player.isRemote}
+      <button
+        class="icon-btn"
+        class:on={player.karaoke}
+        aria-label="Karaoke: turn the vocals down"
+        aria-pressed={player.karaoke}
+        title={player.karaoke ? 'Karaoke on: vocals turned down' : 'Karaoke: turn the vocals down'}
+        onclick={() => {
+          player.setKaraoke(!player.karaoke);
+          if (player.karaoke) ui.toast('Karaoke on: vocals turned down');
+          else if (!player.karaokeAvailable) ui.toast("Karaoke isn't available in this browser");
+        }}><MicVocal size={20} /></button
+      >
     {/if}
     <button class="icon-btn" aria-label="Edit lyrics" onclick={edit}><Pencil size={20} /></button>
     <button class="icon-btn" aria-label="Text size" onclick={() => (ui.lyricsSize = ui.lyricsSize >= 1.5 ? 0.8 : +(ui.lyricsSize + 0.175).toFixed(3))}><Type size={20} /></button>

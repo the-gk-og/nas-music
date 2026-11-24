@@ -85,6 +85,9 @@ class OpusCache:
                 pass
         return True
 
+    def _filter_args(self) -> list[str]:
+        return ["-map", "0:a:0", "-ac", "2"]
+
     def _codec_args(self, kbps: int) -> list[str]:
         return ["-c:a", "libopus", "-b:a", f"{kbps}k", "-vbr", "on", "-application", "audio",
                 "-map_metadata", "0", "-f", "opus"]
@@ -94,7 +97,7 @@ class OpusCache:
         tmp = out.with_name(f".{out.name}.{threading.get_ident()}.tmp")
         cmd = [
             self.ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
-            "-i", str(src), "-map", "0:a:0", "-vn", "-ac", "2",
+            "-i", str(src), *self._filter_args(), "-vn",
             *self._codec_args(kbps), str(tmp),
         ]
         t0 = time.monotonic()
@@ -159,3 +162,31 @@ class Mp3Cache(OpusCache):
     def _codec_args(self, kbps: int) -> list[str]:
         return ["-c:a", "libmp3lame", "-b:a", f"{kbps}k", "-map_metadata", "0", "-id3v2_version", "3",
                 "-f", "mp3"]
+
+
+# Karaoke: classic centre-channel cancellation (no AI). Lead vocals are usually mixed dead centre, so
+# L' = S + k*M + (1-k)*LP(M) with M = (L+R)/2, S = (L-R)/2: the centre drops to `KARAOKE_KEEP` (-20 dB) above
+# ~150 Hz, while the bass and kick (also centred) are kept by the 4th-order low-pass. Stereo-panned instruments
+# and reverb stay. The web and Android players do the same maths locally (web/src/lib/karaoke.ts,
+# android .../eq/KaraokeProcessor.kt), so the switch is instant there; this is for clients that can't.
+KARAOKE_KEEP = 0.1
+KARAOKE_BASS_HZ = 150
+
+
+def karaoke_filter(keep: float = KARAOKE_KEEP, bass_hz: int = KARAOKE_BASS_HZ) -> str:
+    lo = (1 - keep) / 2
+    same, cross = 0.5 + keep / 2, -0.5 + keep / 2
+    return (
+        "[0:a:0]aformat=sample_fmts=fltp:channel_layouts=stereo,asplit=2[k_a][k_b];"
+        f"[k_a]pan=stereo|c0={lo:g}*c0+{lo:g}*c1|c1={lo:g}*c0+{lo:g}*c1,"
+        f"lowpass=f={bass_hz},lowpass=f={bass_hz}[k_bass];"
+        f"[k_b]pan=stereo|c0={same:g}*c0{cross:+g}*c1|c1={same:g}*c1{cross:+g}*c0[k_side];"
+        "[k_bass][k_side]amerge=inputs=2,pan=stereo|c0=c0+c2|c1=c1+c3[k_out]"
+    )
+
+
+class KaraokeOpusCache(OpusCache):
+    """Opus with the vocals turned down, in its own directory (and size budget) beside the normal cache."""
+
+    def _filter_args(self) -> list[str]:
+        return ["-filter_complex", karaoke_filter(), "-map", "[k_out]"]

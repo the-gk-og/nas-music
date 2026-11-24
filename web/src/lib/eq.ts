@@ -165,8 +165,9 @@ export interface EqGraph {
   /** AutoEq filters currently in the chain (rebuilt when the profile changes). */
   headphone: AudioNode[];
   apply(s: EqSettings): void;
-  /** Insert an extra node (e.g. the pitch shifter) between the bass shelf and the stereo matrix. */
-  insert(node: AudioNode): void;
+  /** Insert an extra node (e.g. the pitch shifter) between the bass shelf and the stereo matrix. Later inserts go
+   * after earlier ones; `output` defaults to `node` (pass it for a sub-graph with separate ends). */
+  insert(node: AudioNode, output?: AudioNode): void;
 }
 
 function setParam(p: AudioParam, v: number, t: number) {
@@ -216,6 +217,7 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
   panner.connect(volume);
   volume.connect(ctx.destination);
 
+  let tail: AudioNode = bass; // last node before the stereo matrix (see insert)
   let headphoneKey = '';
   const setHeadphone = (s: EqSettings) => {
     const prof = s.enabled ? s.headphone : null;
@@ -261,10 +263,11 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
       setParam(panner.pan, Math.max(-1, Math.min(1, s.balance)), t);
       setParam(volume.gain, Math.max(0, Math.min(1, s.volume)), t);
     },
-    insert(node: AudioNode) {
-      bass.disconnect();
-      bass.connect(node);
-      node.connect(splitter);
+    insert(node: AudioNode, output: AudioNode = node) {
+      tail.disconnect();
+      tail.connect(node);
+      output.connect(splitter);
+      tail = output;
     },
   };
   return graph;

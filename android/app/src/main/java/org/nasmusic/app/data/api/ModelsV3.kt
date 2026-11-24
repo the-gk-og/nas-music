@@ -279,3 +279,34 @@ data class AutomixOrderRequest(val trackIds: List<String>, val keepFirst: Boolea
 
 @Serializable
 data class AutomixOrderResponse(val trackIds: List<String>)
+
+// ---------- album completeness ("9 of 12", GET /library/albums/{id}/completeness) ----------
+
+@Serializable
+data class ToGetMark(val id: String, val status: String)
+
+@Serializable
+data class MissingTrack(
+    val disc: Int = 1,
+    val position: Int,
+    val title: String,
+    val durationS: Int? = null,
+    val recordingMbid: String? = null,
+    /** this user's To-get item for the song, if any (status want | got | dismissed) */
+    val toget: ToGetMark? = null,
+)
+
+@Serializable
+data class AlbumCompleteness(
+    val albumId: String,
+    /** complete | incomplete | unknown */
+    val status: String = "unknown",
+    val have: Int = 0,
+    val total: Int? = null,
+    val releaseTitle: String? = null,
+    val discCount: Int? = null,
+    val missing: List<MissingTrack> = emptyList(),
+)
+
+@Serializable
+data class MissingToGetBody(val recordingMbids: List<String>? = null)
