@@ -269,6 +269,7 @@ private fun NavGraphBuilder.routes(c: AppContainer, motion: MotionLevel) {
     composable("blend/{id}") { e -> BlendScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("settings") { SettingsScreen(c) }
     composable("equalizer") { EqualizerScreen(c) }
+    composable(org.nasmusic.app.alarm.AlarmScheduler.ROUTE) { org.nasmusic.app.ui.screens.AlarmScreen(c) }
     composable("mixes") { TodayScreen(c) }
     composable("discover") { DiscoverScreen(c) }
     composable("account") { AccountScreen(c) }
