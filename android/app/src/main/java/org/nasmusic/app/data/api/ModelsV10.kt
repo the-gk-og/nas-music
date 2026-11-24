@@ -5,7 +5,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 
-// ---------- api 0.9 (schema v9): song credits ----------
+// ---------- api 0.10 (schema v10): song credits ----------
 
 /** One credited person on a track (GET /library/tracks/{id}/credits). */
 @Serializable

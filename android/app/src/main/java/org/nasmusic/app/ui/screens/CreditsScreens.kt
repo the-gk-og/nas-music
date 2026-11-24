@@ -53,7 +53,7 @@ import org.nasmusic.app.ui.Loading
 import org.nasmusic.app.ui.Message
 import org.nasmusic.app.ui.SongRow
 
-// ---------- api 0.9: song credits ----------
+// ---------- api 0.10: song credits ----------
 
 @Composable
 private fun CreditsBackBar(title: String) {
@@ -87,7 +87,7 @@ fun CreditsScreen(c: AppContainer, trackId: String) {
         CreditsBackBar("Credits")
         val cr = credits
         when {
-            failed && cr == null -> Message("Song credits need a server with api 0.9 or newer.")
+            failed && cr == null -> Message("Song credits need a server with api 0.10 or newer.")
             cr == null -> Loading()
             else -> LazyColumn(Modifier.fillMaxSize()) {
                 track?.let { t ->

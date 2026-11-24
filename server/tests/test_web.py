@@ -116,6 +116,7 @@ def test_settings_and_jobs(web, conn):
     r = web.get("/admin/settings")
     assert r.status_code == 200 and "csecret" not in r.text and "Europe/London" in r.text
     jobs: Jobs = web.app.state.ctx.jobs
+    jobs.chain = False  # no background analysis after the scan: nightly must see nothing analysed
     rec = jobs.run("scan")
     assert rec["ok"] and rec["result"]["unchanged"] == 5
     assert get_setting(conn, "job.scan")["ok"] is True

@@ -39,13 +39,14 @@ export function motionMs(m: Motion, kind: 'fade' | 'cover' = 'fade'): number {
 
 // ---- Home shelves (§3.1): user order + hidden, empty ones hide ----
 /** Home shelf ids (= kinds) as stored in settings `home.shelves` / `home.hidden`. */
-export const HOME_SHELVES = ['start_radio', 'devices', 'recently_played', 'continue_listening', 'pinned'] as const;
+export const HOME_SHELVES = ['start_radio', 'devices', 'recently_played', 'continue_listening', 'pinned', 'on_this_day'] as const;
 export const HOME_SHELF_TITLES: Record<string, string> = {
   start_radio: 'Start radio',
   devices: 'Your devices',
   recently_played: 'Recently played',
   continue_listening: 'Continue listening',
   pinned: 'Pinned',
+  on_this_day: 'On this day',
 };
 
 export interface ShelfPrefs {

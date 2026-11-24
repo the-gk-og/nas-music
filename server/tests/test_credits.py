@@ -1,4 +1,4 @@
-"""Song credits (v9): MusicBrainz recording / work / release relationships (mocked HTTP), the cache, tag credits,
+"""Song credits (v10): MusicBrainz recording / work / release relationships (mocked HTTP), the cache, tag credits,
 the credits and person endpoints, and family mode."""
 from datetime import UTC, datetime, timedelta
 

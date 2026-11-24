@@ -1,5 +1,5 @@
 <script lang="ts">
-  // v9 song credits: producers, songwriters, musicians and engineers of one song (MusicBrainz + the file's
+  // v10 song credits: producers, songwriters, musicians and engineers of one song (MusicBrainz + the file's
   // composer/lyricist tags). Tapping a person opens everything else in the library they worked on.
   import { ArrowLeft, ChevronRight, ExternalLink, User } from '@lucide/svelte';
   import Cover from '../components/Cover.svelte';

@@ -18,6 +18,8 @@ object LenientJson {
     val SHELF_KINDS = setOf(
         "start_radio", "devices", "recently_played", "continue_listening", "pinned", "mixes", "radio",
         "because_you_played", "release_radar", "suggestions", "to_get", "blends", "wrapped",
+        // api 0.9
+        "on_this_day",
     )
     val ITEM_TYPES = setOf(
         "track", "album", "artist", "playlist", "mix", "radio", "queue", "device", "catalog", "suggestion",
@@ -75,6 +77,7 @@ object LenientJson {
             queues = list(o["queues"], Queue.serializer(), json),
             catalog = list(o["catalog"], CatalogItem.serializer(), json),
             catalogError = o.str("catalogError"),
+            lyrics = list(o["lyrics"], LyricsMatch.serializer(), json),
         )
     }
 }

@@ -206,6 +206,11 @@ fun SettingsScreen(c: AppContainer) {
         Section("Playback")
         PlaybackSettings(c)
 
+        DjVoiceSettings(c) {
+            HorizontalDivider()
+            Section("Radio DJ")
+        }
+
         HorizontalDivider()
         Section("Wake-up alarm")
         val wake by c.alarm.alarm.collectAsStateWithLifecycle()
@@ -294,7 +299,7 @@ private fun AppearanceSettings(c: AppContainer, settings: org.nasmusic.app.data.
         }
     }
     Text("Home shelves")
-    val names = mapOf("start_radio" to "Start radio", "devices" to "Your devices", "recently_played" to "Recently played", "continue_listening" to "Continue listening", "pinned" to "Pinned")
+    val names = mapOf("start_radio" to "Start radio", "devices" to "Your devices", "recently_played" to "Recently played", "continue_listening" to "Continue listening", "pinned" to "Pinned", "on_this_day" to "On this day")
     val order = settings.homeShelves
     order.forEachIndexed { i, entry ->
         val id = entry.removePrefix("-")

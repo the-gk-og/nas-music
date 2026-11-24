@@ -111,7 +111,7 @@ def test_v7_to_v8(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == db.SCHEMA_VERSION >= 8
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     assert {"toget_id", "note", "done_by", "done_at", "auto"} <= migrations._columns(conn, "toget_admin")
     assert len(list(tmp_path.glob("x.db.v7-backup-*"))) == 1
     assert not migrations.migrate_v7_to_v8(conn, db.schema_sql())

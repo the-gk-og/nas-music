@@ -1,4 +1,4 @@
-package org.nasmusic.app.v9
+package org.nasmusic.app.v10
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -8,7 +8,7 @@ import org.nasmusic.app.data.api.ApiFactory
 import org.nasmusic.app.data.api.CreditPerson
 import org.nasmusic.app.data.api.TrackCredits
 
-/** api 0.9 song credits: the models against JSON shaped like api/openapi.yaml (TrackCredits, CreditPerson). */
+/** api 0.10 song credits: the models against JSON shaped like api/openapi.yaml (TrackCredits, CreditPerson). */
 class CreditsTest {
     private val json = ApiFactory.json
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // v9: one credited person (producer, songwriter, musician, ...) and every song in the library they are
+  // v10: one credited person (producer, songwriter, musician, ...) and every song in the library they are
   // credited on, with their role on each. Play all / shuffle; link to their artist page when they have one.
   import { ArrowLeft, ExternalLink, Play, Shuffle, User } from '@lucide/svelte';
   import TrackList from '../components/TrackList.svelte';
