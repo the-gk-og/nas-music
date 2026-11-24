@@ -7,7 +7,8 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 
 /**
- * ExoPlayer's volume = user volume × levelling × crossfade fade-in × sleep fade × DJ-voice duck. ExoPlayer can only
+ * ExoPlayer's volume = user volume × levelling × crossfade fade-in × sleep fade × wake-up alarm fade-in ×
+ * DJ-voice duck. ExoPlayer can only
  * attenuate, so a levelling gain above 0 dB is applied as 0 dB (tracks louder than the reference are
  * the common case; quiet tracks simply aren't raised on the phone).
  */
@@ -20,11 +21,13 @@ class VolumeMixer(private val apply: (Float) -> Unit) {
         set(v) { field = v.coerceIn(0f, 1f); push() }
     var sleep = 1f
         set(v) { field = v.coerceIn(0f, 1f); push() }
+    var alarm = 1f
+        set(v) { field = v.coerceIn(0f, 1f); push() }
     /** Lowered while the radio DJ talks (DjVoice). */
     var duck = 1f
         set(v) { field = v.coerceIn(0f, 1f); push() }
 
-    val total: Float get() = (user * levelling * fade * sleep * duck).coerceIn(0f, 1f)
+    val total: Float get() = (user * levelling * fade * sleep * alarm * duck).coerceIn(0f, 1f)
 
     fun push() = apply(total)
 }
