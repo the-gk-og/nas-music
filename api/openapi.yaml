@@ -18,6 +18,9 @@ info:
     upsampled; duplicate copies gain `losslessVerdict`/`losslessNote`, /admin/duplicates/resolve takes
     `remove: true` to trash the other copies, and /admin/preview/{trackId} streams any copy (hidden or removed
     too) so an admin can compare them by ear. Removed songs drop out of every listing, like missing files.
+    0.8.2 (no schema change): radio DJ voice. GET /dj/status, POST /dj/intro and /stream/dj/{clipId}: optional
+    spoken intros (Piper TTS on the server) before songs in AI radio and mixes; user settings `dj.voice`
+    (bool, default false) and `dj.every` (1-10, default 3).
     0.8.1 (no schema change): synced lyric lines may carry `words` (word-by-word timings from enhanced LRC)
     for karaoke-style highlighting. Optional and additive; clients that ignore it keep line-level sync.
     0.8.0 (schema v8): resume and Continue listening. (1) Podcast episodes, audiobooks and internet radio play
@@ -768,6 +771,8 @@ paths:
         `appearance.accent` green|blue|purple|pink|orange|red|teal or "#rrggbb", `home.shelves` / `foryou.shelves`
         (array of shelf ids, display order), `home.hidden` / `foryou.hidden` (array of shelf ids),
         `library.view.<chip>` grid|list (usually per device: `device.<id>.library.view.albums`).
+        0.8.2 radio DJ voice (validated on PUT): `dj.voice` (bool, default false), `dj.every` (integer 1-10,
+        default 3: the DJ talks before the first song and then every N songs).
       responses:
         '200':
           description: settings
@@ -3947,6 +3952,79 @@ paths:
                         tempoMultiplier: { type: [number, 'null'], enum: [1, 2, 0.5, null], description: '2 = toId runs at half the tempo (its beats are every other beat)' }
                         keyDistance: { type: [integer, 'null'], description: 'Camelot steps: 0 same key, 1 adjacent/relative, 2 energy boost, ...' }
                         beatmatch: { type: boolean, description: 'both grids stable and |tempoRatio-1| <= 0.08' }
+  /dj/status:
+    get:
+      summary: |
+        0.8.2 Radio DJ voice: whether the server can speak intros, and the caller's DJ settings. `state`: ready |
+        downloading (the voice is being fetched on first use; asking starts it) | unavailable (built without
+        Piper, or no voice model) | disabled (off in config.toml) | error (`detail` says why). Clients show the
+        "Radio DJ" switch when state is not unavailable/disabled.
+      responses:
+        '200':
+          description: status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [state, voice, enabled, every]
+                properties:
+                  state: { type: string, enum: [ready, downloading, unavailable, disabled, error] }
+                  voice: { type: string, description: 'Piper voice name, e.g. en_GB-cori-medium' }
+                  detail: { type: [string, 'null'] }
+                  enabled: { type: boolean, description: "user setting `dj.voice` (default false)" }
+                  every: { type: integer, minimum: 1, maximum: 10, description: "user setting `dj.every` (default 3)" }
+  /dj/intro:
+    post:
+      summary: |
+        0.8.2 Radio DJ voice: the spoken intro before a song in AI radio or a mix (Piper TTS on the server; facts
+        from the song's tags and the artist-page cache). Clients ask for the upcoming song while the one before
+        it plays, then play the clip over the song's opening with the music ducked (about 30 %), and only on
+        automatic moves to the next song (not after a manual skip), never while casting or on a remote. The
+        server decides whether the DJ talks here: only when the user's `dj.voice` is true, before the first
+        song (position 0, with the station's name when `queueId` is a radio or mix queue) and then every
+        `dj.every` songs; otherwise 204. `force` skips that check (a "say something" button). The same
+        (queue, position, songs) on the same day gives the same words and clip.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackId, position]
+              properties:
+                trackId: { type: string, description: the song about to play }
+                previousTrackId: { type: [string, 'null'], description: the song that just played (back-announced) }
+                queueId: { type: [string, 'null'] }
+                position: { type: integer, minimum: 0, description: "trackId's position in the queue" }
+                force: { type: boolean, default: false }
+      responses:
+        '200':
+          description: the intro
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [clipId, text, url, durationMs, voice]
+                properties:
+                  clipId: { type: string }
+                  text: { type: string, description: what is said (for captions / accessibility) }
+                  url: { type: string, description: 'relative to the API base: stream/dj/{clipId}' }
+                  durationMs: { type: integer }
+                  voice: { type: string }
+        '204': { description: the DJ stays quiet before this song }
+        '404': { description: unknown track }
+        '503': { description: "the voice isn't ready (see GET /dj/status); play the song without an intro" }
+  /stream/dj/{clipId}:
+    get:
+      summary: |
+        0.8.2 A spoken DJ clip (Ogg Opus, mono). Like other /stream paths it also accepts `?token=` for
+        <audio> elements in cross-origin clients. Clips are cached on the server and may be pruned after a while.
+      parameters: [ { name: clipId, in: path, required: true, schema: { type: string, pattern: '^[0-9a-f]{32}$' } } ]
+      responses:
+        '200':
+          description: the clip
+          content: { audio/ogg: { schema: { type: string, format: binary } } }
+        '404': { description: 'no such clip (expired, so ask /dj/intro again)' }
 components:
   securitySchemes:
     device: { type: http, scheme: bearer }

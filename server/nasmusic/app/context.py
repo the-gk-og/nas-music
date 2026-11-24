@@ -36,6 +36,7 @@ class AppContext:
     started_at: float = 0.0                # time.time() at start (uptime)
     artist_fetcher: object | None = None   # nasmusic.library.artistinfo.Fetcher (created on first use)
     scrobbler: object | None = None        # nasmusic.app.scrobble.Scrobbler (v7)
+    dj_voice: object | None = None         # nasmusic.djvoice.tts.Engine (created on first use, see app.djvoice_api)
     jam_hub: object | None = None          # nasmusic.jam.hub.JamHub (created on first use, see app.jam_api)
     login_limiter: users.RateLimiter = field(default_factory=lambda: users.RateLimiter(5, 60.0))
     # Family-mode unlock PINs can be 4 digits: 5 tries per 15 minutes makes guessing one take weeks, not a day.

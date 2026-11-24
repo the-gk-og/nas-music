@@ -52,6 +52,7 @@ def test_user_devices_detail_and_revoke(client, bob, conn):
 
 
 def test_status_shape(client, app):
+    app.state.ctx.jobs.chain = False  # no background analysis after the scan (it would race analysis.done)
     app.state.ctx.jobs.run("scan")
     s = client.get(f"{ADMIN}/status").json()
     for k in ("version", "uptimeS", "cpuPct", "load", "memUsedBytes", "memTotalBytes", "disks", "dataBytes",

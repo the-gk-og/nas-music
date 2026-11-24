@@ -258,3 +258,22 @@ port 8090 must be reachable from the Chromecast.
 "Play my Pop radio in the bedroom", "skip", "what's playing?" from Home Assistant voice satellites or the HA
 app: create a voice token in nas-music's Settings → Voice control and follow
 [`homeassistant/README.md`](homeassistant/README.md) (one YAML package, no add-ons).
+
+## Radio DJ voice
+
+In AI radio and mixes, a voice can introduce some songs ("That was Hyperballad by Björk. Radiohead got together
+in Abingdon back in 1985. Here's Karma Police.") over the song's opening while the music dips. It is off until
+each user switches it on (Settings → Radio DJ, synced to all their devices; "every song / every 3rd / every 5th").
+
+- Speech is made on the NAS with [Piper](https://github.com/OHF-Voice/piper1-gpl) (GPL-3.0, CPU only). A
+  two-sentence intro should take a second or two on the i5-3470, and players ask for it ~25 s ahead. The image
+  includes it by default (`--build-arg WITH_DJVOICE=0` leaves it out). Nothing goes to an online speech service.
+- The voice itself (about 60 MB) downloads into `/data/dj-voices` from huggingface.co/rhasspy/piper-voices the first
+  time someone uses the DJ. To fetch it up front: `docker exec nasmusic nasmusic dj-voice download`; to hear it:
+  `docker exec nasmusic nasmusic dj-voice say "Hello from the NAS"` (prints the .ogg it wrote).
+- Pick another voice with `dj_voice = "en_GB-alan-medium"` (any Piper voice name), or point `dj_voice_model` at a
+  local `.onnx` (with its `.onnx.json`) and set `dj_voice_download = false`. Each voice has its own licence (see its
+  MODEL_CARD); the default `en_GB-cori-medium` was trained on a public-domain LibriVox reading.
+- What it says comes from the song's tags and the artist pages cache (Wikipedia/MusicBrainz, `artist_info_enabled`).
+  Clips are cached in `/data/dj/clips` (pruned at 300 MB).
+- `dj_voice_enabled = false` turns it off for everyone.

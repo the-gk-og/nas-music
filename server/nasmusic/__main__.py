@@ -231,6 +231,30 @@ def cmd_hash_password(args) -> None:
     print(f'admin_password_hash = "{h}"' if sys.stdout.isatty() else h)
 
 
+def cmd_dj_voice(args) -> None:
+    from nasmusic.djvoice import tts
+
+    cfg = _load(args)
+    eng = tts.Engine(cfg)
+    if args.action == "download":
+        if cfg.dj_voice_model:
+            sys.exit(f"dj_voice_model is set ({cfg.dj_voice_model}); nothing to download.")
+        eng.download()
+        print(f"Downloaded {cfg.dj_voice} to {eng.model_path()}")
+    elif args.action == "say":
+        if not args.text:
+            sys.exit("Give the text to say.")
+        if eng.status()["state"] != "ready" and not cfg.dj_voice_model:
+            eng.download()
+        res = eng.speak(args.text)
+        if res is None:
+            sys.exit(f"The DJ voice isn't ready: {eng.status()['detail']}")
+        print(eng.clips_dir / f"{res[0]}.ogg")
+    else:
+        st = eng.status()
+        print(f"{st['state']}: {st['voice']}" + (f" ({st['detail']})" if st["detail"] else ""))
+
+
 def main(argv: list[str] | None = None) -> None:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--config", "-c", default=argparse.SUPPRESS,
@@ -257,6 +281,10 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("name", nargs="?")
     s.add_argument("--admin", action="store_true", help="with add: make the user an admin")
     s.set_defaults(fn=cmd_user)
+    s = sub.add_parser("dj-voice", parents=[common], help="radio DJ voice: status | download | say TEXT")
+    s.add_argument("action", choices=["status", "download", "say"])
+    s.add_argument("text", nargs="?")
+    s.set_defaults(fn=cmd_dj_voice)
     s = sub.add_parser("init-config", parents=[common],
                        help="create config.toml from NASMUSIC_* environment variables (first install)")
     s.set_defaults(fn=cmd_init_config)

@@ -77,3 +77,11 @@ opus_cache_gb = 20                 # LRU limit for transcoded Opus files
 # podcastindex_api_secret = ""     #   https://api.podcastindex.org/signup (keep them out of git)
 # podcast_itunes_search = true     # iTunes Search API for discovery (no key; only finds feed URLs)
 # radio_browser_url = "https://all.api.radio-browser.info"  # community station directory
+
+# ---- Radio DJ voice (spoken intros between songs in AI radio and mixes; users switch it on in Settings) ----
+# Needs the image built with the djvoice extra (the default). The voice downloads on first use from
+# huggingface.co/rhasspy/piper-voices into <data_dir>/dj-voices (about 60 MB). Each voice has its own licence.
+# dj_voice_enabled = true
+# dj_voice = "en_GB-cori-medium"   # any Piper voice name, e.g. en_GB-alan-medium, en_US-ljspeech-high
+# dj_voice_model = "/data/my-voice.onnx"  # or a local voice (.onnx + .onnx.json); nothing is downloaded
+# dj_voice_download = true
