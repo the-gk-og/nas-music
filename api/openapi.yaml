@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.9.0
+  version: 0.10.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,7 +10,7 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
-    0.9.0 (schema v9): admin library cleanup (/admin/cleanup/*). Pruning reports (never played, unplayed
+    0.10.0 (schema v10): admin library cleanup (/admin/cleanup/*). Pruning reports (never played, unplayed
     albums, disliked/skipped, low bitrate, fake lossless, very short), search, and removal of songs, albums or
     artists into a trash (`trash_days`, default 30) with restore. Purging deletes uploaded files, and library
     files only when the server's `library_delete_files` is on; otherwise songs stay hidden and are listed in a
@@ -18,6 +18,13 @@ info:
     upsampled; duplicate copies gain `losslessVerdict`/`losslessNote`, /admin/duplicates/resolve takes
     `remove: true` to trash the other copies, and /admin/preview/{trackId} streams any copy (hidden or removed
     too) so an admin can compare them by ear. Removed songs drop out of every listing, like missing files.
+    0.9.0 (schema v9): (1) search by lyrics. The server keeps a full-text index of the lyrics everyone sees by
+    default (admin edit, else the file's own, else cached LRCLIB; per-user edits are private and not indexed),
+    filled by the scan job. GET /search gains `scope=lyrics` (only lyric matches, in `lyrics`) and every library
+    search returns up to 5 lyric matches in the new optional `lyrics` group: [{track, line}], `line` being the
+    lyric line that matched. (2) Home gains the `on_this_day` shelf: track items the user played within 3 days
+    of today's date in earlier years (most recent year first; imported history counts), subtitle like
+    "Artist · 2 years ago, played 5 times". It can be hidden or reordered like any Home shelf.
     0.8.2 (no schema change): radio DJ voice. GET /dj/status, POST /dj/intro and /stream/dj/{clipId}: optional
     spoken intros (Piper TTS on the server) before songs in AI radio and mixes; user settings `dj.voice`
     (bool, default false) and `dj.every` (1-10, default 3).
@@ -1253,6 +1260,24 @@ paths:
         '200':
           description: activity
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PlaylistActivity' } } } }
+  /playlists/{playlistId}/m3u:
+    get:
+      summary: |
+        Export the playlist as UTF-8 M3U (#EXTM3U, #PLAYLIST, #EXTINF "Artist - Title"), as an attachment
+        named after the playlist. Any user who can view the playlist.
+      parameters:
+        - { name: playlistId, in: path, required: true, schema: { type: string } }
+        - name: paths
+          in: query
+          schema: { type: string, enum: [library, absolute, url], default: library }
+          description: |
+            library = paths relative to the library root (save the file there for other players); absolute =
+            the server's own file paths; url = this server's /stream URLs (they need the app's sign-in)
+      responses:
+        '200':
+          description: the playlist
+          content: { audio/x-mpegurl: { schema: { type: string } } }
+        '404': { description: no such playlist (or no access) }
   /users:
     get:
       summary: v5. Other enabled users on this server (id + username), to share a playlist with.
@@ -1909,7 +1934,8 @@ paths:
       summary: |
         Home (docs/v3-ux.md §3.1): typed shelves in the user's order (settings `home.shelves`, hidden ones in
         `home.hidden`). Empty shelves are omitted, except `start_radio`, which always has its buttons (v6: smart shuffle first, then random radio).
-        Shelf kinds here: start_radio, devices, recently_played, continue_listening, pinned.
+        Shelf kinds here: start_radio, devices, recently_played, continue_listening, pinned, on_this_day (0.9.0:
+        track items played around today's date in earlier years; see info.description).
       responses:
         '200':
           description: shelves
@@ -1966,9 +1992,12 @@ paths:
         all|catalog — an online catalogue (Deezer public search + MusicBrainz) for "Not in your library".
         Catalogue results are cached server-side and rate-limited; if the catalogue is unreachable the library
         results still come back and `catalogError` says why.
+        0.9.0: lyrics. scope all|library also returns up to 5 songs whose lyrics contain every word of `q`
+        (`lyrics`); scope=lyrics returns only those, up to `limit`, best first (the other groups are empty).
+        Words match case- and accent-insensitively; the last word also matches as a prefix (3+ letters).
       parameters:
         - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } }
-        - { name: scope, in: query, schema: { type: string, enum: [all, library, catalog], default: all } }
+        - { name: scope, in: query, schema: { type: string, enum: [all, library, catalog, lyrics], default: all } }
         - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 }, description: per group }
       responses:
         '200':
@@ -2660,7 +2689,7 @@ paths:
               properties:
                 keepTrackId: { type: string }
                 hideTrackIds: { type: array, items: { type: string }, minItems: 1, maxItems: 100 }
-                remove: { type: boolean, default: false, description: 'v9: also move the other copies to the trash (see /admin/cleanup/remove)' }
+                remove: { type: boolean, default: false, description: 'v10: also move the other copies to the trash (see /admin/cleanup/remove)' }
       responses:
         '200':
           description: done
@@ -2689,7 +2718,7 @@ paths:
   /admin/cleanup/summary:
     get:
       summary: |
-        Admin only (v9). Every pruning report's count and size, how many songs are in the trash and on the
+        Admin only (v10). Every pruning report's count and size, how many songs are in the trash and on the
         delete list, fake-lossless progress, and the server's trash settings.
       responses:
         '200':
@@ -2713,7 +2742,7 @@ paths:
                   deleteFiles: { type: boolean, description: 'config library_delete_files: purging deletes library files' }
   /admin/cleanup/reports/{reportId}:
     get:
-      summary: Admin only (v9). The items of one pruning report (present tracks only).
+      summary: Admin only (v10). The items of one pruning report (present tracks only).
       parameters:
         - { name: reportId, in: path, required: true, schema: { type: string, enum: [never_played, unplayed_albums, disliked, low_quality, fake_lossless, short] } }
         - { name: threshold, in: query, schema: { type: integer, minimum: 0 }, description: 'days / skips / kbps / seconds (see CleanupReport.unit); default per report' }
@@ -2733,7 +2762,7 @@ paths:
         '404': { description: unknown report }
   /admin/cleanup/search:
     get:
-      summary: Admin only (v9). Find artists, albums and songs to remove.
+      summary: Admin only (v10). Find artists, albums and songs to remove.
       parameters: [ { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } } ]
       responses:
         '200':
@@ -2753,7 +2782,7 @@ paths:
   /admin/cleanup/remove:
     post:
       summary: |
-        Admin only (v9). Move songs, whole albums or artists (their albums too) to the trash. They vanish from
+        Admin only (v10). Move songs, whole albums or artists (their albums too) to the trash. They vanish from
         every listing at once (tracks.missing = 3); playlists, favourites and history stay until the trash is
         purged, so a restore puts everything back.
       requestBody:
@@ -2782,7 +2811,7 @@ paths:
         '404': { description: nothing to remove (unknown ids, or already removed) }
   /admin/cleanup/trash:
     get:
-      summary: Admin only (v9). Removal batches, newest first (purged ones whose file was kept included).
+      summary: Admin only (v10). Removal batches, newest first (purged ones whose file was kept included).
       responses:
         '200':
           description: trash
@@ -2812,7 +2841,7 @@ paths:
                           items: { type: object, properties: { id: { type: string }, title: { type: string }, artist: { type: string }, album: { type: string }, path: { type: string } } }
   /admin/cleanup/trash/{batchId}:
     get:
-      summary: Admin only (v9). Every song of one removal batch.
+      summary: Admin only (v10). Every song of one removal batch.
       parameters: [ { name: batchId, in: path, required: true, schema: { type: string } } ]
       responses:
         '200':
@@ -2835,7 +2864,7 @@ paths:
         '404': { description: no such batch }
   /admin/cleanup/trash/restore:
     post:
-      summary: Admin only (v9). Take batches or songs out of the trash (a hidden duplicate goes back to hidden).
+      summary: Admin only (v10). Take batches or songs out of the trash (a hidden duplicate goes back to hidden).
       requestBody:
         required: true
         content:
@@ -2852,7 +2881,7 @@ paths:
   /admin/cleanup/trash/purge:
     post:
       summary: |
-        Admin only (v9). Empty these batches now instead of waiting `trashDays` (the nightly cleanup job purges
+        Admin only (v10). Empty these batches now instead of waiting `trashDays` (the nightly cleanup job purges
         expired ones). Uploaded files are deleted; library files only when `deleteFiles` is on, otherwise (or if
         deleting fails, e.g. a read-only mount) the songs stay hidden and join the delete list. Not undoable for
         deleted files.
@@ -2881,7 +2910,7 @@ paths:
   /admin/cleanup/delete-list:
     get:
       summary: |
-        Admin only (v9). Purged songs whose file is still on disk. `format=sh` returns a POSIX shell script
+        Admin only (v10). Purged songs whose file is still on disk. `format=sh` returns a POSIX shell script
         (`sh delete-list.sh /path/to/music`); once the files are gone the server forgets the songs.
       parameters: [ { name: format, in: query, schema: { type: string, enum: [json, sh], default: json } } ]
       responses:
@@ -2895,7 +2924,7 @@ paths:
             text/x-shellscript: { schema: { type: string } }
   /admin/cleanup/lossless/dismiss:
     post:
-      summary: 'Admin only (v9). Mark fake-lossless verdicts as fine (dismissed = false flags them again).'
+      summary: 'Admin only (v10). Mark fake-lossless verdicts as fine (dismissed = false flags them again).'
       requestBody:
         required: true
         content:
@@ -2913,7 +2942,7 @@ paths:
   /admin/preview/{trackId}:
     get:
       summary: |
-        Admin only (v9). Stream any track, including hidden duplicates and removed songs, to compare copies by
+        Admin only (v10). Stream any track, including hidden duplicates and removed songs, to compare copies by
         ear. `original` (default) is the file as stored; `opus` transcodes at `bitrate`. Accepts `?token=` like
         /stream. `X-Stream-Format` describes what was sent.
       parameters:
@@ -3483,6 +3512,119 @@ paths:
               schema:
                 allOf:
                   - $ref: '#/components/schemas/ScrobbleStatus'
+                  - type: object
+                    required: [removed]
+                    properties:
+                      removed: { type: integer }
+  /me/import:
+    get:
+      summary: |
+        Listens imported from other services (counts per source), the last Last.fm import job, and whether the
+        server can import from Last.fm by user name (it has a Last.fm API key).
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ImportStatus' } } }
+  /me/import/spotify:
+    post:
+      summary: |
+        Import from a Spotify account data export, one file per request (body = the file's bytes, up to
+        512 MiB): my_spotify_data.zip (or any zip of the export), a streaming-history JSON
+        (Streaming_History_Audio_*.json / endsong_*.json extended history, or the 30-day StreamingHistory*.json),
+        a Playlist*.json, or an Exportify playlist CSV (playlist name = file name). History rows played for at
+        least 30 s and half the song (or 4 minutes) that match a library track become imported play events
+        (source spotify; idempotent; plays already known from a client or another import are skipped).
+        Each playlist becomes a new playlist of the matched tracks; songs not in the library go to To get
+        unless addMissing=false. Re-sending a file is harmless (an identical playlist is not created twice).
+        422 when the file is none of these.
+      parameters:
+        - { name: name, in: query, schema: { type: string, maxLength: 300 }, description: "the file name (names CSV playlists)" }
+        - { name: addMissing, in: query, schema: { type: boolean, default: true }, description: add songs not in the library to To get }
+        - name: missingMinPlays
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: history only; also add to To get songs played at least this often that aren't in the library (0 = none)
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: { schema: { type: string, format: binary } }
+      responses:
+        '200':
+          description: what was imported
+          content: { application/json: { schema: { $ref: '#/components/schemas/SpotifyImportResult' } } }
+        '413': { description: file too large }
+        '422': { description: not a Spotify export file }
+  /me/import/lastfm:
+    post:
+      summary: |
+        Import Last.fm scrobbles by user name (default: the connected Last.fm account) through
+        user.getRecentTracks, newest first; matches become imported play events (source lastfm). Needs the
+        server's Last.fm API key (503 otherwise: use /me/import/lastfm/csv) and a profile that doesn't hide its
+        listening. Runs in the background (202); progress in ImportStatus.lastfm. 409 while one is running.
+      parameters:
+        - { name: wait, in: query, schema: { type: boolean, default: false }, description: run inline }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: { type: string, maxLength: 64 }
+                maxScrobbles: { type: integer, minimum: 1, maximum: 200000, default: 200000 }
+      responses:
+        '202':
+          description: started; status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ImportStatus' } } }
+        '409': { description: already running }
+        '422': { description: no user name }
+        '503': { description: no Last.fm API key on this server }
+  /me/import/lastfm/csv:
+    post:
+      summary: |
+        Import a CSV of Last.fm scrobbles (body = the file, up to 20 MiB): artist, album, title, date with no
+        header (lastfm-to-csv), or a header naming artist / title (or track) / date (or uts, timestamp).
+      parameters:
+        - { name: missingMinPlays, in: query, schema: { type: integer, minimum: 0, default: 0 }, description: "also add to To get songs scrobbled at least this often that aren't in the library (0 = none)" }
+      requestBody:
+        required: true
+        content:
+          text/csv: { schema: { type: string } }
+      responses:
+        '200':
+          description: what was imported
+          content: { application/json: { schema: { $ref: '#/components/schemas/ImportHistoryResult' } } }
+        '422': { description: not a scrobbles CSV }
+  /me/import/m3u:
+    post:
+      summary: |
+        Import an .m3u / .m3u8 playlist (body = the file, up to 20 MiB) as a new playlist. Entries match by this
+        server's stream URL, file path (relative to the library root, or any trailing part of an absolute
+        path), then #EXTINF "Artist - Title". Missing songs with an #EXTINF go to To get unless addMissing=false.
+      parameters:
+        - { name: name, in: query, schema: { type: string, maxLength: 300 }, description: "file name, used when the file has no #PLAYLIST line" }
+        - { name: addMissing, in: query, schema: { type: boolean, default: true } }
+      requestBody:
+        required: true
+        content:
+          audio/x-mpegurl: { schema: { type: string } }
+      responses:
+        '200':
+          description: the playlist
+          content: { application/json: { schema: { $ref: '#/components/schemas/ImportedPlaylist' } } }
+        '422': { description: empty playlist file }
+  /me/import/history/{source}:
+    delete:
+      summary: Remove every listen imported from one source (and the play counts it added).
+      parameters:
+        - { name: source, in: path, required: true, schema: { type: string, enum: [listenbrainz, lastfm, spotify] } }
+      responses:
+        '200':
+          description: removed count + status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ImportStatus'
                   - type: object
                     required: [removed]
                     properties:
@@ -4476,7 +4618,7 @@ components:
       required: [id, kind, title, items]
       properties:
         id: { type: string, description: 'stable id for ordering/hiding (e.g. "recently_played", "byp:album:<id>")' }
-        kind: { type: string, enum: [start_radio, devices, recently_played, continue_listening, pinned, mixes, radio, because_you_played, release_radar, suggestions, to_get, blends, wrapped] }
+        kind: { type: string, enum: [start_radio, devices, recently_played, continue_listening, pinned, on_this_day, mixes, radio, because_you_played, release_radar, suggestions, to_get, blends, wrapped] }
         title: { type: string }
         subtitle: { type: [string, 'null'] }
         layout: { type: string, enum: [button, row, grid2], description: 'hint: grid2 = 2-row quick-pick grid (Recently played)' }
@@ -4754,6 +4896,16 @@ components:
         queues: { type: array, items: { $ref: '#/components/schemas/Queue' } }
         catalog: { type: array, items: { $ref: '#/components/schemas/CatalogItem' }, description: '"Not in your library" — owned items are filtered out unless scope=catalog' }
         catalogError: { type: [string, 'null'] }
+        lyrics:
+          type: array
+          description: '0.9.0: songs whose lyrics match (optional; absent from older servers)'
+          items: { $ref: '#/components/schemas/LyricsMatch' }
+    LyricsMatch:
+      type: object
+      required: [track, line]
+      properties:
+        track: { $ref: '#/components/schemas/Track' }
+        line: { type: string, description: the lyric line that matched best (no timestamps) }
     CatalogItem:
       type: object
       description: |
@@ -5190,7 +5342,7 @@ components:
               losslessVerdict:
                 type: [string, 'null']
                 enum: [ok, lossy_source, suspect, upsampled, unknown, error, null]
-                description: v9 fake-lossless checker (lossless codecs only; null = not checked yet)
+                description: v10 fake-lossless checker (lossless codecs only; null = not checked yet)
               losslessNote: { type: [string, 'null'], description: 'e.g. "cut off at 16.0 kHz: made from an MP3 ~128 kbps"' }
     Queue:
       type: object
@@ -5842,6 +5994,84 @@ components:
             unmatched: { type: integer }
             error: { type: string }
         importedEvents: { type: integer, description: imported events currently stored }
+    ImportHistoryResult:
+      type: object
+      description: one history import (Spotify, Last.fm)
+      properties:
+        scanned: { type: integer, description: listens read }
+        matched: { type: integer }
+        imported: { type: integer }
+        alreadyKnown: { type: integer, description: already here from a client or another import }
+        unmatched: { type: integer, description: not in this library }
+        tooShort: { type: integer, description: 'Spotify: played too briefly to count' }
+        topMissing:
+          type: array
+          description: most-played songs not in the library (up to 50)
+          items:
+            type: object
+            properties:
+              artist: { type: string }
+              title: { type: string }
+              plays: { type: integer }
+        toGetAdded: { type: integer }
+    ImportedPlaylist:
+      type: object
+      required: [name, total, matched, missing, playlistId, unchanged, toGetAdded]
+      properties:
+        name: { type: string }
+        total: { type: integer }
+        matched: { type: integer }
+        missing: { type: integer }
+        playlistId: { type: [string, 'null'], description: "null when nothing matched" }
+        unchanged: { type: boolean, description: "the user already had this playlist with exactly these tracks; nothing created" }
+        toGetAdded: { type: integer }
+        missingSongs:
+          type: array
+          description: up to 50
+          items:
+            type: object
+            properties:
+              artist: { type: [string, 'null'] }
+              title: { type: [string, 'null'] }
+    SpotifyImportResult:
+      type: object
+      required: [files, playlists, history, toGetAdded]
+      properties:
+        files: { type: array, items: { type: string }, description: "files used (inside a zip, their names)" }
+        playlists: { type: array, items: { $ref: '#/components/schemas/ImportedPlaylist' } }
+        history:
+          oneOf:
+            - $ref: '#/components/schemas/ImportHistoryResult'
+            - type: 'null'
+        toGetAdded: { type: integer }
+    ImportStatus:
+      type: object
+      required: [imported, lastfmAvailable]
+      properties:
+        imported:
+          type: object
+          description: imported play events stored, per source
+          properties:
+            listenbrainz: { type: integer }
+            lastfm: { type: integer }
+            spotify: { type: integer }
+        lastfm:
+          type: [object, 'null']
+          description: last Last.fm import by user name (ImportHistoryResult fields plus these)
+          properties:
+            state: { type: string, enum: [running, done, error] }
+            username: { type: string }
+            startedAt: { type: string, format: date-time }
+            finishedAt: { type: string, format: date-time }
+            page: { type: integer }
+            pages: { type: integer }
+            scanned: { type: integer }
+            imported: { type: integer }
+            alreadyKnown: { type: integer }
+            unmatched: { type: integer }
+            error: { type: string }
+        lastfmAvailable: { type: boolean, description: the server has a Last.fm API key }
+        lastfmUsername: { type: [string, 'null'], description: the connected Last.fm account, if any }
     Notification:
       type: object
       required: [id, kind, title, body, data, createdAt, read]

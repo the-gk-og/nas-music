@@ -1,4 +1,4 @@
-"""Fake-lossless checker (schema v9 `lossless_checks`), filled by the resumable `lossless` job.
+"""Fake-lossless checker (schema v10 `lossless_checks`), filled by the resumable `lossless` job.
 
 A lossy encoder throws away the top of the spectrum: LAME's MP3 at 128 kbps cuts everything above ~16 kHz,
 192 kbps ~19 kHz, 320 kbps / V0 ~19.5-20.5 kHz. Converting that MP3 to FLAC keeps the hole, so a "lossless"

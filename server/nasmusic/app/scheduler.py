@@ -28,6 +28,9 @@ JOB_NAMES = ("scan", "full_scan", "analyse", "loudness", "nightly", "pretranscod
 LOUDNESS_BUDGET_S = 50 * 60
 HISTORY = 20
 LYRICS_PER_RUN = 200
+# Lyrics search index: each scan indexes new/changed tracks for at most this long (the first pass over a big
+# library takes several scans; search works for what is indexed so far).
+LYRICS_INDEX_BUDGET_S = 120
 # The explicit-content job (file tags, Deezer, lyrics word list) is resumable: each run stops after this.
 EXPLICIT_BUDGET_S = 20 * 60
 # Fake-lossless checker (spectrum of FLAC/ALAC/WAV files): resumable; each run stops after this.
@@ -63,6 +66,7 @@ class Jobs:
 
         res = scanner.scan(self.cfg, conn, full=full).as_dict()
         res["togetGot"] = toget.match_owned(conn)  # wanted albums/songs that the library now has
+        res["lyricsIndex"] = self._lyrics_index(conn, full=full)
         try:
             from nasmusic.app import notify
 
@@ -71,6 +75,15 @@ class Jobs:
             log.exception("new-music notifications failed")
         return res
 
+    def _lyrics_index(self, conn, full: bool = False) -> dict | None:
+        from nasmusic.library import lyrics_index
+
+        try:
+            return lyrics_index.refresh(conn, self.cfg.library_root, full=full, time_budget_s=LYRICS_INDEX_BUDGET_S)
+        except Exception:
+            log.exception("lyrics index failed")
+            return None
+
     def _upload_scan(self, conn):
         """Index just upload_root (seconds), right after an upload finishes or is deleted."""
         from nasmusic.library import scanner
@@ -78,7 +91,9 @@ class Jobs:
         self._upload_scan_again.clear()
         if self.cfg.upload_root is None:
             return {"skipped": "upload_root is not configured"}
-        return scanner.scan(self.cfg, conn, uploads_only=True).as_dict()
+        res = scanner.scan(self.cfg, conn, uploads_only=True).as_dict()
+        res["lyricsIndex"] = self._lyrics_index(conn)
+        return res
 
     def request_upload_scan(self) -> None:
         self._upload_scan_again.set()
@@ -154,7 +169,7 @@ class Jobs:
             fetched += 1
             found += row["status"] == "found"
         return {"candidates": len(rows), "fetched": fetched, "found": found, "inFile": in_file,
-                "unreachable": unreachable}
+                "unreachable": unreachable, "lyricsIndex": self._lyrics_index(conn) if found else None}
 
     def _cleanup(self, conn):
         """Daily housekeeping: expire bug reports (30 days), purge the library trash, tidy uploads."""

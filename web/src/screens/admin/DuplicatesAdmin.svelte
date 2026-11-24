@@ -1,6 +1,6 @@
 <script lang="ts">
   // Admin: duplicate finder (v6). Copies of the same recording found by audio fingerprint. Pick the copy to
-  // keep; the others are hidden from the library, or (v9) moved to the trash to be deleted. Each copy can be
+  // keep; the others are hidden from the library, or (v10) moved to the trash to be deleted. Each copy can be
   // played; switching copies keeps the position so you can compare them by ear.
   import { Eye, EyeOff, Pause, Play, RefreshCw, Trash2 } from '@lucide/svelte';
   import { autotagApi, cleanupApi, losslessLabel, qualityText, type DuplicateGroup } from '../../lib/api/admin';

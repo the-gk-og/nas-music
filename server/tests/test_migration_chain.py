@@ -22,7 +22,7 @@ OLD_VERSIONS = list(range(1, db.SCHEMA_VERSION))
 # Versions whose fixture holds every table we care about filling generically (v1-v4 are covered with real
 # data by test_v1_rows_survive / test_v4_rows_survive below; their steps move columns between tables).
 FILLABLE = [v for v in OLD_VERSIONS if v >= 5]
-STEPS = {5: "migrate_v5_to_v6", 6: "migrate_v6_to_v7", 7: "migrate_v7_to_v8", 8: "migrate_v8_to_v9"}
+STEPS = {5: "migrate_v5_to_v6", 6: "migrate_v6_to_v7", 7: "migrate_v7_to_v8", 8: "migrate_v8_to_v9", 9: "migrate_v9_to_v10"}
 
 
 # ---------- helpers ----------
@@ -62,9 +62,11 @@ def _fill(conn: sqlite3.Connection) -> None:
     """One row in every table: each column gets a value of its declared type, or the first value its
     `col IN ('a', ...)` CHECK allows. Foreign keys are off while filling, so references needn't resolve."""
     conn.execute("PRAGMA foreign_keys = OFF")
+    virtual = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' "
+                                          "AND sql LIKE 'CREATE VIRTUAL TABLE%'")]
     for t in _tables(conn):
-        if t == "schema_version":
-            continue
+        if t == "schema_version" or any(t.startswith(f"{v}_") for v in virtual):
+            continue  # FTS shadow tables are filled through their virtual table
         info = list(conn.execute(f"PRAGMA table_info('{t}')"))
         sql = conn.execute("SELECT sql FROM sqlite_master WHERE name = ?", (t,)).fetchone()[0]
         enums = {m.group(1): re.findall(r"'([^']*)'", m.group(2))[0]

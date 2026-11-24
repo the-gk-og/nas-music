@@ -55,7 +55,7 @@ function recorder() {
 }
 
 // The transport itself, and relArtSrc (fetches whatever art path the server handed out).
-const SKIP = new Set(['constructor', 'request', 'fetchRaw', 'putRaw', 'get', 'post', 'put', 'patch', 'del', 'headers', 'relArtSrc']);
+const SKIP = new Set(['constructor', 'request', 'fetchRaw', 'putRaw', 'postRaw', 'getBlob', 'rawRequest', 'get', 'post', 'put', 'patch', 'del', 'headers', 'relArtSrc']);
 
 const ARGS = ['id1', 'id2', 'id3', 'id4'];
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Admin: library cleanup (v9). Pruning reports, find-and-remove, and the trash. Removing is undoable until
+  // Admin: library cleanup (v10). Pruning reports, find-and-remove, and the trash. Removing is undoable until
   // the trash is purged; purging deletes files only when the server allows it (config library_delete_files).
   import { Download, Pause, Play, RefreshCw, RotateCcw, Search, ShieldCheck, Trash2 } from '@lucide/svelte';
   import {

@@ -3,6 +3,7 @@
   import type { PlayMeta } from '../lib/events';
   import type { Track } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
+  import { selection } from '../lib/selection.svelte';
   import TrackRow from './TrackRow.svelte';
 
   let {
@@ -23,6 +24,9 @@
       current={t.id === currentId}
       onplay={() => player.playList(tracks, i, queueName, meta)}
       onmenu={() => ui.open({ kind: 'songMenu', ctx: { track: t, list: tracks } })}
+      selected={selection.active && selection.has(t.id)}
+      selecting={selection.active}
+      onselect={(range) => selection.pick(tracks, i, range)}
     />
   {:else}
     <div class="empty">No songs</div>

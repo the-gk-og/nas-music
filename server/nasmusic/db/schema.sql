@@ -1,4 +1,4 @@
--- nas-music shared schema v9 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v10 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
@@ -22,6 +22,9 @@
 -- are upgraded by nasmusic.db.migrations.
 -- v8 adds toget_admin (the admin's check-off of users' want-list items) and continue_dismissed (Continue
 -- listening items the user swiped away; an item comes back once it is played again after that).
+-- v9 adds the lyrics search index (lyrics_index + the FTS5 table lyrics_fts), filled by the scan job.
+-- v10 adds library cleanup: library_removed (the admin trash; tracks.missing = 3) and lossless_checks (the
+-- fake-lossless checker's spectral verdicts).
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -103,7 +106,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     mbid            TEXT,              -- MusicBrainz recording id
     added_at        TEXT NOT NULL,
     -- 0 = present; 1 = file vanished on last scan (kept for history); 2 (v6) = hidden by an admin as a
-    -- duplicate copy (see duplicate_hidden); 3 (v9) = removed by an admin (see library_removed).
+    -- duplicate copy (see duplicate_hidden); 3 (v10) = removed by an admin (see library_removed).
     -- Everything that filters `missing = 0` skips all of them.
     missing         INTEGER NOT NULL DEFAULT 0,
     -- v2 song-info fields, filled by the scanner
@@ -1084,7 +1087,28 @@ CREATE TABLE IF NOT EXISTS continue_dismissed (
     PRIMARY KEY (user_id, kind, item_id)
 );
 
--- v9 library cleanup: tracks an admin removed (tracks.missing = 3). A removal sits in the trash until
+-- ---------- v9: lyrics search ----------
+
+-- One row per present track once the scan job has looked for its lyrics. The indexed text is what everyone
+-- sees by default: an admin's edit (tag_overrides field 'lyrics'), else the file's own lyrics (embedded tags or
+-- a sidecar .lrc), else cached LRCLIB lyrics; timestamps stripped. Per-user lyrics edits are private and never
+-- indexed. source 'none' = looked, found nothing. Re-read when tracks.mtime changes, the admin edit or the
+-- LRCLIB cache is newer than indexed_at, or a full scan runs.
+CREATE TABLE IF NOT EXISTS lyrics_index (
+    track_id   TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    source     TEXT NOT NULL CHECK (source IN ('none','library','embedded','lrc_file','lrclib')),
+    mtime      REAL,                   -- tracks.mtime when the file was read
+    indexed_at TEXT NOT NULL
+);
+
+-- Full-text index over the same lyrics (one row per track with source != 'none'; rowid is not meaningful).
+CREATE VIRTUAL TABLE IF NOT EXISTS lyrics_fts USING fts5(
+    track_id UNINDEXED,
+    body,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+
+-- v10 library cleanup: tracks an admin removed (tracks.missing = 3). A removal sits in the trash until
 -- purge_after (restoring deletes the row). Purging deletes uploaded files, and library files too when config
 -- library_delete_files is on (the music folder must then be mounted read-write); otherwise the track stays
 -- hidden for good and is listed in the admin's delete list. purged_at marks a purge that kept the row.
@@ -1100,7 +1124,7 @@ CREATE TABLE IF NOT EXISTS library_removed (
 );
 CREATE INDEX IF NOT EXISTS idx_library_removed_batch ON library_removed(batch_id);
 
--- v9 fake-lossless checker (nasmusic.library.lossless): the spectrum of lossless files. A sharp cutoff well
+-- v10 fake-lossless checker (nasmusic.library.lossless): the spectrum of lossless files. A sharp cutoff well
 -- below the Nyquist frequency means the file was made from a lossy (MP3/AAC) source; a hi-res file whose
 -- content stops at ~22 kHz was upsampled from CD. Rechecked when tracks.mtime changes.
 CREATE TABLE IF NOT EXISTS lossless_checks (

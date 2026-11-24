@@ -539,7 +539,7 @@ export interface DuplicateTrack {
   hidden: boolean;
   keptId: string | null;
   recommended: boolean;
-  /** v9 fake-lossless checker (lossless codecs; null = not checked yet). */
+  /** v10 fake-lossless checker (lossless codecs; null = not checked yet). */
   losslessVerdict?: LosslessVerdict | null;
   losslessNote?: string | null;
 }
@@ -636,7 +636,7 @@ export function qualityText(t: Pick<DuplicateTrack, 'codec' | 'bitrate' | 'sampl
   return parts.join(' · ');
 }
 
-// ---- library cleanup (v9): pruning reports, trash, delete list, fake lossless, preview ----
+// ---- library cleanup (v10): pruning reports, trash, delete list, fake lossless, preview ----
 
 export type LosslessVerdict = 'ok' | 'lossy_source' | 'suspect' | 'upsampled' | 'unknown' | 'error';
 export type CleanupReportId = 'never_played' | 'unplayed_albums' | 'disliked' | 'low_quality' | 'fake_lossless' | 'short';

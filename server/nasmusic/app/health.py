@@ -151,7 +151,7 @@ def delete_track_rows(conn: sqlite3.Connection, ids: list[str]) -> None:
         chunk = ids[i:i + 500]
         q = ",".join("?" * len(chunk))
         for table in ("user_tracks", "events", "features", "analysis_jobs", "lyrics_overrides", "lyrics_cache",
-                      "track_dj", "blend_tracks", "jam_requests", "smart_playlist_tracks", "scrobble_queue"):
+                      "track_dj", "blend_tracks", "jam_requests", "smart_playlist_tracks", "scrobble_queue", "lyrics_fts"):
             conn.execute(f"DELETE FROM {table} WHERE track_id IN ({q})", chunk)
         conn.execute(f"DELETE FROM tracks WHERE id IN ({q})", chunk)
     conn.execute("DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)")
