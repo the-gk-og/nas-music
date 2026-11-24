@@ -137,6 +137,7 @@ def test_analysis_eta(client, conn):
 
 def test_health_checks_list(client, conn, cfg, app, base_flac):
     make_flac(base_flac, cfg.library_root / "Dupes" / "a.flac", title="Song 1", artist="Artist One", album="Other")
+    app.state.ctx.jobs.chain = False  # no background analysis after the scan (it would race the unanalysed count)
     app.state.ctx.jobs.run("scan")
     checks = {c["id"]: c for c in client.get(f"{ADMIN}/health").json()}
     assert list(checks) == ["missing", "duplicates", "missing_tags", "missing_art", "unanalysed", "orphan_cache",
