@@ -2,6 +2,7 @@
   import { ArrowDown, ArrowLeft, ArrowUp } from '@lucide/svelte';
   import { appearance } from '../lib/appearance.svelte';
   import ScrobbleSettings from '../components/ScrobbleSettings.svelte';
+  import ImportSettings from '../components/ImportSettings.svelte';
   import { family } from '../lib/family.svelte';
   import { ACCENTS, HOME_SHELVES, HOME_SHELF_TITLES, moveInList, type Motion } from '../lib/v3';
   import { WEB_SIGNALS, type SignalKey } from '../lib/events';
@@ -13,18 +14,33 @@
   import { session } from '../lib/session.svelte';
   import { ui } from '../lib/ui.svelte';
   import VoiceSettings from '../components/VoiceSettings.svelte';
-  import { desktop } from '../lib/desktop.svelte';
   import { validAppId } from '../lib/discord';
   import { isTauri } from '../lib/platform';
   import { pwa } from '../lib/pwa.svelte';
+  import { desktop, getAutostart, setAutostart } from '../lib/desktop.svelte';
+  import { djVoice } from '../lib/djvoice.svelte';
 
   import type { DataSummary } from '../lib/types';
 
   let deviceName = $state(session.saved.deviceName);
+  /** Desktop app: start with the computer, minimised to the tray (null in a browser). */
+  let autostart = $state<boolean | null>(null);
+  $effect(() => {
+    void getAutostart().then((v) => (autostart = v));
+  });
+  async function toggleAutostart(el: HTMLInputElement) {
+    try {
+      autostart = await setAutostart(el.checked);
+    } catch (e) {
+      ui.toast((e as Error).message);
+    }
+    el.checked = !!autostart;
+  }
   let summary = $state<DataSummary | null>(null);
   const day = (s?: string | null) => (s ? new Date(s).toLocaleDateString() : '—');
   $effect(() => {
     session.api.dataSummary().then((s) => (summary = s)).catch(() => (summary = null));
+    void djVoice.refresh();
   });
 
   // Every context signal (also the Android-only ones), for "Erase collected context".
@@ -99,25 +115,6 @@
     {/if}
   </div>
 
-  {#if isTauri()}
-    <div class="section-title">Desktop app</div>
-    <div class="pad form">
-      <label class="sig inline">
-        <div><div>Show what I'm playing in Discord</div><div class="muted small">“Listening to” on your Discord profile while music plays on this computer. Only the Discord app on this computer is told; nothing is shown when paused.</div></div>
-        <input type="checkbox" class="switch" checked={desktop.discord.on} onchange={(e) => desktop.setDiscord({ on: e.currentTarget.checked })} />
-      </label>
-      {#if desktop.discord.on}
-        <label>Discord application ID
-          <input inputmode="numeric" placeholder="e.g. 1234567890123456789" value={desktop.discord.appId} onchange={(e) => desktop.setDiscord({ appId: e.currentTarget.value })} />
-        </label>
-        <div class="muted small">
-          {#if desktop.discord.appId && !validAppId(desktop.discord.appId)}That doesn't look like an application ID (17–20 digits).{:else}
-          Discord needs one: create an application at discord.com/developers/applications, name it what you want shown (“Listening to …”), and paste its Application ID here. Optionally upload an image called “logo” under Rich Presence → Art Assets.{/if}
-        </div>
-      {/if}
-    </div>
-  {/if}
-
   <div class="section-title">Appearance</div>
   <div class="pad form">
     <div class="opt">
@@ -169,6 +166,29 @@
       <input type="checkbox" class="switch" checked={appearance.localOnly} onchange={(e) => appearance.setLocalOnly(e.currentTarget.checked)} />
     </label>
   </div>
+
+  {#if isTauri()}
+    <div class="section-title">Desktop app</div>
+    <div class="pad form">
+      <label class="sig inline">
+        <div><div>Start with the computer</div><div class="muted small">Opens minimised to the tray when you log in, ready for media keys.</div></div>
+        <input type="checkbox" class="switch" checked={autostart} onchange={(e) => toggleAutostart(e.currentTarget)} />
+      </label>
+      <label class="sig inline">
+        <div><div>Show what I'm playing in Discord</div><div class="muted small">“Listening to” on your Discord profile while music plays on this computer. Only the Discord app on this computer is told; nothing is shown when paused.</div></div>
+        <input type="checkbox" class="switch" checked={desktop.discord.on} onchange={(e) => desktop.setDiscord({ on: e.currentTarget.checked })} />
+      </label>
+      {#if desktop.discord.on}
+        <label>Discord application ID
+          <input inputmode="numeric" placeholder="e.g. 1234567890123456789" value={desktop.discord.appId} onchange={(e) => desktop.setDiscord({ appId: e.currentTarget.value })} />
+        </label>
+        <div class="muted small">
+          {#if desktop.discord.appId && !validAppId(desktop.discord.appId)}That doesn't look like an application ID (17–20 digits).{:else}
+          Discord needs one: create an application at discord.com/developers/applications, name it what you want shown (“Listening to …”), and paste its Application ID here. Optionally upload an image called “logo” under Rich Presence → Art Assets.{/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   <div class="section-title">Streaming quality</div>
   <div class="pad form">
@@ -255,6 +275,38 @@
     <div class="muted small">These settings are kept on this device.</div>
   </div>
 
+  {#if djVoice.available}
+    <div class="section-title">Radio DJ</div>
+    <div class="pad form">
+      <label class="sig inline">
+        <div>
+          <div>DJ voice</div>
+          <div class="muted small">
+            In radio and mixes, a voice introduces some songs over their opening, with facts about the artist from your
+            server. The music dips while it talks. Never after you skip, and not when you cast to a speaker.
+          </div>
+        </div>
+        <input type="checkbox" class="switch" checked={djVoice.status?.enabled ?? false} onchange={(e) => void djVoice.set({ enabled: e.currentTarget.checked }).catch((err) => ui.toast((err as Error).message))} />
+      </label>
+      {#if djVoice.status?.enabled}
+        <div class="opt">
+          <div><div>How often</div><div class="muted small">Always before the first song of a radio.</div></div>
+          <div class="seg" role="radiogroup" aria-label="How often the DJ talks">
+            {#each [[1, 'Every song'], [3, 'Every 3rd'], [5, 'Every 5th']] as [k, label]}
+              <button role="radio" aria-checked={djVoice.status?.every === k} class:on={djVoice.status?.every === k} onclick={() => void djVoice.set({ every: k as number })}>{label}</button>
+            {/each}
+          </div>
+        </div>
+        {#if djVoice.status?.state === 'downloading'}
+          <div class="muted small">Your server is downloading the voice. The DJ starts talking once it's ready.</div>
+        {:else if djVoice.status?.state === 'error'}
+          <div class="muted small">The DJ can't talk right now: {djVoice.status.detail}</div>
+        {/if}
+      {/if}
+      <div class="muted small">Synced to all your devices.</div>
+    </div>
+  {/if}
+
   <div class="section-title">Family mode</div>
   <p class="pad muted small">
     Hides explicit songs everywhere — library, search, mixes, radio — and skips them in queues. Your server does the
@@ -277,6 +329,7 @@
 
   <VoiceSettings />
   <ScrobbleSettings />
+  <ImportSettings />
 
   <div class="section-title">Data &amp; recommendations</div>
   <p class="pad muted small">

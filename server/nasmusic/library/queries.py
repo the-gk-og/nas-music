@@ -9,8 +9,12 @@ policy hides (and albums/artists/genres/folders left with none). Queues and play
 flag them `familyHidden` (tracks_by_ids(..., hidden="flag")), so positions stay stable and clients skip them."""
 from __future__ import annotations
 
+import difflib
 import posixpath
+import re
 import sqlite3
+import time
+import unicodedata
 from pathlib import Path
 
 from nasmusic.db import family
@@ -315,17 +319,108 @@ def _like(q: str) -> str:
     return f"%{esc}%"
 
 
+def _fold(s: str) -> str:
+    """Lower-case and strip accents, so "Beyonce" finds "Beyoncé"."""
+    return "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)).casefold()
+
+
+_WORD = re.compile(r"\w+", re.UNICODE)
+# Per database file: (library stamp, {folded word: {spellings as tagged}}).
+_vocab_cache: dict[str, tuple[tuple, dict[str, set[str]]]] = {}
+
+
+def _vocab(conn: sqlite3.Connection) -> dict[str, set[str]]:
+    """Every word in artist names, album titles and track titles, rebuilt only when the library changes."""
+    db = next((r[2] for r in conn.execute("PRAGMA database_list") if r[1] == "main"), "") or f"mem:{id(conn)}"
+    stamp = tuple(conn.execute(
+        "SELECT (SELECT COUNT(*) FROM tracks WHERE missing = 0), (SELECT COUNT(*) FROM artists), "
+        "(SELECT COUNT(*) FROM albums), (SELECT COALESCE(SUM(mtime), 0) FROM tracks)").fetchone())
+    stamp = (*stamp, int(time.monotonic() // 300))  # and at least every five minutes (tag edits keep counts)
+    hit = _vocab_cache.get(db)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    vocab: dict[str, set[str]] = {}
+    for sql in ("SELECT name FROM artists", "SELECT title FROM albums", "SELECT title FROM tracks WHERE missing = 0"):
+        for (text,) in conn.execute(sql):
+            for w in _WORD.findall(text or ""):
+                if len(w) >= 2:
+                    vocab.setdefault(_fold(w), set()).add(w)
+    _vocab_cache[db] = (stamp, vocab)
+    return vocab
+
+
+def _fuzzy_words(vocab: dict[str, set[str]], word: str) -> list[str]:
+    """Library spellings a (possibly misspelt or accent-less) query word could mean."""
+    w = _fold(word)
+    out: set[str] = set()
+    if len(w) >= 2:
+        for k, forms in vocab.items():
+            if w in k:
+                out |= forms
+                if len(out) >= 12:
+                    break
+    if len(w) >= 3:
+        # Typos: difflib narrows to similar words quickly, then allow one slip (a wrong, missing, extra or
+        # swapped letter) per word, two in words of eight letters or more.
+        edits = 1 if len(w) < 8 else 2
+        keys = [k for k in vocab if abs(len(k) - len(w)) <= edits]
+        for k in difflib.get_close_matches(w, keys, n=12, cutoff=0.6):
+            if _edit_distance(w, k) <= edits:
+                out |= vocab[k]
+    return sorted(out)[:16]
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Optimal string alignment distance (Levenshtein plus adjacent swaps)."""
+    prev2: list[int] = []
+    prev = list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        cur = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            cost = a[i - 1] != b[j - 1]
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                cur[j] = min(cur[j], prev2[j - 2] + 1)
+        prev2, prev = prev, cur
+    return prev[-1]
+
+
+def fuzzy_terms(conn: sqlite3.Connection, q: str) -> list[list[str]] | None:
+    """For each query word, the library words it probably means; None when some word matches nothing."""
+    vocab = _vocab(conn)
+    terms = []
+    for w in [w for w in q.split() if w][:8]:
+        alts = _fuzzy_words(vocab, w)
+        if not alts:
+            return None
+        terms.append(alts)
+    return terms or None
+
+
 def search(conn: sqlite3.Connection, uid: str, q: str, limit: int, data_dir: Path) -> dict:
-    """Case-insensitive substring search on each word (all words must match)."""
+    """Case-insensitive substring search on each word (all words must match). When that finds nothing at all,
+    retry typo- and accent-tolerantly: each word may instead match a close spelling from the library's own
+    vocabulary ("beatels" finds "Beatles", "bjork" finds "Björk")."""
     words = [w for w in q.split() if w][:8]
     if not words:
         return {"artists": [], "albums": [], "tracks": []}
+    res = _search_terms(conn, uid, [[w] for w in words], limit, data_dir)
+    if not any(res.values()):
+        terms = fuzzy_terms(conn, q)
+        if terms:
+            res = _search_terms(conn, uid, terms, limit, data_dir)
+    return res
+
+
+def _search_terms(conn: sqlite3.Connection, uid: str, terms: list[list[str]], limit: int, data_dir: Path) -> dict:
+    """Every term must match one of the columns; a term matches when any of its alternatives is a substring."""
 
     def cond(cols: list[str]) -> tuple[str, list[str]]:
         parts, params = [], []
-        for w in words:
-            parts.append("(" + " OR ".join(f"{c} LIKE ? ESCAPE '\\'" for c in cols) + ")")
-            params.extend([_like(w)] * len(cols))
+        for alts in terms:
+            parts.append("(" + " OR ".join(f"{c} LIKE ? ESCAPE '\\'" for a in alts for c in cols) + ")")
+            for a in alts:
+                params.extend([_like(a)] * len(cols))
         return " AND ".join(parts), params
 
     f = fam(conn, uid)
