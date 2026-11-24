@@ -44,8 +44,10 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SpeakerGroup
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +58,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -128,6 +131,9 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
     var dragX by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var dragY by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var starred by remember(trackId) { mutableStateOf(extras?.getBoolean(MediaItems.EXTRA_STARRED) ?: false) }
+    // Liked from the notification / lock screen / widget meanwhile.
+    val starMap by org.nasmusic.app.widget.WidgetHub.starChanges.collectAsStateWithLifecycle()
+    LaunchedEffect(trackId, starMap[trackId]) { starMap[trackId]?.let { starred = it } }
     var volumeOpen by remember { mutableStateOf(false) }
     var sleepOpen by remember { mutableStateOf(false) }
     val sleepTimer by c.sleep.timer.collectAsStateWithLifecycle()
@@ -228,8 +234,15 @@ fun NowPlayingScreen(c: AppContainer, compact: Boolean = false) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = {
                     starred = !starred
+                    org.nasmusic.app.widget.WidgetHub.setStarred(trackId, starred)
                     c.events.record(if (starred) EventType.STAR else EventType.UNSTAR, trackId, context = c.contextCollector.snapshot())
                     scope.launch { runCatching { if (starred) c.api.star(trackId) else c.api.unstar(trackId) } }
+                    if (!starred) ui.undo = org.nasmusic.app.ui.UndoRequest("Removed from favourites") {
+                        starred = true
+                        org.nasmusic.app.widget.WidgetHub.setStarred(trackId, true)
+                        c.events.record(EventType.STAR, trackId, context = c.contextCollector.snapshot())
+                        c.api.star(trackId)
+                    }
                 }) { Icon(if (starred) Icons.Default.Favorite else Icons.Default.FavoriteBorder, if (starred) "Remove from favourites" else "Favourite", tint = if (starred) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface) }
                 IconButton(onClick = { ui.songInfo = trackId }) { Icon(Icons.Default.Info, "Song info") }
                 IconButton(onClick = { ui.addToPlaylist = listOf(track) }) { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, "Add to playlist") }
@@ -355,6 +368,14 @@ private fun LyricsPanel(c: AppContainer, trackId: String, positionMs: Long, onCl
     val default = (result as? LyricsResult.Found)?.lyrics
     val lyrics = picked ?: default
 
+    // Keep the screen on while reading along (option in the source menu).
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(view, settings.lyricsKeepScreenOn) {
+        val was = view.keepScreenOn
+        if (settings.lyricsKeepScreenOn) view.keepScreenOn = true
+        onDispose { view.keepScreenOn = was }
+    }
+
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) {
@@ -363,6 +384,12 @@ private fun LyricsPanel(c: AppContainer, trackId: String, positionMs: Long, onCl
                     Icon(Icons.Default.ArrowDropDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 DropdownMenu(sourceMenu, { sourceMenu = false }) {
+                    DropdownMenuItem(
+                        { Text("Keep screen on") },
+                        { scope.launch { c.settings.setLyricsKeepScreenOn(!settings.lyricsKeepScreenOn) } },
+                        trailingIcon = { Checkbox(settings.lyricsKeepScreenOn, onCheckedChange = null) },
+                    )
+                    HorizontalDivider()
                     val sources = (default?.sources.orEmpty() + listOfNotNull(default?.source)).distinct()
                     if (sources.isEmpty()) DropdownMenuItem({ Text("Embedded lyrics") }, { sourceMenu = false })
                     sources.forEach { src ->

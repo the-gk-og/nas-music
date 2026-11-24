@@ -52,6 +52,12 @@ object WidgetHub {
         local.value = np?.let { WidgetStates.fromNowPlaying(it, castName) }
     }
 
+    /** Favourite changes made this session (track id to starred), for the notification's Like button. */
+    val starChanges: StateFlow<Map<String, Boolean>> get() = stars
+
+    /** A favourite toggled since the song's media item was built, or null. */
+    fun starOverride(trackId: String): Boolean? = stars.value[trackId]
+
     fun setStarred(trackId: String, starred: Boolean) {
         stars.value = stars.value + (trackId to starred)
     }

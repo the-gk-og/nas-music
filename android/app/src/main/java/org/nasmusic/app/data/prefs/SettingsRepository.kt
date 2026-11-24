@@ -36,6 +36,8 @@ data class AppSettings(
     val downloadQuality: String = "opus128",
     /** Lyrics text size multiplier (Tt button). */
     val lyricsScale: Float = 1f,
+    /** Keep the screen awake while lyrics are open. */
+    val lyricsKeepScreenOn: Boolean = true,
     // ---- v3 Appearance (docs/v3-ux.md §7) ----
     /** off | quick | expressive */
     val animations: String = "quick",
@@ -87,6 +89,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     private val smartBudgetKey = stringPreferencesKey("smart_budget")
     private val qualityKey = stringPreferencesKey("download_quality")
     private val lyricsScaleKey = androidx.datastore.preferences.core.floatPreferencesKey("lyrics_scale")
+    private val lyricsAwakeKey = booleanPreferencesKey("lyrics_keep_screen_on")
     private val animationsKey = stringPreferencesKey("ui_animations")
     private val defaultViewKey = stringPreferencesKey("ui_default_view")
     private val pageStyleKey = stringPreferencesKey("ui_page_style")
@@ -108,6 +111,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             smartBudget = p[smartBudgetKey] ?: "gb:5",
             downloadQuality = p[qualityKey] ?: "opus128",
             lyricsScale = p[lyricsScaleKey] ?: 1f,
+            lyricsKeepScreenOn = p[lyricsAwakeKey] ?: true,
             animations = p[animationsKey] ?: "quick",
             defaultView = p[defaultViewKey] ?: "grid",
             pageStyle = p[pageStyleKey] ?: "big",
@@ -152,6 +156,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     suspend fun setSmartDownloads(on: Boolean) = context.dataStore.edit { it[smartKey] = on }
     suspend fun setSmartBudget(key: String) = context.dataStore.edit { it[smartBudgetKey] = key }
     suspend fun setDownloadQuality(key: String) = context.dataStore.edit { it[qualityKey] = key }
+    suspend fun setLyricsKeepScreenOn(on: Boolean) = context.dataStore.edit { it[lyricsAwakeKey] = on }
     suspend fun setLyricsScale(s: Float) = context.dataStore.edit { it[lyricsScaleKey] = s.coerceIn(0.7f, 2f) }
     suspend fun setStreamQuality(net: org.nasmusic.app.playback.NetworkKind, key: String) = context.dataStore.edit {
         it[when (net) {

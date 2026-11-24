@@ -191,6 +191,7 @@ class PlaybackService : MediaLibraryService() {
                 applyItemMode()
                 applyLevelling()
                 updateNowFormat()
+                refreshButtons()
                 grantNowPlayingArt(mediaItem)
                 loadArtworkData(player.currentMediaItemIndex)
                 loadArtworkData(player.currentMediaItemIndex + 1)
@@ -245,13 +246,15 @@ class PlaybackService : MediaLibraryService() {
         session = MediaLibrarySession.Builder(this, sessionPlayer, LibraryCallback())
             .setSessionActivity(openApp)
             .setBitmapLoader(bitmaps)
-            .setMediaButtonPreferences(listOf(sleepButton(false)))
+            .setMediaButtonPreferences(buttons())
             .build()
 
+        // Like button: follows favourites toggled anywhere (app, widget, notification).
+        scope.launch { org.nasmusic.app.widget.WidgetHub.starChanges.collect { refreshButtons() } }
         scope.launch { c.listening.settings.collect { applyLevelling() } }
         scope.launch {
             c.sleep.timer.collect { t ->
-                session?.setMediaButtonPreferences(listOf(sleepButton(t != null)))
+                refreshButtons()
                 if (t == null) { mixer.sleep = 1f; if (sleepPausedAtEnd) { sleepPausedAtEnd = false; player.pauseAtEndOfMediaItems = false } }
             }
         }
@@ -693,6 +696,44 @@ class PlaybackService : MediaLibraryService() {
         if (wasPlaying || !pauseNow) c.ui.toast("Sleep timer: playback stopped")
     }
 
+    /** Notification / lock screen buttons: Like (music only) next to the transport controls, sleep timer in the overflow. */
+    private fun buttons(): List<CommandButton> {
+        val sleep = sleepButton(c.sleep.timer.value != null)
+        val id = if (spokenMode) null else player.currentMediaItem?.mediaId
+        return if (id == null) listOf(sleep) else listOf(likeButton(isStarred(id)), sleep)
+    }
+
+    private fun refreshButtons() {
+        session?.setMediaButtonPreferences(buttons())
+    }
+
+    private fun isStarred(id: String): Boolean =
+        org.nasmusic.app.widget.WidgetHub.starOverride(id)
+            ?: player.currentMediaItem?.takeIf { it.mediaId == id }?.mediaMetadata?.extras?.getBoolean(MediaItems.EXTRA_STARRED)
+            ?: false
+
+    private fun likeButton(on: Boolean): CommandButton =
+        CommandButton.Builder(if (on) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED)
+            .setCustomIconResId(if (on) org.nasmusic.app.R.drawable.ic_w_heart else org.nasmusic.app.R.drawable.ic_w_heart_outline)
+            .setDisplayName(if (on) "Remove from favourites" else "Favourite")
+            .setSessionCommand(SessionCommand(CMD_LIKE, android.os.Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_FORWARD_SECONDARY, CommandButton.SLOT_OVERFLOW)
+            .build()
+
+    /** Like / unlike the playing song from the notification, lock screen or a watch. */
+    private fun toggleLike() {
+        if (spokenMode) return
+        val id = player.currentMediaItem?.mediaId ?: return
+        val was = isStarred(id)
+        val star = !was
+        org.nasmusic.app.widget.WidgetHub.setStarred(id, star)
+        c.events.record(if (star) org.nasmusic.app.feedback.EventType.STAR else org.nasmusic.app.feedback.EventType.UNSTAR, id, context = c.contextCollector.snapshot())
+        scope.launch(Dispatchers.IO) {
+            val ok = runCatching { if (star) c.api.star(id) else c.api.unstar(id) }.getOrNull()?.isSuccessful == true
+            if (!ok) org.nasmusic.app.widget.WidgetHub.setStarred(id, was)
+        }
+    }
+
     private fun sleepButton(on: Boolean): CommandButton =
         CommandButton.Builder(CommandButton.ICON_UNDEFINED)
             .setCustomIconResId(org.nasmusic.app.R.drawable.ic_sleep_timer)
@@ -707,6 +748,7 @@ class PlaybackService : MediaLibraryService() {
         override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
             val cmds = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                 .add(SessionCommand(CMD_SLEEP, android.os.Bundle.EMPTY))
+                .add(SessionCommand(CMD_LIKE, android.os.Bundle.EMPTY))
                 .add(SessionCommand(CMD_SKIP_SILENCE, android.os.Bundle.EMPTY)).build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailableSessionCommands(cmds).build()
         }
@@ -717,6 +759,10 @@ class PlaybackService : MediaLibraryService() {
             if (customCommand.customAction == CMD_SLEEP) {
                 c.sleep.toggleFromNotification()
                 c.ui.toast(if (c.sleep.timer.value != null) "Sleep timer: 30 min" else "Sleep timer off")
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            if (customCommand.customAction == CMD_LIKE) {
+                toggleLike()
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
             if (customCommand.customAction == CMD_SKIP_SILENCE) {
@@ -1372,6 +1418,7 @@ class PlaybackService : MediaLibraryService() {
 }
 
 private const val CMD_SLEEP = "org.nasmusic.sleep_timer"
+private const val CMD_LIKE = "org.nasmusic.like"
 
 object ArtworkScaler {
     const val MAX_PX = 512
