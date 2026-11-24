@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: web-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   web:
     runs-on: ubuntu-latest
@@ -29,6 +33,7 @@ jobs:
       - run: npm ci
       - name: Lint
         run: npm run lint
+      # Includes src/lib/api/contract.test.ts: every request the web client sends must be in api/openapi.yaml.
       - name: Test
         run: npm test
       - name: Build

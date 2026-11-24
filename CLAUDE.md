@@ -12,6 +12,10 @@ Replaces LatentJam. Design doc: https://claude.ai/artifact/PAiW16UTjDX9JSseBPeqn
 - `api/openapi.yaml` is THE contract between server and app. Change it only deliberately, and
   update both sides (or note the change for the other side in the PR/commit message).
 - `server/nasmusic/db/schema.sql` is the shared database contract between server core and the AI.
+  Before bumping `SCHEMA_VERSION`, copy the current schema.sql to `server/tests/fixtures/schema_vN.sql`;
+  `tests/test_migration_chain.py` checks every old version migrates to exactly a fresh install's schema.
+- CI checks both sides against `api/openapi.yaml`: `server/tests/test_openapi_contract.py` (served routes) and
+  `web/src/lib/api/contract.test.ts` (requests the web client sends). Document a new endpoint in the same PR.
 - The music library is mounted read-only. Never write to it.
 - No secrets in the repo (Cloudflare tokens, Last.fm keys go in `config.toml`, which is gitignored).
 

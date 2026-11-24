@@ -301,7 +301,7 @@ def parse(text: str, vocab: Vocab | None = None) -> list[dict[str, Any]]:
         pat = re.compile(r"(?<![\w-])" + re.escape(phrase) + r"(?![\w-])")
         for m in list(pat.finditer(s)):
             before = s[:m.start()].split()
-            neg = _negated(before) and not phrase.split()[0] in NEGATIONS
+            neg = _negated(before) and phrase.split()[0] not in NEGATIONS
             for kind, params in LEXICON[phrase]:
                 f = _invert(kind, params) if neg else (kind, dict(params))
                 if f is not None:
