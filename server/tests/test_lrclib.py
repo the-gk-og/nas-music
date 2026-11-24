@@ -137,7 +137,9 @@ def test_prefetch_job(client, conn, app, lrc, cfg):
     lrc.get = {"id": 1, "syncedLyrics": SYNCED}
     jobs = app.state.ctx.jobs
     res = jobs.run("lyrics")["result"]
+    index = res.pop("lyricsIndex")  # found lyrics go into the lyrics search index straight away
     assert res == {"candidates": 3, "fetched": 2, "found": 2, "inFile": 1, "unreachable": 0}
+    assert index["withLyrics"] >= 2
     assert jobs.run("lyrics")["result"]["candidates"] == 1  # only the in-file track remains a candidate
     jobs.cfg = replace(jobs.cfg, lrclib_enabled=False)
     assert jobs.run("lyrics")["result"] == {"skipped": "LRCLIB is turned off"}

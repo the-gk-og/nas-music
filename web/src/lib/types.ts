@@ -700,6 +700,7 @@ export type ShelfKind =
   | 'recently_played'
   | 'continue_listening'
   | 'pinned'
+  | 'on_this_day'
   | 'mixes'
   | 'radio'
   | 'because_you_played'
@@ -750,6 +751,13 @@ export interface SearchResults {
   queues?: Queue[];
   catalog: CatalogItem[];
   catalogError?: string | null;
+  /** 0.9.0: songs whose lyrics match, with the line that matched (absent from older servers). */
+  lyrics?: LyricsMatch[];
+}
+
+export interface LyricsMatch {
+  track: Track;
+  line: string;
 }
 
 export type ToGetStatus = 'want' | 'got' | 'dismissed';

@@ -16,7 +16,7 @@ def test_v7_to_v8(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == db.SCHEMA_VERSION == 8
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION
     assert {"user_id", "kind", "item_id", "dismissed_at"} <= migrations._columns(conn, "continue_dismissed")
     assert conn.execute("SELECT username FROM users").fetchone()[0] == "owner"
     assert len(list(tmp_path.glob("nasmusic.db.v7-backup-*"))) == 1

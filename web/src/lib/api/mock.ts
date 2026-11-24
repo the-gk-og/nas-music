@@ -1063,6 +1063,21 @@ export class MockBackend {
       { id: 'recently_played', kind: 'recently_played', title: 'Recently played', layout: 'grid2', items: recent },
       { id: 'continue_listening', kind: 'continue_listening', title: 'Continue listening', layout: 'row', items: cont },
       { id: 'pinned', kind: 'pinned', title: 'Pinned', layout: 'row', items: this.pinsList.map((p) => this.item(p.type, p.id)) },
+      {
+        id: 'on_this_day',
+        kind: 'on_this_day',
+        title: 'On this day',
+        subtitle: `Around ${new Date().getDate()} ${new Date().toLocaleString('en-GB', { month: 'long' })} in earlier years`,
+        layout: 'row',
+        items: this.lib.tracks.slice(3, 9).map((t, i) => ({
+          type: 'track' as const,
+          id: t.id,
+          title: t.title,
+          subtitle: `${t.artist} · ${i < 3 ? '1 year ago' : '2 years ago'}, played ${6 - i} times`,
+          artUrl: `art/${t.albumId}`,
+          track: this.pub(t),
+        })),
+      },
     ];
     return shelves.filter((s) => s.items.length);
   }
@@ -1201,6 +1216,8 @@ export class MockBackend {
   private search(q: string, scope: string) {
     const term = q.toLowerCase().trim();
     const L = this.lib;
+    const lyrics = this.lyricMatches(term, scope === 'lyrics' ? 50 : 5);
+    if (scope === 'lyrics') return { query: q, top: null, tracks: [], albums: [], artists: [], playlists: [], queues: [], catalog: [], catalogError: null, lyrics };
     const lib = scope !== 'catalog';
     const tracks = lib ? L.tracks.filter((t) => t.title.toLowerCase().includes(term) || t.artist.toLowerCase().includes(term)).slice(0, 20).map((t) => this.pub(t)) : [];
     const albums = lib ? L.albums.filter((a) => a.title.toLowerCase().includes(term) || a.artist.toLowerCase().includes(term)) : [];
@@ -1225,7 +1242,25 @@ export class MockBackend {
           : catalog[0]
             ? { type: 'catalog', id: catalog[0].id, title: catalog[0].title, subtitle: catalog[0].artist, artUrl: catalog[0].artUrl, catalog: catalog[0] }
             : null;
-    return { query: q, top, tracks, albums, artists, playlists, queues, catalog, catalogError: null };
+    return { query: q, top, tracks, albums, artists, playlists, queues, catalog, catalogError: null, lyrics: lib ? lyrics : [] };
+  }
+
+  /** Lyrics search like the server's: every word somewhere in the song's words; the best line comes back. */
+  private lyricMatches(term: string, limit: number) {
+    const words = term.split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    const out: { track: Track; line: string }[] = [];
+    for (const [id, raw] of this.lib.lyrics) {
+      const lines = raw.split('\n').map((l) => l.replace(/\[[^\]]*\]|<[^>]*>/g, '').trim()).filter(Boolean);
+      const text = lines.join(' ').toLowerCase();
+      if (!words.every((w) => text.includes(w))) continue;
+      const score = (l: string) => words.filter((w) => l.toLowerCase().includes(w)).length;
+      const line = lines.reduce((a, b) => (score(b) > score(a) ? b : a), lines[0]);
+      const t = this.pubTrackById(id);
+      if (t) out.push({ track: t, line });
+      if (out.length >= limit) break;
+    }
+    return out;
   }
 
   // ---- media ----
