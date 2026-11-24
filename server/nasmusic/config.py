@@ -118,6 +118,11 @@ class Config:
     backup_copy_to: str | None = None           # a folder on another disk/dataset ("/backup") or rclone "remote:path"
     backup_keep: int = 14                       # nightly copies kept there
     backup_include_config: bool | None = None   # also copy config.toml + TLS cert; default: folder yes, rclone no
+    # ---- radio DJ voice (nasmusic/djvoice): spoken intros between songs in AI radio and mixes ----
+    dj_voice_enabled: bool = True               # users still switch it on themselves (setting dj.voice)
+    dj_voice: str = "en_GB-cori-medium"         # a Piper voice name (rhasspy/piper-voices), downloaded on first use
+    dj_voice_model: Path | None = None          # or a local .onnx voice (with its .onnx.json next to it)
+    dj_voice_download: bool = True              # false = never download a voice (use dj_voice_model)
     source_path: Path | None = field(default=None, compare=False)
 
     def __post_init__(self):
@@ -199,6 +204,11 @@ def from_dict(raw: dict, source: Path | None = None) -> Config:
         vals["audiobooks_root"] = pth if pth.is_absolute() else (base / pth).resolve()
     else:
         vals["audiobooks_root"] = None
+    if vals.get("dj_voice_model"):
+        pth = Path(vals["dj_voice_model"]).expanduser()
+        vals["dj_voice_model"] = pth if pth.is_absolute() else (base / pth).resolve()
+    else:
+        vals["dj_voice_model"] = None
     for key in ("tunnel_url", "cf_access_client_id", "cf_access_client_secret", "admin_password_hash",
                 "lastfm_api_key", "lastfm_api_secret", "acoustid_api_key", "lan_public_url", "cast_media_url",
                 "homeassistant_url", "homeassistant_token", "snapcast_host", "podcastindex_api_key",

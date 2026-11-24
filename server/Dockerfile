@@ -1,6 +1,7 @@
 # nas-music server image, including the web player. Build from the REPO ROOT (BuildKit required):
 #   docker build -f server/Dockerfile -t nasmusic:latest .
 #   docker build -f server/Dockerfile --build-arg WITH_ANALYSIS=1 -t nasmusic:latest .   # + Essentia extra
+#   docker build -f server/Dockerfile --build-arg WITH_DJVOICE=0 -t nasmusic:latest .    # without the radio DJ voice
 # The build context is filtered by server/Dockerfile.dockerignore.
 # Runs as uid/gid 568 (TrueNAS "apps"). Expects /data (rw: config.toml, db, cert, caches) and /music (ro).
 
@@ -22,6 +23,8 @@ RUN --mount=type=bind,source=.,target=/ctx \
 # ---------- build: resolve the locked deps into /opt/venv ----------
 FROM ${PYTHON_IMAGE} AS build
 ARG WITH_ANALYSIS=0
+# Radio DJ voice (Piper TTS, ~50 MB). The voice model itself downloads into /data on first use.
+ARG WITH_DJVOICE=1
 COPY --from=ghcr.io/astral-sh/uv:0.13.8 /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -32,10 +35,12 @@ WORKDIR /src
 COPY server/pyproject.toml server/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     EXTRA=""; if [ "$WITH_ANALYSIS" = "1" ]; then EXTRA="--extra analysis"; fi; \
+    if [ "$WITH_DJVOICE" = "1" ]; then EXTRA="$EXTRA --extra djvoice"; fi; \
     uv sync --frozen --no-dev --no-install-project $EXTRA
 COPY server/nasmusic ./nasmusic
 RUN --mount=type=cache,target=/root/.cache/uv \
     EXTRA=""; if [ "$WITH_ANALYSIS" = "1" ]; then EXTRA="--extra analysis"; fi; \
+    if [ "$WITH_DJVOICE" = "1" ]; then EXTRA="$EXTRA --extra djvoice"; fi; \
     uv sync --frozen --no-dev --no-editable $EXTRA
 
 # ---------- runtime ----------
