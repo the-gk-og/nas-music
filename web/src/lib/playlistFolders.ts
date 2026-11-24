@@ -1,4 +1,4 @@
-// v9 playlist folders: pure helpers for the sidebar tree, the Library playlists chip and the "Move to folder" picker.
+// v10 playlist folders: pure helpers for the sidebar tree, the Library playlists chip and the "Move to folder" picker.
 import type { Playlist, PlaylistFolder } from './types';
 
 export interface FolderNode {

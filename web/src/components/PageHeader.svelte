@@ -34,7 +34,7 @@
 
   const styleKind = $derived(kind === 'album' || kind === 'artist' ? kind : 'playlist');
   const style = $derived<PageStyle>(appearance.pageStyle(styleKind));
-  const pinKind = $derived(kind === 'work' ? null : kind); // v9 works can't be pinned
+  const pinKind = $derived(kind === 'work' ? null : kind); // v10 works can't be pinned
   let color = $state('rgb(40,40,40)');
   let menuOpen = $state(false);
 

@@ -1,4 +1,4 @@
-"""Classical music (schema v9): work/movement from tags or titles, composers and works API, backfill."""
+"""Classical music (schema v10): work/movement from tags or titles, composers and works API, backfill."""
 import pytest
 
 from nasmusic.library import classical, scanner

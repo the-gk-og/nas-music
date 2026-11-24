@@ -196,7 +196,7 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
             if (style == "big") BigHeader(MediaItems.artUrl(a.id, 512), a.title, a.artist, meta, MediaItems.artUrl(a.id, 128), list, play, shuffle, radio, { ui.go("artist/${a.artistId}") }, menu)
             else SimpleHeader(c, a.id, a.title, a.artist, meta, play, shuffle, radio, menu)
         }
-        albumTrackItems(c, a.tracks, name, classical)  // api 0.9: grouped by work in classical mode
+        albumTrackItems(c, a.tracks, name, classical)  // api 0.10: grouped by work in classical mode
         if (style == "big" && more.isNotEmpty()) item { ShelfHeader("More by ${a.artist}"); ShelfRow(c, more) }
         item { Spacer(Modifier.height(24.dp)) }
     }

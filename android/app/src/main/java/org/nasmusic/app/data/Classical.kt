@@ -10,7 +10,7 @@ import org.nasmusic.app.data.api.PlaylistFolder
 import org.nasmusic.app.data.api.Track
 import org.nasmusic.app.data.api.UserSettings
 
-/** api 0.9 classical mode: group albums by work, movement names, composer before performer. Pure helpers. */
+/** api 0.10 classical mode: group albums by work, movement names, composer before performer. Pure helpers. */
 object Classical {
     data class Group(val workId: String?, val work: String?, val composer: String?, val tracks: List<Track>, val start: Int)
 

@@ -75,7 +75,7 @@ def track_dict(r: sqlite3.Row) -> dict:
     if r["missing"]:
         d["missing"] = True
     keys = r.keys()
-    if "work" in keys:  # v9 classical fields (only when set)
+    if "work" in keys:  # v10 classical fields (only when set)
         if r["composer"]:
             d["composer"] = r["composer"]
         if r["work"]:

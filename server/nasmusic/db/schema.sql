@@ -1,4 +1,4 @@
--- nas-music shared schema v9 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v10 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
@@ -22,7 +22,8 @@
 -- are upgraded by nasmusic.db.migrations.
 -- v8 adds toget_admin (the admin's check-off of users' want-list items) and continue_dismissed (Continue
 -- listening items the user swiped away; an item comes back once it is played again after that).
--- v9 adds playlist folders (playlist_folders, playlist_folder_items: each user files the playlists they can
+-- v9 adds the lyrics search index (lyrics_index + the FTS5 table lyrics_fts), filled by the scan job.
+-- v10 adds playlist folders (playlist_folders, playlist_folder_items: each user files the playlists they can
 -- see, their own and shared ones, into their own folder tree) and classical-music fields on tracks (work,
 -- movement, movement_no: from WORK/MOVEMENTNAME/MOVEMENT tags or a "Work: I. Movement" title).
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
@@ -132,8 +133,8 @@ CREATE TABLE IF NOT EXISTS tracks (
     rg_album_peak   REAL,
     rg_source       TEXT,
     loudness_lufs   REAL,              -- integrated loudness of the track (measured, or derived from the gain)
-    -- v9 classical music (nasmusic.library.classical). `work` is the composition a track belongs to, from the
-    -- WORK tag (ID3 TIT1/GRP1, MP4 \xa9wrk) or a "Work: I. Movement" title; NULL = not read since v9
+    -- v10 classical music (nasmusic.library.classical). `work` is the composition a track belongs to, from the
+    -- WORK tag (ID3 TIT1/GRP1, MP4 \xa9wrk) or a "Work: I. Movement" title; NULL = not read since v10
     -- (the scanner backfills it), '' = not part of a work. movement_no is the movement's number in the work.
     work            TEXT,
     movement        TEXT,
@@ -276,7 +277,7 @@ CREATE TABLE IF NOT EXISTS playlist_activity (
 );
 CREATE INDEX IF NOT EXISTS playlist_activity_pl ON playlist_activity(playlist_id, id);
 
--- v9: playlist folders. Each user has their own tree (parent_id NULL = top level); `position` orders siblings.
+-- v10: playlist folders. Each user has their own tree (parent_id NULL = top level); `position` orders siblings.
 -- playlist_folder_items files a playlist the user can see (own or shared) into one of their folders; a
 -- playlist with no row is at the top level. Deleting a folder moves its contents up (nasmusic.app.playlist_folders).
 CREATE TABLE IF NOT EXISTS playlist_folders (
@@ -1111,4 +1112,25 @@ CREATE TABLE IF NOT EXISTS continue_dismissed (
     item_id      TEXT NOT NULL,
     dismissed_at TEXT NOT NULL,
     PRIMARY KEY (user_id, kind, item_id)
+);
+
+-- ---------- v9: lyrics search ----------
+
+-- One row per present track once the scan job has looked for its lyrics. The indexed text is what everyone
+-- sees by default: an admin's edit (tag_overrides field 'lyrics'), else the file's own lyrics (embedded tags or
+-- a sidecar .lrc), else cached LRCLIB lyrics; timestamps stripped. Per-user lyrics edits are private and never
+-- indexed. source 'none' = looked, found nothing. Re-read when tracks.mtime changes, the admin edit or the
+-- LRCLIB cache is newer than indexed_at, or a full scan runs.
+CREATE TABLE IF NOT EXISTS lyrics_index (
+    track_id   TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    source     TEXT NOT NULL CHECK (source IN ('none','library','embedded','lrc_file','lrclib')),
+    mtime      REAL,                   -- tracks.mtime when the file was read
+    indexed_at TEXT NOT NULL
+);
+
+-- Full-text index over the same lyrics (one row per track with source != 'none'; rowid is not meaningful).
+CREATE VIRTUAL TABLE IF NOT EXISTS lyrics_fts USING fts5(
+    track_id UNINDEXED,
+    body,
+    tokenize = 'unicode61 remove_diacritics 2'
 );

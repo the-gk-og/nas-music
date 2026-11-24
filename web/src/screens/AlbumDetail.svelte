@@ -33,7 +33,7 @@
   const name = $derived(album ? `Album: ${album.title}` : '');
   const meta = { source: 'library' as const, addedFrom: 'album' };
   const item = $derived<ShelfItem | null>(album ? { type: 'album', id: album.id, title: album.title, subtitle: album.artist, albumId: album.id, album } : null);
-  // v9 classical mode: movements grouped under their work, each work playable on its own.
+  // v10 classical mode: movements grouped under their work, each work playable on its own.
   const groups = $derived(album && appearance.prefs.classical && hasWorks(album.tracks) ? groupByWork(album.tracks) : null);
   const currentId = $derived(player.shown.track?.id);
   function playWork(tracks: Track[], work: string) {

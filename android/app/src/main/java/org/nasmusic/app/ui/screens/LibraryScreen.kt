@@ -87,7 +87,7 @@ fun LibraryScreen(c: AppContainer) {
     var sort by rememberSaveable(chip) { mutableStateOf(SORTS[chip]?.first()?.first ?: "") }
     var sortMenu by remember { mutableStateOf(false) }
     val view = settings.viewFor(chip)
-    // api 0.9: the Composers chip only in classical mode
+    // api 0.10: the Composers chip only in classical mode
     val classical by org.nasmusic.app.data.ClassicalMode.on.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { org.nasmusic.app.data.ClassicalMode.ensure(c.context, c.api) }
 
@@ -150,7 +150,7 @@ private fun ListRow(title: String, subtitle: String?, leading: @Composable () ->
 private fun PlaylistsSection(c: AppContainer, view: String, sort: String) {
     val ui = LocalUi.current
     var lists by remember { mutableStateOf<List<Playlist>?>(null) }
-    // api 0.9: playlists filed in folders show inside their folder, not here
+    // api 0.10: playlists filed in folders show inside their folder, not here
     var folders by remember { mutableStateOf<List<org.nasmusic.app.data.api.PlaylistFolder>>(emptyList()) }
     val folderActions = remember { FolderActions() }
     suspend fun reload() {

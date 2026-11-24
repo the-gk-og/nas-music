@@ -21,7 +21,7 @@
     current?: boolean;
     handle?: boolean;
     showAlbum?: boolean;
-    /** v9: under a work heading, show the movement name instead of the full title. */
+    /** v10: under a work heading, show the movement name instead of the full title. */
     movement?: boolean;
     onplay: () => void;
     onmenu: (ev: MouseEvent) => void;

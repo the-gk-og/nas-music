@@ -14,7 +14,7 @@
   const form = $derived(appearance.form);
   const tabs = $derived(form === 'desktop' ? TABS.filter((t) => t.id !== 'queue') : TABS);
 
-  // v9 playlist folders: a collapsible tree; drag a playlist or folder onto a folder (or the header) to move it.
+  // v10 playlist folders: a collapsible tree; drag a playlist or folder onto a folder (or the header) to move it.
   const tree = $derived(buildTree(library.folders, library.playlists));
   let open = $state<Record<string, boolean>>(loadJson('nm.navFolders', {}));
   function toggle(id: string) {

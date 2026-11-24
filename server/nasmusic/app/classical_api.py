@@ -1,4 +1,4 @@
-"""Classical music (schema v9): composers, and works with their movements (see nasmusic.library.classical).
+"""Classical music (schema v10): composers, and works with their movements (see nasmusic.library.classical).
 
 Clients show these when the user turns on classical mode (`library.classical` in /me/settings); tracks carry
 `work` / `workId` / `movement` / `movementNo` / `composer` whether or not it is on."""

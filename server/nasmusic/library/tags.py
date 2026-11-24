@@ -42,7 +42,7 @@ class TrackTags:
     rg_track_peak: float | None = None   # linear
     rg_album_gain: float | None = None
     rg_album_peak: float | None = None
-    # v9 classical music (see nasmusic.library.classical)
+    # v10 classical music (see nasmusic.library.classical)
     work: str | None = None
     movement: str | None = None
     movement_no: int | None = None

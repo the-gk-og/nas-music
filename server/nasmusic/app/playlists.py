@@ -204,7 +204,7 @@ def create_playlist(conn: sqlite3.Connection, uid: str, name: str, track_ids: li
                      (pid, uid, name.strip()[:200] or "Playlist", now, now))
         _insert(conn, pid, uid, ids, [float(i + 1) for i in range(len(ids))])
         _log(conn, pid, uid, "create", count=len(ids))
-        if folder_id is not None:  # v9
+        if folder_id is not None:  # v10
             conn.execute("INSERT INTO playlist_folder_items (user_id, playlist_id, folder_id) VALUES (?, ?, ?)",
                          (uid, pid, folder_id))
     return get_playlist(conn, uid, pid)
@@ -367,7 +367,7 @@ def remove_member(conn: sqlite3.Connection, uid: str, pid: str, member_id: str) 
         if conn.execute("DELETE FROM playlist_members WHERE playlist_id = ? AND user_id = ?",
                         (pid, member_id)).rowcount != 1:
             raise NotFound("not a member")
-        # v9: their filing of it into their folders goes with their access
+        # v10: their filing of it into their folders goes with their access
         conn.execute("DELETE FROM playlist_folder_items WHERE user_id = ? AND playlist_id = ?", (member_id, pid))
         _touch(conn, pid)
         _log(conn, pid, uid, "leave" if member_id == uid else "member_remove", user=u[0] if u else None)

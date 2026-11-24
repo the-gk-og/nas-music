@@ -24,7 +24,7 @@
     ['folders', 'Folders'],
     ['songs', 'Songs'],
   ];
-  // v9: Composers only in classical mode
+  // v10: Composers only in classical mode
   const CHIPS = $derived(ALL_CHIPS.filter(([c]) => c !== 'composers' || appearance.prefs.classical));
   const SORTS: Record<Chip, [string, string][]> = {
     playlists: [['recent', 'Recently updated'], ['name', 'Name']],
@@ -53,7 +53,7 @@
   let genres = $state<{ name: string; trackCount?: number }[] | null>(null);
   let songs = $state<Track[] | null>(null);
   let composers = $state<Composer[] | null>(null);
-  /** v9: the playlist folder being browsed (null = top level). */
+  /** v10: the playlist folder being browsed (null = top level). */
   let inFolder = $state<string | null>(null);
 
   $effect(() => {

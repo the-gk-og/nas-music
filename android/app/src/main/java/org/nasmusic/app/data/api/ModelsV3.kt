@@ -13,7 +13,7 @@ data class ShelfFeed(val shelves: List<Shelf> = emptyList())
 data class Shelf(
     /** Stable id for ordering/hiding, e.g. "recently_played", "byp:album:<id>". */
     val id: String,
-    /** start_radio | devices | recently_played | continue_listening | pinned | mixes | radio | because_you_played | release_radar | suggestions | to_get | blends | wrapped */
+    /** start_radio | devices | recently_played | continue_listening | pinned | on_this_day | mixes | radio | because_you_played | release_radar | suggestions | to_get | blends | wrapped */
     val kind: String = id,
     val title: String,
     val subtitle: String? = null,
@@ -206,7 +206,13 @@ data class SearchResults(
     /** "Not in your library". */
     val catalog: List<CatalogItem> = emptyList(),
     val catalogError: String? = null,
+    /** api 0.9: songs whose lyrics match, with the line that matched (empty from older servers). */
+    val lyrics: List<LyricsMatch> = emptyList(),
 )
+
+/** A lyrics search hit (api 0.9). */
+@Serializable
+data class LyricsMatch(val track: Track, val line: String = "")
 
 @Serializable
 data class ToGetItem(

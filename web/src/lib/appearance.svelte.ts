@@ -14,7 +14,7 @@ export interface AppearancePrefs {
   albumStyle: PageStyle;
   accent: string;
   homeShelves: ShelfPrefs;
-  /** v9 classical mode (`library.classical`). */
+  /** v10 classical mode (`library.classical`). */
   classical: boolean;
 }
 

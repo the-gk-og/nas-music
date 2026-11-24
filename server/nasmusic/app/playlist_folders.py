@@ -1,4 +1,4 @@
-"""Playlist folders (schema v9).
+"""Playlist folders (schema v10).
 
 Each user has their own folder tree (playlist_folders, parent_id NULL = top level) and files into it any
 playlist they can see, their own or one shared with them (playlist_folder_items). Filing is personal: the

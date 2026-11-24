@@ -80,6 +80,19 @@ export class MockBackend {
     listenbrainz: { connected: false, enabled: false, nowPlaying: true, username: null },
     lastfm: { connected: false, enabled: false, nowPlaying: true, username: null },
   };
+  private importMock(path: string, method: string) {
+    const status = { imported: { listenbrainz: 0, lastfm: 0, spotify: 0 }, lastfm: null, lastfmAvailable: true, lastfmUsername: null };
+    const hist = { scanned: 120, matched: 80, imported: 78, alreadyKnown: 2, unmatched: 40, tooShort: 12, topMissing: [{ artist: 'Somebody', title: 'Elsewhere', plays: 9 }], toGetAdded: 0 };
+    const playlist = { name: 'Imported', total: 3, matched: 2, missing: 1, playlistId: 'p1', unchanged: false, toGetAdded: 1, missingSongs: [{ artist: 'Somebody', title: 'Elsewhere' }] };
+    if (path === '/me/import') return status;
+    if (path === '/me/import/spotify') return { files: ['Streaming_History_Audio_2024.json'], playlists: [], history: hist, toGetAdded: 0 };
+    if (path === '/me/import/lastfm/csv') return hist;
+    if (path === '/me/import/lastfm') return { ...status, lastfm: { state: 'done', username: 'me', ...hist } };
+    if (path === '/me/import/m3u') return playlist;
+    if (path.startsWith('/me/import/history/') && method === 'DELETE') return { removed: 0, ...status };
+    throw new HttpError(404, 'not found');
+  }
+
   private scrobbleMock(path: string, method: string, body: Record<string, unknown>) {
     const parts = path.split('/'); // ['', 'me', 'scrobble', service?, action?]
     const svc = parts[3];
@@ -253,7 +266,7 @@ export class MockBackend {
     const tracks = this.tracksOf(p.trackIds);
     return { id: p.id, name: p.name, createdAt: p.createdAt, updatedAt: p.updatedAt, trackCount: tracks.length, durationS: tracks.reduce((s, t) => s + t.durationS, 0), role: 'owner', rev: 0, memberCount: 0, collaborative: false, folderId: p.folderId ?? null, ...(withTracks ? { tracks } : {}) };
   }
-  /** v9 playlist folders, depth first like the server. */
+  /** v10 playlist folders, depth first like the server. */
   private foldersOut(): PlaylistFolder[] {
     const out: PlaylistFolder[] = [];
     const walk = (parent: string | null) => {
@@ -300,7 +313,7 @@ export class MockBackend {
     const method = (init.method ?? 'GET').toUpperCase();
     const auth = new Headers(init.headers).get('Authorization');
     const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-    const body = init.body ? JSON.parse(String(init.body)) : {};
+    const body = typeof init.body === 'string' && init.body ? JSON.parse(init.body) : {};
     const path = url.pathname.replace(/^.*\/api\/v1/, '');
     try {
       const out = this.route(method, path, url.searchParams, body, token);
@@ -360,6 +373,7 @@ export class MockBackend {
       return { settings: this.settings };
     }
     if (path === '/me/scrobble' || path.startsWith('/me/scrobble/')) return this.scrobbleMock(path, method, body);
+    if (path === '/me/import' || path.startsWith('/me/import/')) return this.importMock(path, method);
     if (path === '/me/notifications') return { items: this.notes, unread: this.notes.filter((n) => !n.read).length };
     if (path === '/me/notifications/read') {
       const n = this.notes.filter((x) => !x.read).length;
@@ -609,7 +623,7 @@ export class MockBackend {
       };
     }
 
-    // v9 playlist folders
+    // v10 playlist folders
     if (path === '/playlist-folders') {
       if (method === 'POST') {
         const f = { id: nid('f'), name: String(body.name), parentId: (body.parentId as string | null) ?? null, createdAt: iso(), playlistCount: 0 };
@@ -636,7 +650,7 @@ export class MockBackend {
       p.folderId = (body.folderId as string | null) ?? null;
       return this.plOut(p, false);
     }
-    // v9 classical: the mock library has no works
+    // v10 classical: the mock library has no works
     if (path === '/library/composers') return [];
     if (path === '/library/works') return [];
     if (m(/^\/library\/works\/([^/]+)$/)) throw new HttpError(404, 'not found');
@@ -676,6 +690,7 @@ export class MockBackend {
       this.getP(r[1]);
       return [{ userId: me.id, username: me.username, role: 'owner' }];
     }
+    if (m(/^\/playlists\/([^/]+)\/m3u$/)) return '#EXTM3U\n';
     if ((r = m(/^\/playlists\/([^/]+)\/activity$/))) {
       this.getP(r[1]);
       return [];
@@ -1094,6 +1109,21 @@ export class MockBackend {
       { id: 'recently_played', kind: 'recently_played', title: 'Recently played', layout: 'grid2', items: recent },
       { id: 'continue_listening', kind: 'continue_listening', title: 'Continue listening', layout: 'row', items: cont },
       { id: 'pinned', kind: 'pinned', title: 'Pinned', layout: 'row', items: this.pinsList.map((p) => this.item(p.type, p.id)) },
+      {
+        id: 'on_this_day',
+        kind: 'on_this_day',
+        title: 'On this day',
+        subtitle: `Around ${new Date().getDate()} ${new Date().toLocaleString('en-GB', { month: 'long' })} in earlier years`,
+        layout: 'row',
+        items: this.lib.tracks.slice(3, 9).map((t, i) => ({
+          type: 'track' as const,
+          id: t.id,
+          title: t.title,
+          subtitle: `${t.artist} · ${i < 3 ? '1 year ago' : '2 years ago'}, played ${6 - i} times`,
+          artUrl: `art/${t.albumId}`,
+          track: this.pub(t),
+        })),
+      },
     ];
     return shelves.filter((s) => s.items.length);
   }
@@ -1232,6 +1262,8 @@ export class MockBackend {
   private search(q: string, scope: string) {
     const term = q.toLowerCase().trim();
     const L = this.lib;
+    const lyrics = this.lyricMatches(term, scope === 'lyrics' ? 50 : 5);
+    if (scope === 'lyrics') return { query: q, top: null, tracks: [], albums: [], artists: [], playlists: [], queues: [], catalog: [], catalogError: null, lyrics };
     const lib = scope !== 'catalog';
     const tracks = lib ? L.tracks.filter((t) => t.title.toLowerCase().includes(term) || t.artist.toLowerCase().includes(term)).slice(0, 20).map((t) => this.pub(t)) : [];
     const albums = lib ? L.albums.filter((a) => a.title.toLowerCase().includes(term) || a.artist.toLowerCase().includes(term)) : [];
@@ -1256,7 +1288,25 @@ export class MockBackend {
           : catalog[0]
             ? { type: 'catalog', id: catalog[0].id, title: catalog[0].title, subtitle: catalog[0].artist, artUrl: catalog[0].artUrl, catalog: catalog[0] }
             : null;
-    return { query: q, top, tracks, albums, artists, playlists, queues, catalog, catalogError: null };
+    return { query: q, top, tracks, albums, artists, playlists, queues, catalog, catalogError: null, lyrics: lib ? lyrics : [] };
+  }
+
+  /** Lyrics search like the server's: every word somewhere in the song's words; the best line comes back. */
+  private lyricMatches(term: string, limit: number) {
+    const words = term.split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    const out: { track: Track; line: string }[] = [];
+    for (const [id, raw] of this.lib.lyrics) {
+      const lines = raw.split('\n').map((l) => l.replace(/\[[^\]]*\]|<[^>]*>/g, '').trim()).filter(Boolean);
+      const text = lines.join(' ').toLowerCase();
+      if (!words.every((w) => text.includes(w))) continue;
+      const score = (l: string) => words.filter((w) => l.toLowerCase().includes(w)).length;
+      const line = lines.reduce((a, b) => (score(b) > score(a) ? b : a), lines[0]);
+      const t = this.pubTrackById(id);
+      if (t) out.push({ track: t, line });
+      if (out.length >= limit) break;
+    }
+    return out;
   }
 
   // ---- media ----

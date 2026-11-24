@@ -238,7 +238,7 @@ interface NasMusicApi {
     @GET("playlists")
     suspend fun playlists(): List<Playlist>
 
-    // ---- api 0.9: playlist folders (per user) ----
+    // ---- api 0.10: playlist folders (per user) ----
     @POST("playlists")
     suspend fun createPlaylistIn(@Body body: NewPlaylistIn): Playlist
 
@@ -259,7 +259,7 @@ interface NasMusicApi {
     @PUT("playlists/{id}/folder")
     suspend fun setPlaylistFolder(@Path("id") id: String, @Body body: kotlinx.serialization.json.JsonObject): Playlist
 
-    // ---- api 0.9: classical ----
+    // ---- api 0.10: classical ----
     @GET("library/composers")
     suspend fun composers(): List<Composer>
 

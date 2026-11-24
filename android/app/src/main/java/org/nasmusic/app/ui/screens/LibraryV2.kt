@@ -204,7 +204,7 @@ fun PlaylistsScreen(c: AppContainer) {
     var lists by remember { mutableStateOf<List<Playlist>?>(null) }
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
-    // api 0.9: folders first; playlists filed in a folder show inside it
+    // api 0.10: folders first; playlists filed in a folder show inside it
     var folders by remember { mutableStateOf<List<org.nasmusic.app.data.api.PlaylistFolder>>(emptyList()) }
     val folderActions = remember { FolderActions() }
     suspend fun reload() {
@@ -291,7 +291,7 @@ fun PlaylistScreen(c: AppContainer, id: String) {
     var renaming by remember { mutableStateOf(false) }
     var membersOpen by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
-    // api 0.9: "Move to folder" (each user files playlists, shared ones too, in their own folders)
+    // api 0.10: "Move to folder" (each user files playlists, shared ones too, in their own folders)
     val folderActions = remember { FolderActions() }
     var folders by remember { mutableStateOf<List<org.nasmusic.app.data.api.PlaylistFolder>>(emptyList()) }
     suspend fun reload() { p = runCatching { c.api.playlist(id) }.getOrNull() }

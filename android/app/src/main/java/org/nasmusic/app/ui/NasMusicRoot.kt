@@ -263,7 +263,7 @@ private fun NavGraphBuilder.routes(c: AppContainer, motion: MotionLevel) {
     composable("artist/{id}") { e -> ArtistScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("genre/{name}") { e -> GenreScreen(c, android.net.Uri.decode(e.arguments?.getString("name").orEmpty())) }
     composable("playlist/{id}") { e -> PlaylistScreen(c, e.arguments?.getString("id").orEmpty()) }
-    // api 0.9: playlist folders and classical works
+    // api 0.10: playlist folders and classical works
     composable("playlist-folder/{id}") { e -> PlaylistFolderScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("composer/{name}") { e -> ComposerScreen(c, android.net.Uri.decode(e.arguments?.getString("name").orEmpty())) }
     composable("work/{id}") { e -> WorkScreen(c, android.net.Uri.decode(e.arguments?.getString("id").orEmpty())) }

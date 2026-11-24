@@ -70,7 +70,7 @@ fun SongRow(
                     ExplicitBadge(track.explicit)
                     Text(track.title, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
                 }
-                // api 0.9 classical mode: composer before performer
+                // api 0.10 classical mode: composer before performer
                 val classical by org.nasmusic.app.data.ClassicalMode.on.collectAsState()
                 Text(org.nasmusic.app.data.Classical.artistLine(track, classical), color = color.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                 Row {

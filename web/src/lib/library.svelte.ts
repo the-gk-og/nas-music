@@ -12,7 +12,7 @@ export function isPinType(t: string): t is PinType {
 
 class LibraryStore {
   playlists = $state<Playlist[]>([]);
-  /** v9 playlist folders (the user's own); [] on older servers. */
+  /** v10 playlist folders (the user's own); [] on older servers. */
   folders = $state<PlaylistFolder[]>([]);
   /** v7 smart playlists (rule-based); [] on servers without them. */
   smartPlaylists = $state<SmartPlaylist[]>([]);

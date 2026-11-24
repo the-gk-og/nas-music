@@ -45,17 +45,17 @@ export interface Track {
   familyHidden?: boolean;
   /** v7 DJ automix analysis (beat grid, key, mix points); absent until the server has analysed the track. */
   mix?: TrackMix | null;
-  /** v9: only when tagged. */
+  /** v10: only when tagged. */
   composer?: string | null;
-  /** v9 classical: the work this track is a movement of (absent when it is not part of one). */
+  /** v10 classical: the work this track is a movement of (absent when it is not part of one). */
   work?: string;
   workId?: string;
-  /** v9: the movement name without its number ("Allegro con brio"). */
+  /** v10: the movement name without its number ("Allegro con brio"). */
   movement?: string;
   movementNo?: number;
 }
 
-/** v9 classical: the tracks of one album that share a work. */
+/** v10 classical: the tracks of one album that share a work. */
 export interface Work {
   id: string;
   title: string;
@@ -78,7 +78,7 @@ export interface Composer {
   trackCount: number;
 }
 
-/** v9: one of the user's own playlist folders. */
+/** v10: one of the user's own playlist folders. */
 export interface PlaylistFolder {
   id: string;
   name: string;
@@ -194,6 +194,41 @@ export interface ScrobbleStatus {
   services: ScrobbleService[];
   import?: ScrobbleImport | null;
   importedEvents: number;
+}
+
+/** Imports from other services (GET /me/import, POST /me/import/*). */
+export type ImportSource = 'listenbrainz' | 'lastfm' | 'spotify';
+export interface ImportHistoryResult {
+  scanned: number;
+  matched: number;
+  imported: number;
+  alreadyKnown: number;
+  unmatched: number;
+  tooShort?: number;
+  topMissing?: { artist: string; title: string; plays: number }[];
+  toGetAdded?: number;
+}
+export interface ImportedPlaylist {
+  name: string;
+  total: number;
+  matched: number;
+  missing: number;
+  playlistId: string | null;
+  unchanged: boolean;
+  toGetAdded: number;
+  missingSongs?: { artist: string | null; title: string | null }[];
+}
+export interface SpotifyImportResult {
+  files: string[];
+  playlists: ImportedPlaylist[];
+  history: ImportHistoryResult | null;
+  toGetAdded: number;
+}
+export interface ImportStatus {
+  imported: Record<ImportSource, number>;
+  lastfm?: (Partial<ImportHistoryResult> & { state: 'running' | 'done' | 'error'; username?: string; page?: number; pages?: number; error?: string; startedAt?: string; finishedAt?: string }) | null;
+  lastfmAvailable: boolean;
+  lastfmUsername?: string | null;
 }
 
 /** v7 in-app notification (bell list). */
@@ -399,7 +434,7 @@ export interface Playlist {
   collaborative?: boolean;
   /** Parallel to `tracks`. */
   entries?: PlaylistEntry[];
-  /** v9: the folder of the caller's it is filed in (null = top level). */
+  /** v10: the folder of the caller's it is filed in (null = top level). */
   folderId?: string | null;
 }
 
@@ -707,6 +742,7 @@ export type ShelfKind =
   | 'recently_played'
   | 'continue_listening'
   | 'pinned'
+  | 'on_this_day'
   | 'mixes'
   | 'radio'
   | 'because_you_played'
@@ -757,6 +793,13 @@ export interface SearchResults {
   queues?: Queue[];
   catalog: CatalogItem[];
   catalogError?: string | null;
+  /** 0.9.0: songs whose lyrics match, with the line that matched (absent from older servers). */
+  lyrics?: LyricsMatch[];
+}
+
+export interface LyricsMatch {
+  track: Track;
+  line: string;
 }
 
 export type ToGetStatus = 'want' | 'got' | 'dismissed';

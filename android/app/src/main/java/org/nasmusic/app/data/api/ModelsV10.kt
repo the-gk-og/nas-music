@@ -2,7 +2,7 @@ package org.nasmusic.app.data.api
 
 import kotlinx.serialization.Serializable
 
-// ---------- api 0.9 (schema v9): playlist folders, classical works ----------
+// ---------- api 0.10 (schema v10): playlist folders, classical works ----------
 
 /** One of the user's own playlist folders (GET /playlist-folders lists them depth first). */
 @Serializable

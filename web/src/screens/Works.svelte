@@ -1,5 +1,5 @@
 <script lang="ts">
-  // v9 classical: a composer's works (cards), and one work with its movements ("play whole work").
+  // v10 classical: a composer's works (cards), and one work with its movements ("play whole work").
   import Cover from '../components/Cover.svelte';
   import PageHeader from '../components/PageHeader.svelte';
   import TrackRow from '../components/TrackRow.svelte';

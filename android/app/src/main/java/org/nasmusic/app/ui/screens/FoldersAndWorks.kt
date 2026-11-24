@@ -70,7 +70,7 @@ import org.nasmusic.app.ui.ScreenTitle
 import org.nasmusic.app.ui.SongRow
 import org.nasmusic.app.ui.songItems
 
-// ---------- api 0.9: playlist folders ----------
+// ---------- api 0.10: playlist folders ----------
 
 private fun fmtMin(s: Double): String = "${(s / 60).toInt()} min"
 
@@ -271,7 +271,7 @@ fun PlaylistFolderScreen(c: AppContainer, id: String) {
     FolderDialogs(c, actions, all) { reload() }
 }
 
-// ---------- api 0.9: classical mode ----------
+// ---------- api 0.10: classical mode ----------
 
 @Composable
 fun ClassicalModeSwitch(c: AppContainer) {

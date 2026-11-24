@@ -1,12 +1,12 @@
-"""Classical music (schema v9): which work and movement a track is.
+"""Classical music (schema v10): which work and movement a track is.
 
 A track's work comes from its WORK tag (Vorbis WORK, ID3 TXXX:WORK or TIT1 next to a movement tag, MP4 \\xa9wrk)
 and its movement from MOVEMENTNAME / MOVEMENT (ID3 MVNM / MVIN, MP4 \\xa9mvn / \\xa9mvi). Files without them
 often carry the work in the title instead ("Symphony No. 5 in C minor, Op. 67: I. Allegro con brio"); that is
 split when the track has a composer, so pop titles with a colon are left alone.
 
-tracks.work is NULL until a track is read under v9 and '' when it is not part of a work. `backfill` reads the
-work tags of tracks scanned before v9 (read-only), a time-boxed batch after each library scan.
+tracks.work is NULL until a track is read under v10 and '' when it is not part of a work. `backfill` reads the
+work tags of tracks scanned before v10 (read-only), a time-boxed batch after each library scan.
 
 Works are not stored: a work is the tracks of one album that share `work`. Its id is
 `<album id>.<12 hex of sha1(work)>`, so it is stable across scans and needs no table."""
@@ -97,7 +97,7 @@ def split_work_id(wid: str) -> tuple[str, str] | None:
     return album_id, h
 
 
-# ---------- backfill of tracks scanned before v9 ----------
+# ---------- backfill of tracks scanned before v10 ----------
 
 
 def backfill(cfg: Config, conn: sqlite3.Connection, budget_s: float = 60.0, batch: int = 200) -> int:

@@ -1,4 +1,4 @@
-// v9 classical mode (`library.classical`): group an album's tracks by work, show movement names, put the
+// v10 classical mode (`library.classical`): group an album's tracks by work, show movement names, put the
 // composer before the performer.
 import type { Track } from './types';
 

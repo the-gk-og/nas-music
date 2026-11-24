@@ -1,4 +1,4 @@
-"""Playlist folders (schema v9): per-user trees, filing own and shared playlists, moves, deletes."""
+"""Playlist folders (schema v10): per-user trees, filing own and shared playlists, moves, deletes."""
 from tests.conftest import track_ids
 
 
