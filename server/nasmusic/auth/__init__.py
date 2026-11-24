@@ -20,6 +20,7 @@ PAIR_CODE_TTL = timedelta(minutes=10)
 PAIR_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I
 PAIR_CODE_LEN = 8
 LAST_SEEN_RESOLUTION_S = 60
+DEVICE_IDLE_EXPIRY = timedelta(days=365)  # a device login unused this long stops working (sign in again)
 
 # ---------- passwords ----------
 
@@ -134,7 +135,7 @@ def pair_device(conn: sqlite3.Connection, code: str, device_name: str, kind: str
 def device_for_token(conn: sqlite3.Connection, token: str) -> Device | None:
     """Resolve a bearer token. Revoked devices and disabled users get None."""
     row = conn.execute(
-        "SELECT d.id, d.name, d.kind, d.last_seen, u.id AS user_id, u.username, u.is_admin "
+        "SELECT d.id, d.name, d.kind, d.last_seen, d.created_at, u.id AS user_id, u.username, u.is_admin "
         "FROM devices d JOIN users u ON u.id = d.user_id "
         "WHERE d.token_hash = ? AND d.revoked = 0 AND u.disabled = 0",
         (token_hash(token),),
@@ -143,6 +144,9 @@ def device_for_token(conn: sqlite3.Connection, token: str) -> Device | None:
         return None
     now = datetime.now(UTC)
     last = row["last_seen"]
+    if (last or row["created_at"]) < iso(now - DEVICE_IDLE_EXPIRY):
+        conn.execute("UPDATE devices SET revoked = 1 WHERE id = ?", (row["id"],))
+        return None
     if last is None or last < iso(now - timedelta(seconds=LAST_SEEN_RESOLUTION_S)):
         conn.execute("UPDATE devices SET last_seen = ? WHERE id = ?", (iso(now), row["id"]))
     return Device(id=row["id"], name=row["name"], user_id=row["user_id"], username=row["username"],

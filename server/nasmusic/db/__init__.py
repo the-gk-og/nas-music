@@ -14,6 +14,9 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=30000")
+    # WAL + NORMAL: commits no longer fsync (only checkpoints do). Still crash-safe for the database; a power cut
+    # can lose the last moments of commits. Every write (play events, last_seen, uploads) gets much cheaper.
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 

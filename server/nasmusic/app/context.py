@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request, status
 
@@ -37,6 +38,8 @@ class AppContext:
     scrobbler: object | None = None        # nasmusic.app.scrobble.Scrobbler (v7)
     jam_hub: object | None = None          # nasmusic.jam.hub.JamHub (created on first use, see app.jam_api)
     login_limiter: users.RateLimiter = field(default_factory=lambda: users.RateLimiter(5, 60.0))
+    # Family-mode unlock PINs can be 4 digits: 5 tries per 15 minutes makes guessing one take weeks, not a day.
+    pin_limiter: users.RateLimiter = field(default_factory=lambda: users.RateLimiter(5, 900.0))
 
     @property
     def data_dir(self) -> Path:
@@ -74,6 +77,43 @@ def request_token(request: Request) -> str | None:
     if request.url.path.startswith(QUERY_TOKEN_PATHS):
         return request.query_params.get("token") or None
     return None
+
+
+def _netloc(url_or_host: str | None, scheme: str | None = None) -> str | None:
+    """Lower-case host[:port] with the scheme's default port dropped, for comparing origins."""
+    if not url_or_host:
+        return None
+    if "://" in url_or_host:
+        u = urlsplit(url_or_host)
+        scheme, netloc = u.scheme, u.netloc
+    else:
+        netloc = url_or_host
+    netloc = netloc.strip().lower().rsplit("@", 1)[-1]
+    default = {"https": ":443", "wss": ":443", "http": ":80", "ws": ":80"}.get(scheme or "")
+    if default:
+        netloc = netloc.removesuffix(default)
+    return netloc or None
+
+
+def origin_allowed(headers: Mapping[str, str], cfg: Config) -> bool:
+    """CSRF / cross-site WebSocket guard for requests authenticated by the `nm_session` cookie.
+
+    A browser sends `Origin` on every cross-origin request, on POST/PUT/PATCH/DELETE, and on WebSocket
+    handshakes. It must name this server: the Host the request came in on (or the proxy's X-Forwarded-Host),
+    the configured LAN or tunnel address, or an allowed CORS origin. No Origin (curl, the apps, old browsers)
+    passes: those either don't use the cookie or are covered by SameSite=Lax."""
+    origin = headers.get("origin")
+    if not origin:
+        return True
+    if origin == "null":
+        return False
+    o = _netloc(origin)
+    scheme = urlsplit(origin).scheme
+    ok = {_netloc(headers.get("host"), scheme), _netloc(headers.get("x-forwarded-host"), scheme),
+          _netloc(cfg.lan_url), _netloc(cfg.tunnel_url)}
+    ok |= {_netloc(x) for x in cfg.cors_origins}
+    ok.discard(None)
+    return o in ok
 
 
 def device(request: Request, conn: sqlite3.Connection = Depends(db)) -> auth.Device:
