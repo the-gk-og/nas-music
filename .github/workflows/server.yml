@@ -85,4 +85,4 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker run --rm --entrypoint python ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
-            -c "import nasmusic, essentia; print('nasmusic + essentia import ok')"
+            -c "import nasmusic, essentia, piper; print('nasmusic + essentia + piper import ok')"

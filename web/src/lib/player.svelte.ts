@@ -69,6 +69,7 @@ import {
   type SleepTimer,
 } from './listening';
 import { ui } from './ui.svelte';
+import { PREFETCH_S, djEligible, djVoice, type IntroSpot } from './djvoice.svelte';
 
 const LOCAL_KEY = 'nm.player';
 const SESSION_GAP_MS = 30 * 60 * 1000;
@@ -182,6 +183,8 @@ export class Player {
   private decks: HTMLAudioElement[] = [];
   private deckGains: GainNode[] = [];
   private mix: GainNode | null = null;
+  /** Radio DJ voice: lowers the music while the DJ talks (between `mix` and the EQ). */
+  private duckNode: GainNode | null = null;
   /** The other deck, loaded with the next track (cued at `startS`, the DJ mix-in point, or 0). */
   private preloaded: { id: string; el: HTMLAudioElement; startS: number } | null = null;
   /** The quality each deck's source was requested in. */
@@ -366,6 +369,7 @@ export class Player {
 
     this.setupAudio();
     this.setupMediaSession();
+    void djVoice.refresh();
     this.events.startTimer();
     void this.events.flush();
     this.watchEnvironment();
@@ -482,6 +486,10 @@ export class Player {
     const remaining = (dur - a.currentTime) / (a.playbackRate || 1);
     const n = nextIndex(q, this.repeat, false);
     const next = n == null ? null : q.tracks[n];
+    if (n != null && n !== q.index && remaining <= PREFETCH_S) {
+      const spot = this.djSpot(n, cur.id);
+      if (spot) void djVoice.prefetch(spot);
+    }
     if (this.sleep && sleepStopsAt(this.sleep, cur, next)) {
       this.setMix(sleepFadeLevel(remaining, SLEEP_TRACK_FADE_S));
       return;
@@ -558,9 +566,11 @@ export class Player {
       if (this.audio?.paused && !this.audio.ended) return; // paused meanwhile
       if (this.preloaded.startS) this.preloaded.el.currentTime = 0; // cued for a DJ mix that didn't happen
       this.tracker.ended();
+      const prevId = q.tracks[q.index]?.id ?? null;
       this.queue = { ...q, index: n };
       if (this.viewQueue?.id === q.id) this.viewQueue = this.queue;
       this.loadCurrent(true, 0, fadeS);
+      this.announce(n, prevId);
     } finally {
       this.transitioning = false;
     }
@@ -612,6 +622,7 @@ export class Player {
     this.transitioning = true;
     try {
       const t = q.tracks[n];
+      const prevId = q.tracks[q.index]?.id ?? null;
       this.tracker.ended();
       this.queue = { ...q, index: n };
       if (this.viewQueue?.id === q.id) this.viewQueue = this.queue;
@@ -634,6 +645,7 @@ export class Player {
       this.ab = { a: null, b: null };
       this.updateMediaSession();
       await this.startAudio();
+      this.announce(n, prevId);
       this.stateChanged();
       this.saveLocal();
       void this.saveQueuePosition(true);
@@ -846,7 +858,9 @@ export class Player {
       this.ctx = new AC({ latencyHint: 'playback' });
       this.graph = buildEqGraph(this.ctx);
       this.mix = this.ctx.createGain();
-      this.mix.connect(this.graph.input);
+      this.duckNode = this.ctx.createGain();
+      this.mix.connect(this.duckNode);
+      this.duckNode.connect(this.graph.input);
       this.deckBass = [];
       this.deckGains = this.decks.map((el) => {
         const src = this.ctx!.createMediaElementSource(el);
@@ -1097,6 +1111,7 @@ export class Player {
 
   async playIndex(i: number, startS = 0) {
     if (!this.queue) return;
+    djVoice.stop();
     this.queue = { ...this.queue, index: i };
     if (this.viewQueue?.id === this.queue.id) this.viewQueue = this.queue;
     this.claim();
@@ -1125,6 +1140,7 @@ export class Player {
     this.queueMeta.set(created.id, { source: 'mix', addedFrom: 'radio' });
     this.setQueue({ id: created.id, name: created.name, slot: created.slot, tracks, index: 0, radio: true });
     await this.playIndex(0);
+    this.announce(0, null);
   }
 
   /** AI radio (v6): steer the radio that's playing (here or on the active device). Returns the station. */
@@ -1145,6 +1161,7 @@ export class Player {
       });
       const fresh = res.queue.tracks ?? [];
       for (const t of fresh) this.trackCache.set(t.id, t);
+      djVoice.forget(qid);
       if (!remote && this.queue?.id === qid) {
         const tracks = replaceUpcoming(this.queue.tracks, fresh, this.queue.index);
         this.queue = { ...this.queue, tracks, order: this.shuffle ? shuffleOrder(tracks.length, this.queue.index) : null };
@@ -1272,7 +1289,37 @@ export class Player {
       await this.startAudio();
       return;
     }
+    const prevId = q.tracks[q.index]?.id ?? null;
     await this.playIndex(n);
+    if (!manual) this.announce(n, prevId);
+  }
+
+  // ================= radio DJ voice (api 0.8.2) =================
+
+  /** Where the DJ might talk: queue index `n` of a radio/mix queue this device plays itself. */
+  private djSpot(n: number, previousTrackId: string | null): IntroSpot | null {
+    const q = this.queue;
+    if (!djVoice.enabled || !q || this.isRemote || this.castSpeaker || this.spoken?.active()) return null;
+    if (!djEligible(q, this.queueMeta.get(q.id)?.source ?? undefined)) return null;
+    const t = q.tracks[n];
+    if (!t || t.familyHidden) return null;
+    return { queueId: q.id, position: n, trackId: t.id, previousTrackId };
+  }
+
+  /** A song started on its own (or a radio just started): let the DJ introduce it over the opening. */
+  private announce(n: number, previousTrackId: string | null) {
+    const spot = this.djSpot(n, previousTrackId);
+    if (spot) void djVoice.announce(spot, (level, s) => this.duckMusic(level, s), this.sinkId);
+  }
+
+  private duckMusic(level: number, seconds: number) {
+    if (this.duckNode && this.ctx) {
+      const g = this.duckNode.gain;
+      g.cancelScheduledValues(this.ctx.currentTime);
+      g.setTargetAtTime(level, this.ctx.currentTime, Math.max(0.01, seconds / 3));
+    } else if (this.audio) {
+      this.audio.volume = level; // no Web Audio: plain element volume
+    }
   }
 
   // ================= transport (local or remote) =================
@@ -1296,6 +1343,7 @@ export class Player {
 
   pause() {
     if (this.remote('pause')) return;
+    djVoice.stop();
     this.audio?.pause();
     this.stopFading();
   }
@@ -1760,6 +1808,7 @@ export class Player {
   }
 
   private release() {
+    djVoice.stop();
     if (this.playing) this.tracker.finish(this.position);
     this.spoken?.pause();
     this.audio?.pause();
