@@ -7,11 +7,11 @@ import secrets
 import time
 from importlib.metadata import PackageNotFoundError, version
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
-from nasmusic.app.context import AppContext
+from nasmusic.app.context import SESSION_COOKIE, AppContext, origin_allowed
 from nasmusic.app.scheduler import Jobs
 from nasmusic.auth import tls
 from nasmusic.config import Config
@@ -110,6 +110,61 @@ def install_token_redaction() -> None:
         lg.addFilter(_RedactTokens())
 
 
+MAX_BODY_BYTES = 20 * 1024 * 1024  # largest legitimate body: a 16 MiB upload chunk
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+class BodyLimit:
+    """Refuse request bodies over `limit` bytes (413) before anything reads them into memory. FastAPI parses
+    JSON bodies before running auth dependencies, so without this an unauthenticated client could make the
+    server buffer an arbitrarily large body on /auth/login, /pair, /voice/command, ..."""
+
+    def __init__(self, app, limit: int = MAX_BODY_BYTES):
+        self.app, self.limit = app, limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        for k, v in scope.get("headers") or ():
+            if k == b"content-length":
+                try:
+                    too_big = int(v) > self.limit
+                except ValueError:
+                    too_big = True
+                if too_big:
+                    return await JSONResponse({"detail": "request body too large"}, status_code=413)(
+                        scope, receive, send)
+        seen = 0
+
+        async def limited():
+            nonlocal seen
+            msg = await receive()
+            if msg["type"] == "http.request":
+                seen += len(msg.get("body", b""))
+                if seen > self.limit:
+                    raise _TooLarge()
+            return msg
+
+        started = False
+
+        async def tracking_send(msg):
+            nonlocal started
+            if msg["type"] == "http.response.start":
+                started = True
+            await send(msg)
+
+        try:
+            await self.app(scope, limited, tracking_send)
+        except _TooLarge:
+            if not started:
+                await JSONResponse({"detail": "request body too large"}, status_code=413)(scope, receive, send)
+
+
+class _TooLarge(HTTPException):
+    def __init__(self):
+        super().__init__(413, "request body too large")
+
+
 TAURI_ORIGINS = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"]
 ADMIN_CSP = ("default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; media-src 'self'; "
              "form-action 'self'; frame-ancestors 'none'")
@@ -147,12 +202,20 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
         expose_headers=["Content-Range", "Content-Length", "Accept-Ranges", "Content-Disposition", "X-Stream-Format"], max_age=600,
     )
 
+    app.add_middleware(BodyLimit)
+
     @app.exception_handler(web.LoginRequired)
     async def _login_required(request: Request, exc: web.LoginRequired):
         return RedirectResponse("/admin/login", status_code=303)
 
     @app.middleware("http")
     async def _security_headers(request: Request, call_next):
+        # CSRF: a state-changing request that relies on the session cookie (no bearer header) must come from
+        # one of this server's own pages.
+        if (request.method not in SAFE_METHODS and SESSION_COOKIE in request.cookies
+                and not request.headers.get("authorization", "").lower().startswith("bearer ")
+                and not origin_allowed(request.headers, request.app.state.ctx.cfg)):
+            return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
         resp = await call_next(request)
         path = request.url.path
         if not path.startswith("/api/"):

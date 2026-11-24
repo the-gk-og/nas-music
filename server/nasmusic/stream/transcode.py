@@ -55,13 +55,20 @@ class OpusCache:
         out = self.path_for(track_id, kbps, mtime)
         if self._hit(out):
             return out
-        with self._lock_for((track_id, kbps)):
-            if self._hit(out):
-                return out
-            self._transcode(src, out, kbps, low_priority)
-            for old in self.dir.glob(f"{track_id}_{kbps}_*.{self.EXT}"):
-                if old != out:
-                    old.unlink(missing_ok=True)
+        key = (track_id, kbps)
+        lock = self._lock_for(key)
+        try:
+            with lock:
+                if self._hit(out):
+                    return out
+                self._transcode(src, out, kbps, low_priority)
+                for old in self.dir.glob(f"{track_id}_{kbps}_*.{self.EXT}"):
+                    if old != out:
+                        old.unlink(missing_ok=True)
+        finally:
+            with self._guard:  # don't keep a lock per (track, bitrate) ever played; drop it once nobody waits
+                if self._locks.get(key) is lock and not lock.locked():
+                    del self._locks[key]
         self.evict()
         return out
 

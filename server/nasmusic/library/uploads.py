@@ -50,6 +50,7 @@ FORMATS = ("flac", "mp3", "m4a", "aac", "ogg", "opus", "wav")
 
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
+_place_lock = threading.Lock()  # choosing a free destination name and moving there must be one step
 
 
 class UploadError(Exception):
@@ -352,27 +353,9 @@ def append(conn: sqlite3.Connection, cfg: Config, user_id: str, session_id: str,
         return get_session(conn, user_id, session_id)
 
 
-def _finish(conn: sqlite3.Connection, cfg: Config, row: sqlite3.Row, username: str) -> None:
-    from nasmusic.library import tags
-
-    root = _root(cfg)
-    part = part_path(cfg, row["id"])
-    fmt = sniff(_read_head(part))
-    if fmt is None:
-        _fail(conn, cfg, row, "not an audio file")
-        raise UploadError(415, "not an audio file (FLAC, MP3, M4A/AAC, Ogg/Opus or WAV)")
-    ext = EXTENSIONS[fmt]
-    # mutagen picks its parser from content and name: give it the sniffed extension.
-    probe = part.with_suffix(ext)
-    os.replace(part, probe)
-    try:
-        t, mf = tags.read(probe)
-        if mf is None or not t.duration_s or t.duration_s <= 0:
-            raise ValueError("no audio stream")
-    except Exception as e:  # mutagen raises many types on junk
-        probe.unlink(missing_ok=True)
-        _fail(conn, cfg, row, f"not a readable {fmt.upper()} file")
-        raise UploadError(415, f"not a readable {fmt.upper()} file: {e}") from e
+def _place(conn: sqlite3.Connection, cfg: Config, root: Path, probe: Path, row: sqlite3.Row, t, username: str,
+           ext: str) -> Path:
+    """Move the finished file to a free name under the uploader's folder (never over an existing file)."""
     rel = target_relpath(username, row["user_id"], t, row["filename"], ext)
     user_dir = root / rel.split("/", 1)[0]
     dest = root / rel
@@ -395,6 +378,32 @@ def _finish(conn: sqlite3.Connection, cfg: Config, row: sqlite3.Row, username: s
         os.chmod(dest, 0o664)
     except OSError:
         pass
+    return dest
+
+
+def _finish(conn: sqlite3.Connection, cfg: Config, row: sqlite3.Row, username: str) -> None:
+    from nasmusic.library import tags
+
+    root = _root(cfg)
+    part = part_path(cfg, row["id"])
+    fmt = sniff(_read_head(part))
+    if fmt is None:
+        _fail(conn, cfg, row, "not an audio file")
+        raise UploadError(415, "not an audio file (FLAC, MP3, M4A/AAC, Ogg/Opus or WAV)")
+    ext = EXTENSIONS[fmt]
+    # mutagen picks its parser from content and name: give it the sniffed extension.
+    probe = part.with_suffix(ext)
+    os.replace(part, probe)
+    try:
+        t, mf = tags.read(probe)
+        if mf is None or not t.duration_s or t.duration_s <= 0:
+            raise ValueError("no audio stream")
+    except Exception as e:  # mutagen raises many types on junk
+        probe.unlink(missing_ok=True)
+        _fail(conn, cfg, row, f"not a readable {fmt.upper()} file")
+        raise UploadError(415, f"not a readable {fmt.upper()} file: {e}") from e
+    with _place_lock:
+        dest = _place(conn, cfg, root, probe, row, t, username, ext)
     rel = dest.relative_to(root).as_posix()
     uid = uuid.uuid4().hex
     conn.execute("INSERT INTO uploads (id, user_id, path, track_id, bytes, original_name, format, visibility, "
