@@ -35,6 +35,21 @@ CI attaches `nasmusic-wear-v0.1.<n>.apk` (release, R8-shrunk) to each Android re
 - **Tile**: shows cover, title and "on <device>", with prev / play-pause / next.
   - When nothing is loaded, ▶ resumes the last queue on the watch.
   - Buttons go through an invisible trampoline activity, because tiles can only launch activities.
+- **Sleep detection** (opt-in, Settings → Sleep detection): pauses when you doze off.
+  - Turn on "Pause when I fall asleep", then tap the moon chip on the home menu at bedtime. With "Start by
+    itself at night" (on by default) it also starts when you open the app between 9 pm and 5 am while
+    something it should pause is playing.
+  - It reads the accelerometer and heart-rate sensor (raw Android sensors, no Health Services) in 30 s epochs
+    (`sleep/SleepDetector.kt`). Asleep = still for 10 min and the 5-min median heart rate is 7 % below the
+    median from while you settled down. Without heart rate (permission refused or no sensor), 20 min still.
+    Heart rate that never drops still counts after 45 min of complete stillness.
+  - It then fades out over 30 s and pauses, here or on the phone/speaker the watch is a remote for, and puts
+    the volume back for next time. Moving your wrist during the fade cancels it. Pausing saves the position as
+    usual, and with "Go back to where I dozed off" a podcast or audiobook is moved back to where it was when you
+    last moved (at most 30 min).
+  - "Podcasts and audiobooks only" is on by default; switch it off to pause music too.
+  - It runs as a "health" foreground service with a wake lock, only while armed: it stops after pausing, after
+    20 min with nothing playing, after 8 h, or from its notification.
 - **Complication**: SHORT_TEXT / LONG_TEXT with the current title. Tapping it opens now playing.
 
 ## Shared code

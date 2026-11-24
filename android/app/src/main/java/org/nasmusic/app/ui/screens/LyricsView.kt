@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -26,6 +27,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import org.nasmusic.app.container
 import org.nasmusic.app.data.api.Lyrics
 import org.nasmusic.app.lyrics.LyricsOffsets
 import org.nasmusic.app.lyrics.LyricsTimeline
@@ -91,6 +94,15 @@ fun LyricsView(lyrics: Lyrics, positionMs: Long, onSeek: (Long) -> Unit, modifie
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 modifier = Modifier.weight(1f).padding(16.dp),
             )
+            // Karaoke: turn the vocals down on this phone (KaraokeProcessor); pairs with the word-by-word lyrics.
+            val karaokeFlow = remember(context) { context.container.eq.karaoke }
+            val karaoke by karaokeFlow.collectAsState()
+            IconButton(onClick = { karaokeFlow.value = !karaoke }) {
+                Icon(
+                    Icons.Filled.RecordVoiceOver, if (karaoke) "Karaoke on: vocals turned down" else "Karaoke: turn the vocals down",
+                    tint = if (karaoke) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (synced) {
                 IconButton(onClick = { timingOpen = !timingOpen }) {
                     Icon(

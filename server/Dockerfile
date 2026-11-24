@@ -45,9 +45,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # ---------- runtime ----------
 # libchromaprint-tools = fpcalc (Chromaprint, LGPL-2.1+), run as a separate process for automatic tag fixing.
+# rclone (MIT) = off-site backup copies to a cloud/SFTP remote (config backup_copy_to = "remote:path").
 FROM ${PYTHON_IMAGE}
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools tzdata \
+ && apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools rclone tzdata \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 568 apps \
  && useradd --uid 568 --gid 568 --no-create-home --home-dir /data --shell /usr/sbin/nologin apps \
@@ -59,7 +60,8 @@ COPY --from=web /out /opt/nasmusic/web
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    NASMUSIC_CONFIG=/data/config.toml
+    NASMUSIC_CONFIG=/data/config.toml \
+    RCLONE_CONFIG=/data/rclone.conf
 USER 568:568
 WORKDIR /data
 EXPOSE 8443 8080

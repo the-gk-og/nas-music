@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
@@ -239,6 +240,47 @@ class PlayerHub(
         val q = connect.state.value?.queueId
         if (remote && q != null) connect.command("playQueue", mapOf("queueId" to JsonPrimitive(q), "index" to JsonPrimitive(index)))
         else withController { it.seekTo(index, 0); it.play() }
+    }
+
+    /**
+     * Sleep detection: fades out over [fadeMs], pauses, then puts the volume back for next time. Works on the
+     * watch's own player or, as a remote, on the active device. Stops and restores the volume if [cancelled]
+     * turns true during the fade (you moved). Returns true when it paused.
+     */
+    suspend fun fadeOutAndPause(fadeMs: Long, cancelled: () -> Boolean): Boolean = withContext(Dispatchers.Main) {
+        val steps = 15
+        val stepMs = (fadeMs / steps).coerceAtLeast(50)
+        fun vol(v: Float) = mapOf("volume" to JsonPrimitive(v.coerceIn(0f, 1f)))
+        if (remote) {
+            val start = connect.state.value?.volume ?: 1f
+            for (i in 1..steps) {
+                if (cancelled()) { connect.command("setVolume", vol(start)); return@withContext false }
+                connect.command("setVolume", vol(start * (1f - i.toFloat() / steps)))
+                delay(stepMs)
+            }
+            connect.command("pause")
+            delay(1_500) // let the pause land before the volume comes back
+            connect.command("setVolume", vol(start))
+            true
+        } else {
+            val mc = controller ?: return@withContext false
+            val start = mc.volume
+            for (i in 1..steps) {
+                if (cancelled()) { mc.volume = start; return@withContext false }
+                mc.volume = start * (1f - i.toFloat() / steps)
+                delay(stepMs)
+            }
+            mc.pause() // the playback service saves the queue position on pause
+            mc.volume = start
+            refreshLocal()
+            true
+        }
+    }
+
+    /** Seek within the current item, here or on the active remote device. */
+    fun seekTo(positionMs: Long) {
+        if (remote) connect.command("seek", mapOf("positionMs" to JsonPrimitive(positionMs)))
+        else withController { it.seekTo(positionMs) }
     }
 
     /** Move playback to [deviceId] (may be this watch: the server then sends us "takeover"). */

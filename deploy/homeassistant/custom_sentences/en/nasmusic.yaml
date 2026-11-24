@@ -33,8 +33,14 @@ intents:
       - sentences:
           - "(what's|what is) playing"
           - "what (song|track) is (this|that|playing)"
+  NasAddToPlaylist:
+    data:
+      - sentences:
+          - "(add|save) (this|that|this song|this track) to [my] [the] {playlist} [playlist]"
 lists:
   query:
+    wildcard: true
+  playlist:
     wildcard: true
   level:
     range:

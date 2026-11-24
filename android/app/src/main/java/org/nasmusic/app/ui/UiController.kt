@@ -27,6 +27,15 @@ class UiController(val nav: NavHostController) {
     /** Now Playing should show the lyrics side (set by "Show lyrics"). */
     var lyricsRequested by mutableStateOf(false)
     var toast by mutableStateOf<String?>(null)
+    /** Multi-select: songs picked by long-press (in pick order); the selection bar acts on them. */
+    var selection by mutableStateOf<List<Track>>(emptyList())
+
+    fun toggleSelected(t: Track) {
+        selection = if (selection.any { it.id == t.id }) selection.filterNot { it.id == t.id } else selection + t
+    }
+
+    /** "Removed …" snackbar with Undo. */
+    var undo by mutableStateOf<UndoRequest?>(null)
     /** null = closed; false = from Settings; true = offered after a crash. */
     var bugReport by mutableStateOf<Boolean?>(null)
 
