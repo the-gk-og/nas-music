@@ -18,8 +18,11 @@ import androidx.navigation.NavHostController
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import org.nasmusic.wear.WearApp
+import org.nasmusic.wear.sleep.SleepWatch
+import org.nasmusic.wear.sleep.SleepWatchService
 import org.nasmusic.wear.ui.screens.AlbumsScreen
 import org.nasmusic.wear.ui.screens.DevicesScreen
 import org.nasmusic.wear.ui.screens.DownloadsScreen
@@ -44,6 +47,18 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 c.ui.messages.collect { Toast.makeText(this@MainActivity, it, Toast.LENGTH_SHORT).show() }
+            }
+        }
+        // Sleep detection, "start by itself at night": only while the app is open, because Android won't let
+        // a health foreground service start from the background.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(c.player.ui, c.connect.state, c.settings.state) { ui, s, p -> Triple(ui, s, p) }.collect { (ui, s, p) ->
+                    if (!p.sleepEnabled || !p.sleepAutoAtNight || c.sleep.watching) return@collect
+                    if (System.currentTimeMillis() < c.sleep.noAutoUntilMs || !SleepWatch.isNight(java.time.LocalTime.now())) return@collect
+                    val kind = if (ui.isRemote) s?.media?.kind else null
+                    if (SleepWatch.eligible(ui.playing, kind, p.sleepSpokenOnly)) SleepWatchService.start(this@MainActivity)
+                }
             }
         }
         val startAt = intent?.getStringExtra(EXTRA_OPEN)

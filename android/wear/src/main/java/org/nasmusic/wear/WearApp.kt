@@ -77,6 +77,7 @@ class WearContainer(val context: Context) {
     val offline = OfflineStore(context.filesDir)
     val nowPlaying = NowPlayingStore(context)
     val ui = UiMessages()
+    val sleep = org.nasmusic.wear.sleep.SleepWatch()
 
     val connect = WearConnect(
         clients = ::clients,
