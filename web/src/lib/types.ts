@@ -949,3 +949,21 @@ export interface ArtistPage {
   similar: (Artist & { similarity?: number; artUrl?: string | null })[];
   radioSeed: RadioSeed;
 }
+
+/** api 0.8.2 radio DJ voice. */
+export interface DjStatus {
+  state: 'ready' | 'downloading' | 'unavailable' | 'disabled' | 'error';
+  voice: string;
+  detail?: string | null;
+  enabled: boolean;
+  every: number;
+}
+
+export interface DjIntro {
+  clipId: string;
+  text: string;
+  /** relative to the API base: stream/dj/{clipId} */
+  url: string;
+  durationMs: number;
+  voice: string;
+}
