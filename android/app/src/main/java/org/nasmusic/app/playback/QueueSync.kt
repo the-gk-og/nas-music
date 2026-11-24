@@ -78,6 +78,7 @@ class QueueSync(private val api: () -> NasMusicApi, private val scope: Coroutine
 
     fun moved(from: Int, to: Int) = mutate { moveQueueTrack(it, MoveBody(from, to)) }
     fun removed(position: Int) = mutate { removeFromQueue(it, position) }
+    fun inserted(trackIds: List<String>, position: Int) = mutate { addToQueue(it, TrackIdsBody(trackIds, JsonPrimitive(position))) }
     fun added(trackIds: List<String>, next: Boolean) =
         mutate { addToQueue(it, TrackIdsBody(trackIds, JsonPrimitive(if (next) "next" else "end"))) }
     fun progress(index: Int, positionMs: Long) {

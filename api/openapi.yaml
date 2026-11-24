@@ -249,6 +249,43 @@ paths:
                     properties:
                       tracks: { type: array, items: { $ref: '#/components/schemas/Track' } }
         '404': { description: not found }
+  /library/albums/{albumId}/completeness:
+    get:
+      summary: |
+        "9 of 12": how much of the album the library has, from MusicBrainz (the album's release-group tag, else a
+        search by album artist + title). The release in the group that best matches the library's tracks is used
+        (not a deluxe edition when you have the standard one); video discs are ignored. Cached 30 days per release
+        group; the first call may take a few seconds. Sends only album artist, title and MBIDs.
+      parameters: [ { name: albumId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: completeness (status "unknown" when MusicBrainz has no confident match)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlbumCompleteness' }
+        '404': { description: no such album }
+        '409': { description: turned off on this server (album_completeness_enabled = false) }
+        '503': { description: MusicBrainz unreachable or rate limiting; try again later }
+  /library/albums/{albumId}/completeness/toget:
+    post:
+      summary: Put the album's missing tracks on the caller's To-get list as songs (all, or just `recordingMbids`)
+      parameters: [ { name: albumId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                recordingMbids: { type: [array, 'null'], items: { type: string }, description: 'omit or null = all missing tracks' }
+      responses:
+        '200':
+          description: the completeness again, with each missing track's To-get mark
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlbumCompleteness' }
+        '404': { description: no such album }
+        '409': { description: turned off on this server }
+        '503': { description: MusicBrainz unreachable }
   /library/tracks/{trackId}:
     get:
       parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
@@ -322,13 +359,21 @@ paths:
             kbps, opus only. 1–1000 accepted (else 422); snapped to the nearest of 64, 96, 128, 160, 192, 256
             (a tie goes up), so the cache keeps at most six variants per track, bounded by `opus_cache_gb`.
           schema: { type: integer, minimum: 1, maximum: 1000, default: 160 }
+        - name: karaoke
+          in: query
+          description: |
+            Karaoke: vocals turned down with an ffmpeg centre-cancel filter (no AI; centre -20 dB above ~150 Hz, bass
+            kept). Always Opus at `bitrate` (overrides `format`), cached apart from the normal Opus files. Mono
+            sources are sent normally (no "karaoke" in X-Stream-Format). The web and Android players do the same
+            filter locally so their switch is instant; this is for clients that can't.
+          schema: { type: boolean, default: false }
         - { name: token, in: query, schema: { type: string }, description: 'device token, for <audio> elements that cannot send headers' }
       responses:
         '200':
           description: full body (audio/ogg for opus, the file's own type for flac/original); Content-Length set
           headers:
             X-Stream-Format:
-              description: 'what was sent, short, for "now playing": "Opus 128", "FLAC 16/44.1", "FLAC 24/96", "MP3 320". Exposed to CORS.'
+              description: 'what was sent, short, for "now playing": "Opus 128", "FLAC 16/44.1", "FLAC 24/96", "MP3 320", "Opus 160 karaoke". Exposed to CORS.'
               schema: { type: string }
         '206': { description: partial content (same X-Stream-Format header) }
         '404': { description: not found }
@@ -5495,6 +5540,35 @@ components:
                 required: [credits]
                 properties:
                   credits: { type: array, items: { type: string }, description: their roles on this track }
+    AlbumCompleteness:
+      type: object
+      required: [albumId, status, have, total, missing]
+      properties:
+        albumId: { type: string }
+        status: { type: string, enum: [complete, incomplete, unknown] }
+        have: { type: integer, description: 'library tracks matched to the release ("9" of "9 of 12")' }
+        total: { type: [integer, 'null'], description: 'tracks on the release; null when unknown' }
+        releaseGroupMbid: { type: [string, 'null'] }
+        releaseMbid: { type: [string, 'null'] }
+        releaseTitle: { type: [string, 'null'], description: 'with its MusicBrainz disambiguation, e.g. "Second (2011 remaster)"' }
+        discCount: { type: [integer, 'null'] }
+        missing:
+          type: array
+          items:
+            type: object
+            required: [disc, position, title]
+            properties:
+              disc: { type: integer }
+              position: { type: integer }
+              title: { type: string }
+              durationS: { type: [integer, 'null'] }
+              recordingMbid: { type: [string, 'null'] }
+              toget:
+                type: [object, 'null']
+                description: the caller's To-get item for this song, if any
+                properties:
+                  id: { type: string }
+                  status: { type: string, enum: [want, got, dismissed] }
     Track:
       type: object
       required: [id, title, artistId, artist, albumId, album, durationS, starred]

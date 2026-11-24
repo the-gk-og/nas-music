@@ -762,6 +762,26 @@ export interface LyricsMatch {
 
 export type ToGetStatus = 'want' | 'got' | 'dismissed';
 
+/** GET /library/albums/{id}/completeness: "9 of 12" from MusicBrainz. */
+export interface AlbumCompleteness {
+  albumId: string;
+  status: 'complete' | 'incomplete' | 'unknown';
+  have: number;
+  total: number | null;
+  releaseGroupMbid?: string | null;
+  releaseMbid?: string | null;
+  releaseTitle?: string | null;
+  discCount?: number | null;
+  missing: {
+    disc: number;
+    position: number;
+    title: string;
+    durationS?: number | null;
+    recordingMbid?: string | null;
+    toget?: { id: string; status: ToGetStatus } | null;
+  }[];
+}
+
 export interface ToGetItem {
   id: string;
   type: 'album' | 'track';

@@ -19,6 +19,7 @@ class MainActivity : FragmentActivity() { // FragmentActivity: the Cast button's
         if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         intent?.getStringExtra(EXTRA_ROUTE)?.let { container.pendingRoute.value = it }
         setContent { NasMusicRoot(container) }
+        org.nasmusic.app.ui.AppShortcuts.publish(this)
         if (savedInstanceState == null) org.nasmusic.app.ui.LaunchRequests.handle(intent)
     }
 

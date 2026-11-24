@@ -474,6 +474,13 @@ class PlayerConnection(
         if (!connect.isRemote) withController { it.moveMediaItem(from, to) }
     }
 
+    /** Put a song back at [index] of the playing queue (Undo after removing it). */
+    fun insertItem(index: Int, track: Track) {
+        queues.inserted(listOf(track.id), index)
+        if (connect.isRemote) return
+        withController { c -> c.addMediaItem(index.coerceIn(0, c.mediaItemCount), MediaItems.fromTrack(track, PlaySource.LIBRARY)) }
+    }
+
     fun removeItem(index: Int) {
         queues.removed(index)
         if (!connect.isRemote) withController { it.removeMediaItem(index) }

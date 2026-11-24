@@ -8,6 +8,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.DownloadForOffline
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Speaker
@@ -27,6 +28,9 @@ import org.nasmusic.app.net.Route
 import org.nasmusic.wear.WearContainer
 import org.nasmusic.wear.WearPrefs
 import org.nasmusic.wear.offline.OfflineSyncWorker
+import org.nasmusic.wear.sleep.SleepWatchService
+import org.nasmusic.wear.sleep.label
+import org.nasmusic.wear.sleep.rememberSleepControls
 import org.nasmusic.wear.ui.ListScreen
 import org.nasmusic.wear.ui.NavChip
 import org.nasmusic.wear.ui.header
@@ -36,6 +40,9 @@ import org.nasmusic.wear.ui.message
 fun HomeMenu(c: WearContainer, go: (String) -> Unit) {
     val ui by c.player.ui.collectAsState()
     val route by c.router.route.collectAsState()
+    val prefs by c.settings.state.collectAsState()
+    val sleep by c.sleep.status.collectAsState()
+    val sleepControls = rememberSleepControls(c)
     ListScreen {
         header("nas-music")
         item {
@@ -53,6 +60,16 @@ fun HomeMenu(c: WearContainer, go: (String) -> Unit) {
             ) { go("now") }
         }
         if (route == Route.OFFLINE) message("Offline: downloaded music only")
+        if (prefs.sleepEnabled) {
+            item {
+                val on = c.sleep.watching
+                NavChip(
+                    if (on) "Stop sleep detection" else "Pause when I fall asleep",
+                    sleep.label() ?: if (prefs.sleepSpokenOnly) "Podcasts and audiobooks" else "Anything playing",
+                    icon = Icons.Filled.Bedtime,
+                ) { sleepControls.toggle() }
+            }
+        }
         item { NavChip("Home", icon = Icons.Filled.Home) { go("feed") } }
         item { NavChip("Playlists", icon = Icons.AutoMirrored.Filled.PlaylistPlay) { go("playlists") } }
         item { NavChip("Albums", icon = Icons.Filled.Album) { go("albums") } }
@@ -96,6 +113,7 @@ fun SettingsScreen(c: WearContainer) {
     val cfg by c.secureStore.config.collectAsState()
     val prefs by c.settings.state.collectAsState()
     val route by c.router.route.collectAsState()
+    val sleepControls = rememberSleepControls(c)
     ListScreen {
         header("Settings")
         message(
@@ -119,6 +137,53 @@ fun SettingsScreen(c: WearContainer) {
         item {
             NavChip("Quality", "Opus ${prefs.opusKbps} kbps · tap to change") {
                 c.settings.update { it.copy(opusKbps = next(WearPrefs.KBPS_CHOICES, it.opusKbps)) }
+            }
+        }
+        header("Sleep detection")
+        item {
+            ToggleChip(
+                checked = prefs.sleepEnabled,
+                onCheckedChange = { v ->
+                    c.settings.update { it.copy(sleepEnabled = v) }
+                    // Turning it on asks for heart rate now, while you're looking.
+                    if (v) sleepControls.requestHeartRate() else SleepWatchService.stop(c.context)
+                },
+                label = { Text("Pause when I fall asleep") },
+                secondaryLabel = { Text("Stillness + lower heart rate") },
+                toggleControl = { Switch(checked = prefs.sleepEnabled) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (prefs.sleepEnabled) {
+            item {
+                ToggleChip(
+                    checked = prefs.sleepSpokenOnly,
+                    onCheckedChange = { v -> c.settings.update { it.copy(sleepSpokenOnly = v) } },
+                    label = { Text("Podcasts and audiobooks only") },
+                    secondaryLabel = { Text(if (prefs.sleepSpokenOnly) "Music keeps playing" else "Music pauses too") },
+                    toggleControl = { Switch(checked = prefs.sleepSpokenOnly) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
+                ToggleChip(
+                    checked = prefs.sleepAutoAtNight,
+                    onCheckedChange = { v -> c.settings.update { it.copy(sleepAutoAtNight = v) } },
+                    label = { Text("Start by itself at night") },
+                    secondaryLabel = { Text("9 pm to 5 am, when you open the app") },
+                    toggleControl = { Switch(checked = prefs.sleepAutoAtNight) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
+                ToggleChip(
+                    checked = prefs.sleepRewind,
+                    onCheckedChange = { v -> c.settings.update { it.copy(sleepRewind = v) } },
+                    label = { Text("Go back to where I dozed off") },
+                    secondaryLabel = { Text("Podcasts and audiobooks") },
+                    toggleControl = { Switch(checked = prefs.sleepRewind) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
         item { NavChip("Sign out", icon = Icons.AutoMirrored.Filled.Logout) { c.auth.signOut() } }

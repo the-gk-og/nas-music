@@ -92,6 +92,7 @@ import retrofit2.HttpException
 @Composable
 fun GlobalSheets(c: AppContainer) {
     val ui = LocalUi.current
+    SelectionBar(c)
     ui.songMenu?.let { SongMenuSheet(c, it) { ui.songMenu = null } }
     ui.songInfo?.let { SongInfoSheet(c, it) { ui.songInfo = null } }
     ui.addToPlaylist?.let { AddToPlaylistDialog(c, it.map { t -> t.id }) { ui.addToPlaylist = null } }
@@ -134,7 +135,7 @@ private fun SongMenuSheet(c: AppContainer, target: SongMenuTarget, onDismiss: ()
                 HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
             }
             target.queueIndex?.let { idx ->
-                MenuItem(Icons.Default.Close, "Remove from queue") { close { c.player.removeItem(idx) } }
+                MenuItem(Icons.Default.Close, "Remove from queue") { close { removeFromQueueWithUndo(c, ui, idx, t) } }
             }
             MenuItem(Icons.AutoMirrored.Filled.PlaylistPlay, "Play next") { close { c.player.playNext(listOf(t)); ui.toast = "Playing next" } }
             MenuItem(Icons.AutoMirrored.Filled.QueueMusic, "Add to a queue") { close { ui.addToQueue = listOf(t) } }
@@ -267,6 +268,8 @@ private fun Field(label: String, value: String, link: (() -> Unit)? = null) {
     }
 }
 
+private data class DuplicatePrompt(val id: String, val name: String, val count: Int, val fresh: List<String>)
+
 @Composable
 private fun AddToPlaylistDialog(c: AppContainer, trackIds: List<String>, onDismiss: () -> Unit) {
     val ui = LocalUi.current
@@ -274,10 +277,34 @@ private fun AddToPlaylistDialog(c: AppContainer, trackIds: List<String>, onDismi
     var lists by remember { mutableStateOf<List<Playlist>?>(null) }
     var newName by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { lists = runCatching { c.api.playlists().filter { it.role != "viewer" } }.getOrDefault(emptyList()) }
-    fun add(id: String, name: String) = scope.launch {
-        runCatching { c.api.addToPlaylist(id, TrackIdsBody(trackIds)) }
-            .onSuccess { ui.toast = "Added to $name" }.onFailure { ui.toast = "Couldn't add to $name" }
+    /** Songs already in the chosen playlist: ask before adding them again. */
+    var dup by remember { mutableStateOf<DuplicatePrompt?>(null) }
+    fun send(id: String, name: String, ids: List<String>) = scope.launch {
+        runCatching { c.api.addToPlaylist(id, TrackIdsBody(ids)) }
+            .onSuccess { ui.toast = if (ids.size == 1) "Added to $name" else "Added ${ids.size} songs to $name" }
+            .onFailure { ui.toast = "Couldn't add to $name" }
         onDismiss()
+    }
+    fun add(id: String, name: String) = scope.launch {
+        val have = runCatching { c.api.playlist(id).tracks.map { it.id }.toSet() }.getOrNull()
+        val already = have?.let { h -> trackIds.filter { it in h } }.orEmpty()
+        if (already.isEmpty()) { send(id, name, trackIds) }
+        else { dup = DuplicatePrompt(id, name, already.size, trackIds.filterNot { it in have.orEmpty() }) }
+    }
+    dup?.let { d ->
+        AlertDialog(
+            onDismissRequest = { dup = null },
+            title = { Text("Already in this playlist") },
+            text = { Text(if (trackIds.size == 1) "This song is already in ${d.name}." else "${d.count} of ${trackIds.size} songs are already in ${d.name}.") },
+            confirmButton = { TextButton(onClick = { dup = null; send(d.id, d.name, trackIds) }) { Text(if (d.fresh.isEmpty()) "Add anyway" else "Add all anyway") } },
+            dismissButton = {
+                Row {
+                    if (d.fresh.isNotEmpty()) TextButton(onClick = { dup = null; send(d.id, d.name, d.fresh) }) { Text("Skip them") }
+                    TextButton(onClick = { dup = null }) { Text("Cancel") }
+                }
+            },
+        )
+        return
     }
     AlertDialog(
         onDismissRequest = onDismiss,
