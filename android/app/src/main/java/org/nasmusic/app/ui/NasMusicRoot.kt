@@ -258,6 +258,8 @@ private fun NavGraphBuilder.routes(c: AppContainer, motion: MotionLevel) {
     composable("folder/{path}") { e -> FoldersScreen(c, android.net.Uri.decode(e.arguments?.getString("path").orEmpty())) }
     composable("album/{id}") { e -> AlbumScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("artist/{id}") { e -> ArtistScreen(c, e.arguments?.getString("id").orEmpty()) }
+    composable("credits/{id}") { e -> org.nasmusic.app.ui.screens.CreditsScreen(c, e.arguments?.getString("id").orEmpty()) }
+    composable("person/{id}") { e -> org.nasmusic.app.ui.screens.PersonScreen(c, android.net.Uri.decode(e.arguments?.getString("id").orEmpty())) }
     composable("genre/{name}") { e -> GenreScreen(c, android.net.Uri.decode(e.arguments?.getString("name").orEmpty())) }
     composable("playlist/{id}") { e -> PlaylistScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("smart/{id}") { e -> SmartPlaylistScreen(c, e.arguments?.getString("id").orEmpty()) }

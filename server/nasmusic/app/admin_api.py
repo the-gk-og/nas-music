@@ -28,7 +28,7 @@ router = APIRouter(prefix="/admin", dependencies=[Depends(admin_device)])
 Conn = sqlite3.Connection
 JobName = Literal["scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "discovery",
                   "release_radar", "blends", "lyrics", "cleanup", "backup", "explicit", "autotag", "upload_scan",
-                  "smart", "artist_info", "automix", "podcasts", "audiobooks"]
+                  "smart", "artist_info", "automix", "podcasts", "audiobooks", "credits"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 KEEP_BACKUPS = 5
 

@@ -34,6 +34,8 @@ const TAB_OF: Record<string, TabId> = {
   folders: 'library',
   album: 'library',
   artist: 'library',
+  credits: 'library',
+  person: 'library',
   genre: 'library',
   playlist: 'library',
   list: 'library',

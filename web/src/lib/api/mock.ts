@@ -200,6 +200,45 @@ export class MockBackend {
     if (!t) throw new HttpError(404, 'track not found');
     return t;
   }
+  /** v9 credits: a few invented session people spread over the library, plus the composer tag. */
+  private mockCredits(t: TrackInfo): { personId: string; name: string; group: 'producers' | 'writers' | 'musicians' | 'engineers'; role: string }[] {
+    const i = this.lib.tracks.indexOf(t);
+    const out: { personId: string; name: string; group: 'producers' | 'writers' | 'musicians' | 'engineers'; role: string }[] = [];
+    out.push(i % 2 ? { personId: 'mb:mock-0000-0000-0000-000000000001', name: 'Morgan Desk', group: 'producers', role: 'Producer' } : { personId: 'mb:mock-0000-0000-0000-000000000002', name: 'Rio Knobs', group: 'producers', role: 'Co-producer' });
+    if (t.composer) out.push({ personId: 'n:' + t.composer.toLowerCase(), name: t.composer, group: 'writers', role: 'Composer' });
+    if (i % 3 === 0) out.push({ personId: 'mb:mock-0000-0000-0000-000000000003', name: 'Sam Strings', group: 'musicians', role: 'Cello' });
+    out.push({ personId: 'mb:mock-0000-0000-0000-000000000004', name: 'Ash Master', group: 'engineers', role: 'Mastering' });
+    return out;
+  }
+
+  private credits(id: string) {
+    const t = this.track(id);
+    const all = this.lib.tracks.map((x) => ({ id: x.id, c: this.mockCredits(x) }));
+    const groups: { id: 'producers' | 'writers' | 'musicians' | 'engineers'; label: string; people: unknown[] }[] = [];
+    const labels = { producers: 'Producers', writers: 'Songwriters', musicians: 'Musicians', engineers: 'Engineering' } as const;
+    for (const c of this.mockCredits(t)) {
+      let g = groups.find((x) => x.id === c.group);
+      if (!g) groups.push((g = { id: c.group, label: labels[c.group], people: [] }));
+      const otherTracks = all.filter((x) => x.id !== id && x.c.some((y) => y.personId === c.personId)).length;
+      const artist = this.lib.artists.find((a) => a.name === c.name);
+      g.people.push({ personId: c.personId, name: c.name, mbid: null, roles: [c.role], albumWide: c.group === 'engineers', fromTags: c.personId.startsWith('n:'), otherTracks, artistId: artist?.id ?? null });
+    }
+    const order = ['producers', 'writers', 'musicians', 'engineers'];
+    groups.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    return { trackId: id, status: 'ok', fetchedAt: new Date().toISOString(), recordingMbid: null, musicbrainzUrl: null, groups };
+  }
+
+  private person(pid: string) {
+    const hits = this.lib.tracks.map((x) => ({ t: x, c: this.mockCredits(x).filter((y) => y.personId === pid) })).filter((x) => x.c.length);
+    if (!hits.length) throw new HttpError(404, 'not found');
+    const name = hits[0].c[0].name;
+    const roles = [...new Set(hits.flatMap((h) => h.c.map((c) => c.role)))];
+    return {
+      id: pid, name, mbid: null, musicbrainzUrl: null, artistId: this.lib.artists.find((a) => a.name === name)?.id ?? null, roles,
+      trackCount: hits.length, tracks: hits.map((h) => ({ ...this.pub(h.t), credits: h.c.map((c) => c.role) })),
+    };
+  }
+
   private pub(t: TrackInfo): Track {
     const { id, title, artistId, artist, albumId, album, trackNo, discNo, year, genre, durationS, flacBytes, starred, rating } = t;
     return { id, title, artistId, artist, albumId, album, trackNo, discNo, year, genre, durationS, flacBytes, starred, rating };
@@ -416,6 +455,8 @@ export class MockBackend {
       return { ...a, tracks: L.tracks.filter((t) => t.albumId === a.id).map((t) => this.pub(t)) };
     }
     if ((r = m(/^\/library\/tracks\/([^/]+)\/info$/))) return this.track(decodeURIComponent(r[1]));
+    if ((r = m(/^\/library\/tracks\/([^/]+)\/credits$/))) return this.credits(decodeURIComponent(r[1]));
+    if ((r = m(/^\/people\/(.+)$/))) return this.person(decodeURIComponent(r[1]));
     if ((r = m(/^\/library\/tracks\/([^/]+)$/))) return this.pub(this.track(decodeURIComponent(r[1])));
     if (path === '/library/tracks') {
       const out = L.tracks.map((t) => this.pub(t));

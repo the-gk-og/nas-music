@@ -143,7 +143,7 @@ def test_scheduler_jobs_registered(cfg):
     try:
         ids = {j.id: j for j in sched.get_jobs()}
         assert set(ids) == {"scan", "nightly", "discovery", "release_radar", "cleanup", "autotag",
-                            "smart", "artist_info", "podcasts"}
+                            "smart", "artist_info", "podcasts", "credits"}
         assert "day_of_week='fri'" in str(ids["release_radar"].trigger)
         assert str(ids["nightly"].trigger).startswith("cron[") and "hour='2'" in str(ids["nightly"].trigger)
         assert "day_of_week='sun'" in str(ids["discovery"].trigger)

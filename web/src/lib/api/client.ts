@@ -51,6 +51,8 @@ import type {
   TrackInfo,
   ArtistInfo,
   ArtistPage,
+  CreditPerson,
+  TrackCredits,
   SmartDefinition,
   SmartFields,
   SmartPlaylist,
@@ -374,6 +376,9 @@ export class ApiClient {
   album = (id: string) => this.get<Album & { tracks: Track[] }>(`/library/albums/${encodeURIComponent(id)}`);
   track = (id: string) => this.get<Track>(`/library/tracks/${encodeURIComponent(id)}`);
   trackInfo = (id: string) => this.get<TrackInfo>(`/library/tracks/${encodeURIComponent(id)}/info`);
+  /** v9 song credits; poll while `status` is "pending". */
+  trackCredits = (id: string) => this.get<TrackCredits>(`/library/tracks/${encodeURIComponent(id)}/credits`);
+  person = (id: string) => this.get<CreditPerson>(`/people/${encodeURIComponent(id)}`);
   allTracks = (sort: 'title' | 'added' | 'year' = 'title', offset = 0, limit = 1000) =>
     this.get<Track[]>('/library/tracks', { sort, offset, limit });
   search = (q: string, limit = 50) =>

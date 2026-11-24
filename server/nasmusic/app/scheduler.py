@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 JOB_NAMES = ("scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "lyrics", "discovery", "release_radar",
              "blends", "cleanup", "backup", "explicit", "autotag", "upload_scan", "smart", "artist_info",
-             "podcasts", "audiobooks", "automix")
+             "podcasts", "audiobooks", "automix", "credits")
 # The loudness job runs after every scan; a first pass over a big library takes hours, so each run stops
 # after this long and the next scan (or the nightly chain) carries on.
 LOUDNESS_BUDGET_S = 50 * 60
@@ -192,6 +192,14 @@ class Jobs:
             return {"skipped": "artist info is turned off"}
         http = artistinfo.Http(getattr(self, "http_transport", None))
         return artistinfo.refresh_due(conn, self.cfg.data_dir, http)
+    def _credits(self, conn):
+        """Song credits: look up a few hundred due tracks on MusicBrainz (1 req/s; most-played albums first)."""
+        from nasmusic.library import credits
+
+        if not self.cfg.credits_enabled:
+            return {"skipped": "song credits are turned off"}
+        return credits.refresh_due(conn, credits.Http(getattr(self, "http_transport", None)))
+
     def _podcasts(self, conn):
         """Poll subscribed podcast feeds and keep each show's newest episodes downloaded (nasmusic.spoken)."""
         from nasmusic.spoken import podcasts
@@ -234,6 +242,7 @@ class Jobs:
             "podcasts": self._podcasts,
             "audiobooks": self._audiobooks,
             "automix": self._automix,
+            "credits": self._credits,
         }[name]
 
     # ----- running -----
@@ -328,6 +337,7 @@ class Jobs:
         # Smart playlists move with the date ("not played in a month"): refresh after the nightly jobs.
         sched.add_job(self.run, "cron", args=["smart", "schedule"], id="smart", hour=5, minute=30)
         sched.add_job(self.run, "cron", args=["artist_info", "schedule"], id="artist_info", hour=3, minute=30)
+        sched.add_job(self.run, "cron", args=["credits", "schedule"], id="credits", hour=3, minute=45)
         if self.scrobbler is not None:   # scrobble outbox retries (not a recorded job: it runs every 3 minutes)
             sched.add_job(self.scrobbler.flush_now, "interval", id="scrobble", minutes=3)
         sched.start()

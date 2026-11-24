@@ -1,4 +1,4 @@
--- nas-music shared schema v8 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v9 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
@@ -22,6 +22,7 @@
 -- are upgraded by nasmusic.db.migrations.
 -- v8 adds toget_admin (the admin's check-off of users' want-list items) and continue_dismissed (Continue
 -- listening items the user swiped away; an item comes back once it is played again after that).
+-- v9 adds song credits (credit_lookups, track_credits: producers, songwriters, musicians from MusicBrainz).
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -1082,3 +1083,35 @@ CREATE TABLE IF NOT EXISTS continue_dismissed (
     dismissed_at TEXT NOT NULL,
     PRIMARY KEY (user_id, kind, item_id)
 );
+
+-- ---------- v9: song credits (shared cache, server core writes; nasmusic.library.credits) ----------
+
+-- One row per track looked up on MusicBrainz. Refreshed rarely (ok 180 days, not_found 60, error 1).
+CREATE TABLE IF NOT EXISTS credit_lookups (
+    track_id       TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    status         TEXT NOT NULL CHECK (status IN ('ok','not_found','error')),
+    recording_mbid TEXT,                     -- the recording it resolved to (tag MBID or strict search)
+    release_mbid   TEXT,                     -- the release album-wide credits came from (shared by its tracks)
+    error          TEXT,
+    fetched_at     TEXT NOT NULL,
+    refresh_after  TEXT NOT NULL
+);
+
+-- Who is credited on a track. person_id is 'mb:<artist MBID>'. role is the MusicBrainz relationship type
+-- (producer, composer, lyricist, writer, instrument, vocal, engineer, mix, mastering, ...), detail its
+-- attributes ('electric guitar', 'lead vocals', 'co'), scope where it came from: the recording itself, the work
+-- (song) it records, or the release (album-wide). Composer/lyricist tags are read live from tracks, not copied.
+CREATE TABLE IF NOT EXISTS track_credits (
+    track_id   TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    person_id  TEXT NOT NULL,
+    name       TEXT NOT NULL,                -- as credited
+    name_norm  TEXT NOT NULL,                -- casefolded, punctuation removed (matches tag names)
+    role       TEXT NOT NULL,
+    detail     TEXT NOT NULL DEFAULT '',
+    scope      TEXT NOT NULL CHECK (scope IN ('recording','work','release')),
+    position   INTEGER NOT NULL,
+    PRIMARY KEY (track_id, person_id, role, detail, scope)
+);
+CREATE INDEX IF NOT EXISTS track_credits_person ON track_credits(person_id);
+CREATE INDEX IF NOT EXISTS track_credits_name ON track_credits(name_norm);
+CREATE INDEX IF NOT EXISTS credit_lookups_release ON credit_lookups(release_mbid);

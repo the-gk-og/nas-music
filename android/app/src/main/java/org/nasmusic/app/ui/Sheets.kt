@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Info
@@ -161,6 +162,7 @@ private fun SongMenuSheet(c: AppContainer, target: SongMenuTarget, onDismiss: ()
                     }
                 }
             }
+            MenuItem(Icons.Default.Groups, "Credits") { close { ui.go("credits/${t.id}") } }
             MenuItem(Icons.Default.Info, "Song info") { close { ui.songInfo = t.id } }
             if (c.secureStore.config.value?.isAdmin == true) {
                 MenuItem(Icons.Default.Edit, "Edit tags") { close { ui.tagEdit = TagEditTarget(listOf(t.id), t.title) } }
