@@ -89,7 +89,7 @@ def test_user_wrapped_stats(conn5, lib5):
     lib5.event(t[0]["id"], "star", at(2026, 7, 1, 12))                         # not counted
     lib5.event(t[2]["id"], "play", at(2027, 1, 1, 12), None, None, user=None)  # next year: excluded
     w = wrapped.user_wrapped(conn5, "u1", 2026, "Europe/London", now=at(2026, 11, 19))
-    d0, d1 = t[0]["duration"], t[1]["duration"]
+    d0 = t[0]["duration"]
     expect_s = d0 * 3 + 60 + 30
     assert w["totals"]["plays"] == 4 and w["totals"]["skips"] == 1
     assert w["totals"]["minutes"] == round(expect_s / 60)

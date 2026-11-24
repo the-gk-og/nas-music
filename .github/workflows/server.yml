@@ -13,6 +13,11 @@ permissions:
   contents: read
   packages: write
 
+# A new push to a pull request cancels its older run; main and tags always finish (they publish the image).
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/nasmusic
 
@@ -31,7 +36,18 @@ jobs:
           enable-cache: true
           cache-dependency-glob: server/uv.lock
       - run: uv sync --frozen
-      - run: uv run pytest -q
+      - name: Lint (ruff)
+        run: uv run ruff check --output-format=github .
+      # Includes the API contract (tests/test_openapi_contract.py: api/openapi.yaml vs the served routes) and
+      # the migration chain (tests/test_migration_chain.py: every old schema up to the current one).
+      - name: Test
+        run: uv run pytest -q --durations=15 --junitxml=pytest-report.xml
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: server-test-report
+          path: server/pytest-report.xml
+          retention-days: 14
 
   image:
     # Build the image on every PR (no push) to catch Dockerfile breakage; publish from main and tags.

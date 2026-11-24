@@ -169,8 +169,6 @@ def test_suggestion_flags(client, sugg):
 
 
 def test_admin_suggestions_page_uses_proxy(cfg, scanned, sugg, monkeypatch):
-    from nasmusic import web
-
     cfg = replace(cfg, admin_password_hash=auth.hash_password("hunter22"))
     app = create_app(cfg, jobs=Jobs(cfg))
     u = Upstream()
@@ -303,8 +301,6 @@ def test_thumb_clear(client, conn):
 
 
 def test_dashboard_progress_uses_fallback_model(cfg, scanned, conn):
-    from nasmusic import web
-
     ids = list(track_ids(conn).values())
     for tid in ids[:2]:
         conn.execute("INSERT INTO features (track_id, model_version, embedding, dims, analysed_at) "

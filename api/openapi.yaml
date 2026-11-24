@@ -1790,6 +1790,37 @@ paths:
         '200': { description: JPEG, content: { image/jpeg: { schema: { type: string, format: binary } } } }
         '403': { description: bad or expired signature }
         '404': { description: not found }
+  /cast/spoken/{kind}/{id}:
+    get:
+      tags: [spoken]
+      summary: |
+        Audio for speakers playing an episode, an audiobook part (`id` = `<bookId>.<part>`) or a live station.
+        No session auth: URLs come from /cast/sign-spoken and the HMAC `sig` over (kind, id, exp) is the credential.
+      security: []
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [episode, book, station] } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: exp, in: query, required: true, schema: { type: integer } }
+        - { name: sig, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: audio, content: { audio/*: { schema: { type: string, format: binary } } } }
+        '206': { description: partial content }
+        '403': { description: bad or expired signature }
+        '404': { description: not found }
+  /cast/spoken-art/{kind}/{id}:
+    get:
+      tags: [spoken]
+      summary: Cover (512 px) of a podcast, audiobook or station for speakers. Signed like /cast/spoken.
+      security: []
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [podcast, book, station] } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: exp, in: query, required: true, schema: { type: integer } }
+        - { name: sig, in: query, required: true, schema: { type: string } }
+      responses:
+        '200': { description: image, content: { image/*: { schema: { type: string, format: binary } } } }
+        '403': { description: bad or expired signature }
+        '404': { description: not found }
   /admin/invites:
     get:
       summary: Admin only.
@@ -2808,6 +2839,11 @@ paths:
           description: created
           content: { application/json: { schema: { $ref: '#/components/schemas/Backup' } } }
   /admin/backups/{id}:
+    get:
+      deprecated: true
+      summary: Admin only. Old spelling of /admin/backups/{id}/download, kept for older clients.
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses: { '200': { description: the file }, '404': { description: not found } }
     delete:
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
       responses: { '204': { description: deleted }, '404': { description: not found } }
