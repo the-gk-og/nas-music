@@ -1,5 +1,9 @@
 # Deploying on TrueNAS SCALE
 
+> **New install on any NAS?** Follow [`docker/README.md`](docker/README.md): one Compose file and a `.env`,
+> works on Synology, Unraid, QNAP, OpenMediaVault, TrueNAS or plain Linux. This page is the TrueNAS walkthrough
+> and the reference for the optional features (uploads, casting, scrobbling, tag fixing).
+
 Phase 1 gets music streaming to your phone with Navidrome while the custom server and app are built.
 From Phase 2, `full/compose.yaml` replaces it.
 
