@@ -153,6 +153,7 @@ fun NasMusicRoot(c: AppContainer) {
 private fun MainScaffold(c: AppContainer) {
     val nav = rememberNavController()
     val ui = remember(nav) { UiController(nav) }
+    val ctx = LocalContext.current
     val entry by nav.currentBackStackEntryAsState()
     val current = entry?.destination?.route
     val snack = remember { SnackbarHostState() }
