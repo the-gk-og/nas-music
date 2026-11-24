@@ -1252,6 +1252,24 @@ paths:
         '200':
           description: activity
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PlaylistActivity' } } } }
+  /playlists/{playlistId}/m3u:
+    get:
+      summary: |
+        Export the playlist as UTF-8 M3U (#EXTM3U, #PLAYLIST, #EXTINF "Artist - Title"), as an attachment
+        named after the playlist. Any user who can view the playlist.
+      parameters:
+        - { name: playlistId, in: path, required: true, schema: { type: string } }
+        - name: paths
+          in: query
+          schema: { type: string, enum: [library, absolute, url], default: library }
+          description: |
+            library = paths relative to the library root (save the file there for other players); absolute =
+            the server's own file paths; url = this server's /stream URLs (they need the app's sign-in)
+      responses:
+        '200':
+          description: the playlist
+          content: { audio/x-mpegurl: { schema: { type: string } } }
+        '404': { description: no such playlist (or no access) }
   /users:
     get:
       summary: v5. Other enabled users on this server (id + username), to share a playlist with.
@@ -3239,6 +3257,119 @@ paths:
               schema:
                 allOf:
                   - $ref: '#/components/schemas/ScrobbleStatus'
+                  - type: object
+                    required: [removed]
+                    properties:
+                      removed: { type: integer }
+  /me/import:
+    get:
+      summary: |
+        Listens imported from other services (counts per source), the last Last.fm import job, and whether the
+        server can import from Last.fm by user name (it has a Last.fm API key).
+      responses:
+        '200':
+          description: status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ImportStatus' } } }
+  /me/import/spotify:
+    post:
+      summary: |
+        Import from a Spotify account data export, one file per request (body = the file's bytes, up to
+        512 MiB): my_spotify_data.zip (or any zip of the export), a streaming-history JSON
+        (Streaming_History_Audio_*.json / endsong_*.json extended history, or the 30-day StreamingHistory*.json),
+        a Playlist*.json, or an Exportify playlist CSV (playlist name = file name). History rows played for at
+        least 30 s and half the song (or 4 minutes) that match a library track become imported play events
+        (source spotify; idempotent; plays already known from a client or another import are skipped).
+        Each playlist becomes a new playlist of the matched tracks; songs not in the library go to To get
+        unless addMissing=false. Re-sending a file is harmless (an identical playlist is not created twice).
+        422 when the file is none of these.
+      parameters:
+        - { name: name, in: query, schema: { type: string, maxLength: 300 }, description: "the file name (names CSV playlists)" }
+        - { name: addMissing, in: query, schema: { type: boolean, default: true }, description: add songs not in the library to To get }
+        - name: missingMinPlays
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: history only; also add to To get songs played at least this often that aren't in the library (0 = none)
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: { schema: { type: string, format: binary } }
+      responses:
+        '200':
+          description: what was imported
+          content: { application/json: { schema: { $ref: '#/components/schemas/SpotifyImportResult' } } }
+        '413': { description: file too large }
+        '422': { description: not a Spotify export file }
+  /me/import/lastfm:
+    post:
+      summary: |
+        Import Last.fm scrobbles by user name (default: the connected Last.fm account) through
+        user.getRecentTracks, newest first; matches become imported play events (source lastfm). Needs the
+        server's Last.fm API key (503 otherwise: use /me/import/lastfm/csv) and a profile that doesn't hide its
+        listening. Runs in the background (202); progress in ImportStatus.lastfm. 409 while one is running.
+      parameters:
+        - { name: wait, in: query, schema: { type: boolean, default: false }, description: run inline }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: { type: string, maxLength: 64 }
+                maxScrobbles: { type: integer, minimum: 1, maximum: 200000, default: 200000 }
+      responses:
+        '202':
+          description: started; status
+          content: { application/json: { schema: { $ref: '#/components/schemas/ImportStatus' } } }
+        '409': { description: already running }
+        '422': { description: no user name }
+        '503': { description: no Last.fm API key on this server }
+  /me/import/lastfm/csv:
+    post:
+      summary: |
+        Import a CSV of Last.fm scrobbles (body = the file, up to 20 MiB): artist, album, title, date with no
+        header (lastfm-to-csv), or a header naming artist / title (or track) / date (or uts, timestamp).
+      parameters:
+        - { name: missingMinPlays, in: query, schema: { type: integer, minimum: 0, default: 0 }, description: "also add to To get songs scrobbled at least this often that aren't in the library (0 = none)" }
+      requestBody:
+        required: true
+        content:
+          text/csv: { schema: { type: string } }
+      responses:
+        '200':
+          description: what was imported
+          content: { application/json: { schema: { $ref: '#/components/schemas/ImportHistoryResult' } } }
+        '422': { description: not a scrobbles CSV }
+  /me/import/m3u:
+    post:
+      summary: |
+        Import an .m3u / .m3u8 playlist (body = the file, up to 20 MiB) as a new playlist. Entries match by this
+        server's stream URL, file path (relative to the library root, or any trailing part of an absolute
+        path), then #EXTINF "Artist - Title". Missing songs with an #EXTINF go to To get unless addMissing=false.
+      parameters:
+        - { name: name, in: query, schema: { type: string, maxLength: 300 }, description: "file name, used when the file has no #PLAYLIST line" }
+        - { name: addMissing, in: query, schema: { type: boolean, default: true } }
+      requestBody:
+        required: true
+        content:
+          audio/x-mpegurl: { schema: { type: string } }
+      responses:
+        '200':
+          description: the playlist
+          content: { application/json: { schema: { $ref: '#/components/schemas/ImportedPlaylist' } } }
+        '422': { description: empty playlist file }
+  /me/import/history/{source}:
+    delete:
+      summary: Remove every listen imported from one source (and the play counts it added).
+      parameters:
+        - { name: source, in: path, required: true, schema: { type: string, enum: [listenbrainz, lastfm, spotify] } }
+      responses:
+        '200':
+          description: removed count + status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ImportStatus'
                   - type: object
                     required: [removed]
                     properties:
@@ -5566,6 +5697,84 @@ components:
             unmatched: { type: integer }
             error: { type: string }
         importedEvents: { type: integer, description: imported events currently stored }
+    ImportHistoryResult:
+      type: object
+      description: one history import (Spotify, Last.fm)
+      properties:
+        scanned: { type: integer, description: listens read }
+        matched: { type: integer }
+        imported: { type: integer }
+        alreadyKnown: { type: integer, description: already here from a client or another import }
+        unmatched: { type: integer, description: not in this library }
+        tooShort: { type: integer, description: 'Spotify: played too briefly to count' }
+        topMissing:
+          type: array
+          description: most-played songs not in the library (up to 50)
+          items:
+            type: object
+            properties:
+              artist: { type: string }
+              title: { type: string }
+              plays: { type: integer }
+        toGetAdded: { type: integer }
+    ImportedPlaylist:
+      type: object
+      required: [name, total, matched, missing, playlistId, unchanged, toGetAdded]
+      properties:
+        name: { type: string }
+        total: { type: integer }
+        matched: { type: integer }
+        missing: { type: integer }
+        playlistId: { type: [string, 'null'], description: "null when nothing matched" }
+        unchanged: { type: boolean, description: "the user already had this playlist with exactly these tracks; nothing created" }
+        toGetAdded: { type: integer }
+        missingSongs:
+          type: array
+          description: up to 50
+          items:
+            type: object
+            properties:
+              artist: { type: [string, 'null'] }
+              title: { type: [string, 'null'] }
+    SpotifyImportResult:
+      type: object
+      required: [files, playlists, history, toGetAdded]
+      properties:
+        files: { type: array, items: { type: string }, description: "files used (inside a zip, their names)" }
+        playlists: { type: array, items: { $ref: '#/components/schemas/ImportedPlaylist' } }
+        history:
+          oneOf:
+            - $ref: '#/components/schemas/ImportHistoryResult'
+            - type: 'null'
+        toGetAdded: { type: integer }
+    ImportStatus:
+      type: object
+      required: [imported, lastfmAvailable]
+      properties:
+        imported:
+          type: object
+          description: imported play events stored, per source
+          properties:
+            listenbrainz: { type: integer }
+            lastfm: { type: integer }
+            spotify: { type: integer }
+        lastfm:
+          type: [object, 'null']
+          description: last Last.fm import by user name (ImportHistoryResult fields plus these)
+          properties:
+            state: { type: string, enum: [running, done, error] }
+            username: { type: string }
+            startedAt: { type: string, format: date-time }
+            finishedAt: { type: string, format: date-time }
+            page: { type: integer }
+            pages: { type: integer }
+            scanned: { type: integer }
+            imported: { type: integer }
+            alreadyKnown: { type: integer }
+            unmatched: { type: integer }
+            error: { type: string }
+        lastfmAvailable: { type: boolean, description: the server has a Last.fm API key }
+        lastfmUsername: { type: [string, 'null'], description: the connected Last.fm account, if any }
     Notification:
       type: object
       required: [id, kind, title, body, data, createdAt, read]
