@@ -1,12 +1,15 @@
 //! nas-music desktop: a Tauri v2 shell around the web player (`../web/dist`).
 //! Extras over the browser: tray icon (play/pause, next, previous, show, quit), global media keys,
 //! a native notification on track change, single instance, and the window size/position remembered.
-//! The web app listens for `nm-control` events and calls `track_changed`.
+//! Optional: Discord "Listening to" status (`discord.rs`, off by default).
+//! The web app listens for `nm-control` events and calls `track_changed`, `discord_configure`, `discord_update`.
+
+mod discord;
 
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, WindowEvent,
+    AppHandle, Emitter, Manager, State, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
@@ -46,6 +49,18 @@ fn track_changed(app: AppHandle, title: String, artist: String, album: String) {
     }
 }
 
+/// Turn the Discord status on (with the user's Discord application ID) or off (`None`).
+#[tauri::command]
+fn discord_configure(discord: State<discord::Discord>, app_id: Option<String>) {
+    let _ = discord.0.send(discord::Msg::Configure(app_id));
+}
+
+/// What's playing now, or `None` when paused/stopped (the status is cleared).
+#[tauri::command]
+fn discord_update(discord: State<discord::Discord>, now: Option<discord::NowPlaying>) {
+    let _ = discord.0.send(discord::Msg::Update(now));
+}
+
 pub fn run() {
     tauri::Builder::default()
         // Must be first: a second launch focuses the running window instead.
@@ -69,7 +84,8 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![track_changed])
+        .manage(discord::Discord::spawn())
+        .invoke_handler(tauri::generate_handler![track_changed, discord_configure, discord_update])
         .setup(|app| {
             // Global media keys. Registration can fail (e.g. another player owns them, or Wayland);
             // the web player's Media Session still handles keys while it has focus.

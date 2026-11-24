@@ -13,6 +13,10 @@
   import { session } from '../lib/session.svelte';
   import { ui } from '../lib/ui.svelte';
   import VoiceSettings from '../components/VoiceSettings.svelte';
+  import { desktop } from '../lib/desktop.svelte';
+  import { validAppId } from '../lib/discord';
+  import { isTauri } from '../lib/platform';
+  import { pwa } from '../lib/pwa.svelte';
 
   import type { DataSummary } from '../lib/types';
 
@@ -87,7 +91,32 @@
       <input bind:value={deviceName} onchange={() => session.setDeviceName(deviceName.trim() || session.saved.deviceName)} />
     </label>
     <div class="muted small">Server: {session.isMock ? 'built-in demo (mock)' : session.saved.origin || location.origin} · signed in as {session.saved.username}</div>
+    {#if pwa.canInstall}
+      <div class="opt">
+        <div><div>Install as an app</div><div class="muted small">Its own window and icon, and it still opens when the server can't be reached.</div></div>
+        <button class="btn" onclick={() => pwa.install()}>Install</button>
+      </div>
+    {/if}
   </div>
+
+  {#if isTauri()}
+    <div class="section-title">Desktop app</div>
+    <div class="pad form">
+      <label class="sig inline">
+        <div><div>Show what I'm playing in Discord</div><div class="muted small">“Listening to” on your Discord profile while music plays on this computer. Only the Discord app on this computer is told; nothing is shown when paused.</div></div>
+        <input type="checkbox" class="switch" checked={desktop.discord.on} onchange={(e) => desktop.setDiscord({ on: e.currentTarget.checked })} />
+      </label>
+      {#if desktop.discord.on}
+        <label>Discord application ID
+          <input inputmode="numeric" placeholder="e.g. 1234567890123456789" value={desktop.discord.appId} onchange={(e) => desktop.setDiscord({ appId: e.currentTarget.value })} />
+        </label>
+        <div class="muted small">
+          {#if desktop.discord.appId && !validAppId(desktop.discord.appId)}That doesn't look like an application ID (17–20 digits).{:else}
+          Discord needs one: create an application at discord.com/developers/applications, name it what you want shown (“Listening to …”), and paste its Application ID here. Optionally upload an image called “logo” under Rich Presence → Art Assets.{/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   <div class="section-title">Appearance</div>
   <div class="pad form">

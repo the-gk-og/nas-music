@@ -73,6 +73,12 @@ jobs:
         shell: bash
         run: npx tauri build ${{ matrix.args }} --config "{\"version\":\"${VERSION}\"}"
 
+      # Unit tests for the Rust side (Discord status helpers).
+      - name: Rust unit tests
+        if: runner.os == 'Linux'
+        working-directory: desktop/src-tauri
+        run: cargo test
+
       - name: Collect bundles
         shell: bash
         run: |

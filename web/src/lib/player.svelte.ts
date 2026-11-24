@@ -867,6 +867,28 @@ export class Player {
     }
   }
 
+  private analyserNode: AnalyserNode | null = null;
+
+  /** Spectrum tap for the Now Playing visualiser: both decks after the DJ mix, before EQ and volume (so it
+   *  still moves at low volume). Null without Web Audio, or before the first play. */
+  analyser(): AnalyserNode | null {
+    if (!this.ctx || !this.mix) return null;
+    if (!this.analyserNode) {
+      try {
+        const a = this.ctx.createAnalyser();
+        a.fftSize = 2048;
+        a.smoothingTimeConstant = 0.72;
+        a.minDecibels = -90;
+        a.maxDecibels = -20;
+        this.mix.connect(a);
+        this.analyserNode = a;
+      } catch {
+        return null;
+      }
+    }
+    return this.analyserNode;
+  }
+
   private async loadPitchWorklet() {
     if (!this.ctx?.audioWorklet || !this.graph) return;
     try {
