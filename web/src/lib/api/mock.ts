@@ -915,6 +915,24 @@ export class MockBackend {
       };
     if (path === '/admin/autotag/rematch' && method === 'POST') return { queued: (body.trackIds as string[]).length };
     if (path === '/admin/duplicates') return A.dups;
+    // library cleanup (v9): an empty, working console in mock mode
+    if (path === '/admin/cleanup/summary')
+      return {
+        reports: [
+          { id: 'never_played', title: 'Never played', description: 'Songs nobody has played.', kind: 'track', threshold: 90, unit: 'days', count: 0, bytes: 0 },
+          { id: 'fake_lossless', title: 'Fake lossless', description: 'Lossless files made from an MP3/AAC.', kind: 'track', threshold: null, unit: null, count: 0, bytes: 0 },
+        ],
+        inTrash: 0,
+        deleteList: 0,
+        lossless: { lossless: 0, checked: 0, flagged: 0, byVerdict: {} },
+        trashDays: 30,
+        deleteFiles: false,
+      };
+    if (path.startsWith('/admin/cleanup/reports/')) return { total: 0, bytes: 0, items: [] };
+    if (path === '/admin/cleanup/search') return { artists: [], albums: [], tracks: [] };
+    if (path === '/admin/cleanup/trash') return { trashDays: 30, deleteFiles: false, batches: [] };
+    if (path === '/admin/cleanup/delete-list') return [];
+    if (path === '/admin/cleanup/remove' && method === 'POST') return { removed: 0, batchId: 'mock', purgeAfter: iso(), bytes: 0 };
     if (path === '/admin/duplicates/resolve' && method === 'POST') return A.resolveDup(body.keepTrackId as string, body.hideTrackIds as string[]);
     if (path === '/admin/duplicates/unhide' && method === 'POST') return A.unhideDup(body.trackIds as string[]);
     if (path === '/admin/backups') {

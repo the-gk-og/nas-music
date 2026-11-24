@@ -16,7 +16,10 @@ Replaces LatentJam. Design doc: https://claude.ai/artifact/PAiW16UTjDX9JSseBPeqn
   `tests/test_migration_chain.py` checks every old version migrates to exactly a fresh install's schema.
 - CI checks both sides against `api/openapi.yaml`: `server/tests/test_openapi_contract.py` (served routes) and
   `web/src/lib/api/contract.test.ts` (requests the web client sends). Document a new endpoint in the same PR.
-- The music library is mounted read-only. Never write to it.
+- The music library is mounted read-only. Never write to it. **One owner-approved exception (2026-11-24):**
+  the admin trash purge in `server/nasmusic/library/cleanup.py` may delete the exact files of songs an admin
+  removed, only when config `library_delete_files = true` (the owner then mounts the folder read-write). No
+  other code may write to the library; keep the read-only fallback (hide + delete list) working.
 - No secrets in the repo (Cloudflare tokens, Last.fm keys go in `config.toml`, which is gitignored).
 
 ## Layout and ownership

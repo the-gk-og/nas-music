@@ -101,42 +101,62 @@ def remove_missing(conn: sqlite3.Connection, track_ids: list[str] | None) -> int
         ids = [i for i in ids if i in wanted]
     if not ids:
         return 0
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        delete_track_rows(conn, ids)
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    return len(ids)
+
+
+def detach_tracks(conn: sqlite3.Connection, ids: list[str]) -> None:
+    """Take tracks out of every playlist, queue and mix (inside the caller's transaction); queues keep their
+    current track current."""
+    if not ids:
+        return
     from nasmusic.app import collections as coll
     from nasmusic.app import playlists
 
     gone = set(ids)
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        playlists.remove_tracks_everywhere(conn, ids)
-        for (qid,) in conn.execute("SELECT DISTINCT queue_id FROM queue_tracks WHERE track_id IN "
-                                   f"({','.join('?' * len(ids))})", ids).fetchall():
+    playlists.remove_tracks_everywhere(conn, ids)
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        q = ",".join("?" * len(chunk))
+        for (qid,) in conn.execute(f"SELECT DISTINCT queue_id FROM queue_tracks WHERE track_id IN ({q})",
+                                   chunk).fetchall():
             row = conn.execute("SELECT current_index FROM queues WHERE id = ?", (qid,)).fetchone()
             old = coll._queue_ids(conn, qid)
             cur = old[row[0]] if 0 <= row[0] < len(old) else None
             keep = [t for t in old if t not in gone]
             new_cur = keep.index(cur) if cur in keep else min(row[0], max(len(keep) - 1, 0))
             coll._write_queue(conn, qid, keep, new_cur)
-        for (mid,) in conn.execute("SELECT DISTINCT mix_id FROM mix_tracks WHERE track_id IN "
-                                   f"({','.join('?' * len(ids))})", ids).fetchall():
+        for (mid,) in conn.execute(f"SELECT DISTINCT mix_id FROM mix_tracks WHERE track_id IN ({q})",
+                                   chunk).fetchall():
             rows = conn.execute("SELECT * FROM mix_tracks WHERE mix_id = ? ORDER BY position", (mid,)).fetchall()
             conn.execute("DELETE FROM mix_tracks WHERE mix_id = ?", (mid,))
             conn.executemany("INSERT INTO mix_tracks (mix_id, position, track_id, score, reason) VALUES (?,?,?,?,?)",
                              [(mid, n, r["track_id"], r["score"], r["reason"])
                               for n, r in enumerate(x for x in rows if x["track_id"] not in gone)])
-        for i in range(0, len(ids), 500):
-            chunk = ids[i:i + 500]
-            q = ",".join("?" * len(chunk))
-            for table in ("user_tracks", "events", "features", "analysis_jobs", "lyrics_overrides", "lyrics_cache"):
-                conn.execute(f"DELETE FROM {table} WHERE track_id IN ({q})", chunk)
-            conn.execute(f"DELETE FROM tracks WHERE id IN ({q})", chunk)
-        conn.execute("DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)")
-        conn.execute("DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM albums) "
-                     "AND id NOT IN (SELECT DISTINCT artist_id FROM tracks)")
-        conn.execute("COMMIT")
-    except BaseException:
-        conn.execute("ROLLBACK")
-        raise
-    return len(ids)
+
+
+def delete_track_rows(conn: sqlite3.Connection, ids: list[str]) -> None:
+    """Delete tracks and everything referring to them (inside the caller's transaction), then albums and
+    artists nothing references any more."""
+    if not ids:
+        return
+    detach_tracks(conn, ids)
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        q = ",".join("?" * len(chunk))
+        for table in ("user_tracks", "events", "features", "analysis_jobs", "lyrics_overrides", "lyrics_cache",
+                      "track_dj", "blend_tracks", "jam_requests", "smart_playlist_tracks", "scrobble_queue"):
+            conn.execute(f"DELETE FROM {table} WHERE track_id IN ({q})", chunk)
+        conn.execute(f"DELETE FROM tracks WHERE id IN ({q})", chunk)
+    conn.execute("DELETE FROM albums WHERE id NOT IN (SELECT DISTINCT album_id FROM tracks)")
+    conn.execute("DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM albums) "
+                 "AND id NOT IN (SELECT DISTINCT artist_id FROM tracks)")
 
 
 def duplicates(conn: sqlite3.Connection) -> list[dict]:

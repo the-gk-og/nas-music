@@ -539,6 +539,9 @@ export interface DuplicateTrack {
   hidden: boolean;
   keptId: string | null;
   recommended: boolean;
+  /** v9 fake-lossless checker (lossless codecs; null = not checked yet). */
+  losslessVerdict?: LosslessVerdict | null;
+  losslessNote?: string | null;
 }
 
 export interface DuplicateGroup {
@@ -576,10 +579,11 @@ export function autotagApi(c: ApiClient) {
     rematch: (trackIds: string[]) => c.post<{ queued: number }>('/admin/autotag/rematch', { trackIds }),
     coverPath: (releaseMbid: string) => `/admin/autotag/cover/${enc(releaseMbid)}`,
     duplicates: () => c.get<DuplicateGroup[]>('/admin/duplicates'),
-    resolve: (keepTrackId: string, hideTrackIds: string[]) =>
-      c.post<{ hidden: number; keptId: string }>('/admin/duplicates/resolve', {
+    resolve: (keepTrackId: string, hideTrackIds: string[], remove = false) =>
+      c.post<{ hidden: number; keptId: string; removed?: number; batchId?: string; purgeAfter?: string }>('/admin/duplicates/resolve', {
         keepTrackId,
         hideTrackIds,
+        remove,
       }),
     unhide: (trackIds: string[]) => c.post<{ unhidden: number }>('/admin/duplicates/unhide', { trackIds }),
   };
@@ -630,4 +634,125 @@ export function qualityText(t: Pick<DuplicateTrack, 'codec' | 'bitrate' | 'sampl
   else if (t.sampleRate) parts.push(`${(t.sampleRate / 1000).toFixed(1)} kHz`);
   if (t.bitrate) parts.push(`${t.bitrate} kbps`);
   return parts.join(' · ');
+}
+
+// ---- library cleanup (v9): pruning reports, trash, delete list, fake lossless, preview ----
+
+export type LosslessVerdict = 'ok' | 'lossy_source' | 'suspect' | 'upsampled' | 'unknown' | 'error';
+export type CleanupReportId = 'never_played' | 'unplayed_albums' | 'disliked' | 'low_quality' | 'fake_lossless' | 'short';
+
+export interface CleanupReport {
+  id: CleanupReportId;
+  title: string;
+  description: string;
+  kind: 'track' | 'album';
+  threshold: number | null;
+  unit: 'days' | 'skips' | 'kbps' | 'seconds' | null;
+  count: number;
+  bytes: number;
+}
+
+export interface CleanupItem {
+  kind: 'track' | 'album';
+  id: string;
+  title: string;
+  artist: string;
+  album: string;
+  albumId: string;
+  path: string | null;
+  bytes: number | null;
+  durationS: number | null;
+  codec: string | null;
+  bitrate: number | null;
+  sampleRate: number | null;
+  bitsPerSample: number | null;
+  plays: number;
+  skips: number;
+  blockedBy: number;
+  lastPlayed: string | null;
+  addedAt: string | null;
+  note: string | null;
+  verdict?: LosslessVerdict;
+  trackCount: number;
+  trackIds: string[];
+}
+
+export interface CleanupSummary {
+  reports: CleanupReport[];
+  inTrash: number;
+  deleteList: number;
+  lossless: { lossless: number; checked: number; flagged: number; byVerdict: Record<string, number> };
+  trashDays: number;
+  deleteFiles: boolean;
+}
+
+export interface TrashBatch {
+  batchId: string;
+  removedAt: string;
+  removedBy: string | null;
+  reason: string | null;
+  purgeAfter: string;
+  count: number;
+  bytes: number;
+  purgedCount: number;
+  purgeError: string | null;
+  sample: { id: string; title: string; artist: string; album: string; path: string }[];
+}
+
+export interface CleanupSearch {
+  artists: { id: string; name: string; trackCount: number; bytes: number }[];
+  albums: { id: string; title: string; artist: string; year: number | null; trackCount: number; bytes: number; path: string | null }[];
+  tracks: CleanupItem[];
+}
+
+export interface PurgeResult {
+  purged: number;
+  filesDeleted: number;
+  freedBytes: number;
+  kept: number;
+  errors: number;
+}
+
+export function cleanupApi(c: ApiClient) {
+  const enc = encodeURIComponent;
+  return {
+    summary: () => c.get<CleanupSummary>('/admin/cleanup/summary'),
+    report: (id: CleanupReportId, q: { threshold?: number; limit?: number; offset?: number } = {}) =>
+      c.get<{ total: number; bytes: number; items: CleanupItem[] }>(`/admin/cleanup/reports/${enc(id)}`, q),
+    search: (q: string) => c.get<CleanupSearch>('/admin/cleanup/search', { q }),
+    remove: (b: { trackIds?: string[]; albumIds?: string[]; artistIds?: string[]; reason?: string | null }) =>
+      c.post<{ removed: number; batchId: string; purgeAfter: string; bytes: number }>('/admin/cleanup/remove', b),
+    trash: () => c.get<{ trashDays: number; deleteFiles: boolean; batches: TrashBatch[] }>('/admin/cleanup/trash'),
+    restore: (b: { batchIds?: string[]; trackIds?: string[] }) => c.post<{ restored: number }>('/admin/cleanup/trash/restore', b),
+    purge: (batchIds: string[]) => c.post<PurgeResult>('/admin/cleanup/trash/purge', { batchIds }),
+    deleteList: () => c.get<{ id: string; path: string; bytes: number | null; error: string | null }[]>('/admin/cleanup/delete-list'),
+    deleteScriptUrl: () => c.downloadUrl('/admin/cleanup/delete-list?format=sh'),
+    dismissLossless: (trackIds: string[], dismissed = true) => c.post<{ updated: number }>('/admin/cleanup/lossless/dismiss', { trackIds, dismissed }),
+    /** <audio> URL for any copy (hidden/removed too): the file as stored, or Opus. '' in mock mode. */
+    previewUrl: (trackId: string, format: 'original' | 'opus' = 'original') =>
+      c.mediaUrl(`/admin/preview/${enc(trackId)}?format=${format}`),
+  };
+}
+
+/** Plain-English label for a fake-lossless verdict, or null when there is nothing to say. */
+export function losslessLabel(v: LosslessVerdict | null | undefined): string | null {
+  switch (v) {
+    case 'lossy_source':
+      return 'Fake lossless';
+    case 'suspect':
+      return 'Possibly fake lossless';
+    case 'upsampled':
+      return 'Upsampled';
+    case 'ok':
+      return 'Real lossless';
+    default:
+      return null;
+  }
+}
+
+/** "120 songs · 1.2 GB" for a selection. */
+export function selectionText(items: Pick<CleanupItem, 'trackIds' | 'bytes'>[], fmt: (n: number) => string): string {
+  const songs = items.reduce((n, i) => n + i.trackIds.length, 0);
+  const bytes = items.reduce((n, i) => n + (i.bytes ?? 0), 0);
+  return `${songs} song${songs === 1 ? '' : 's'} · ${fmt(bytes)}`;
 }

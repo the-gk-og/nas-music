@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 JOB_NAMES = ("scan", "full_scan", "analyse", "loudness", "nightly", "pretranscode", "lyrics", "discovery", "release_radar",
              "blends", "cleanup", "backup", "explicit", "autotag", "upload_scan", "smart", "artist_info",
-             "podcasts", "audiobooks", "automix")
+             "podcasts", "audiobooks", "automix", "lossless")
 # The loudness job runs after every scan; a first pass over a big library takes hours, so each run stops
 # after this long and the next scan (or the nightly chain) carries on.
 LOUDNESS_BUDGET_S = 50 * 60
@@ -30,6 +30,8 @@ HISTORY = 20
 LYRICS_PER_RUN = 200
 # The explicit-content job (file tags, Deezer, lyrics word list) is resumable: each run stops after this.
 EXPLICIT_BUDGET_S = 20 * 60
+# Fake-lossless checker (spectrum of FLAC/ALAC/WAV files): resumable; each run stops after this.
+LOSSLESS_BUDGET_S = 30 * 60
 # DJ automix analysis (beat grid, key, mix points): resumable, one low-priority worker; each run stops after this.
 AUTOMIX_BUDGET_S = 45 * 60
 
@@ -152,7 +154,7 @@ class Jobs:
                 "unreachable": unreachable}
 
     def _cleanup(self, conn):
-        """Daily housekeeping: expire bug reports (30 days)."""
+        """Daily housekeeping: expire bug reports (30 days), purge the library trash, tidy uploads."""
         from datetime import UTC, datetime, timedelta
 
         from nasmusic.core import iso
@@ -161,9 +163,18 @@ class Jobs:
 
         cutoff = iso(datetime.now(UTC) - timedelta(days=30))
         out = {"bugReportsDeleted": conn.execute("DELETE FROM bug_reports WHERE created_at < ?", (cutoff,)).rowcount}
+        from nasmusic.library import cleanup
+
+        out["trash"] = cleanup.purge(conn, self.cfg)  # removals older than trash_days (admin console Cleanup)
         if self.cfg.upload_root is not None:
             out.update(uploads.cleanup(conn, self.cfg))
         return out
+
+    def _lossless(self, conn):
+        """Fake-lossless checker: flags lossless files made from MP3/AAC or upsampled (time-boxed, resumable)."""
+        from nasmusic.library import lossless
+
+        return lossless.run(conn, self.cfg.library_root, time_budget_s=LOSSLESS_BUDGET_S)
 
     def _backup(self, conn):
         from nasmusic.app import backups
@@ -234,6 +245,7 @@ class Jobs:
             "podcasts": self._podcasts,
             "audiobooks": self._audiobooks,
             "automix": self._automix,
+            "lossless": self._lossless,
         }[name]
 
     # ----- running -----
@@ -292,6 +304,7 @@ class Jobs:
             self.trigger("loudness", "chained")
             self.trigger("explicit", "chained")
             self.trigger("automix", "chained")
+            self.trigger("lossless", "chained")
         return rec
 
     def trigger(self, name: str, how: str = "manual") -> bool:

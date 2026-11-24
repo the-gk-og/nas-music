@@ -165,6 +165,24 @@ body limit by default; `deploy/relay/Caddyfile` sets an explicit 32 MB cap on `/
 updated Caddyfile to `/data/relay/Caddyfile` and restart the caddy container). The Cloudflare tunnel's 100 MB
 limit is also well above a chunk.
 
+## Deleting songs (admin console "Cleanup & trash")
+
+Admin → **Cleanup & trash** lists songs worth pruning (never played, unplayed albums, disliked/skipped, low
+bitrate, fake lossless, very short) and lets you find and remove any song, album or artist. Duplicates →
+**Keep selected, delete others** does the same for worse copies (press play on each copy to compare them).
+A removal leaves the library at once and waits in the **trash** for `trash_days` (30) days, restorable.
+
+When the trash is emptied:
+- **Default (`library_delete_files = false`)**: the music folder stays read-only and is never touched. The songs
+  stay hidden for good and go on the **delete list**; download its script from the Trash tab and run it on the
+  NAS (`sh delete-list.sh /mnt/NAS/Shared/music`). The server forgets the songs once the files are gone.
+- **`library_delete_files = true`** in `config.toml`: the server deletes the files itself (plus a same-name
+  `.lrc`, and folders left empty). Mount the music folder **read-write** for this: drop `:ro` from the music
+  line in your compose file. If the mount is still read-only, nothing breaks: the songs go on the delete list
+  and the Trash tab shows why. Take a ZFS snapshot of the music dataset first (see the top of this file).
+
+Uploaded songs are always deleted for real (their folder is writable anyway).
+
 ## Casting to speakers
 
 The server can play on Chromecast / Google Cast speakers, DLNA (UPnP AV) renderers, Home Assistant

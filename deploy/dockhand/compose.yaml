@@ -42,6 +42,8 @@ services:
     environment:
       NASMUSIC_CONFIG: /data/config.toml
     volumes:
+      # Read-only. To let the admin trash delete removed songs, drop `:ro` AND set library_delete_files = true
+      # in /data/config.toml (deploy/README.md "Deleting songs").
       - /mnt/NAS/Shared/music:/music:ro
       # Uploads (deploy/README.md "Uploads"): a SEPARATE writable folder, owner 568, group 3000, mode 2775.
       # Create it on the NAS first, then set upload_root = "/uploads" in /data/config.toml.

@@ -1,4 +1,4 @@
--- nas-music shared schema v8 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v9 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
@@ -103,7 +103,8 @@ CREATE TABLE IF NOT EXISTS tracks (
     mbid            TEXT,              -- MusicBrainz recording id
     added_at        TEXT NOT NULL,
     -- 0 = present; 1 = file vanished on last scan (kept for history); 2 (v6) = hidden by an admin as a
-    -- duplicate copy (see duplicate_hidden). Everything that filters `missing = 0` skips both.
+    -- duplicate copy (see duplicate_hidden); 3 (v9) = removed by an admin (see library_removed).
+    -- Everything that filters `missing = 0` skips all of them.
     missing         INTEGER NOT NULL DEFAULT 0,
     -- v2 song-info fields, filled by the scanner
     composer        TEXT,
@@ -1081,4 +1082,34 @@ CREATE TABLE IF NOT EXISTS continue_dismissed (
     item_id      TEXT NOT NULL,
     dismissed_at TEXT NOT NULL,
     PRIMARY KEY (user_id, kind, item_id)
+);
+
+-- v9 library cleanup: tracks an admin removed (tracks.missing = 3). A removal sits in the trash until
+-- purge_after (restoring deletes the row). Purging deletes uploaded files, and library files too when config
+-- library_delete_files is on (the music folder must then be mounted read-write); otherwise the track stays
+-- hidden for good and is listed in the admin's delete list. purged_at marks a purge that kept the row.
+CREATE TABLE IF NOT EXISTS library_removed (
+    track_id     TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    batch_id     TEXT NOT NULL,
+    reason       TEXT,
+    removed_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    removed_at   TEXT NOT NULL,
+    purge_after  TEXT NOT NULL,
+    purged_at    TEXT,
+    purge_error  TEXT                     -- why the file could not be deleted (read-only mount, permissions)
+);
+CREATE INDEX IF NOT EXISTS idx_library_removed_batch ON library_removed(batch_id);
+
+-- v9 fake-lossless checker (nasmusic.library.lossless): the spectrum of lossless files. A sharp cutoff well
+-- below the Nyquist frequency means the file was made from a lossy (MP3/AAC) source; a hi-res file whose
+-- content stops at ~22 kHz was upsampled from CD. Rechecked when tracks.mtime changes.
+CREATE TABLE IF NOT EXISTS lossless_checks (
+    track_id     TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    mtime        REAL NOT NULL,           -- tracks.mtime the check was made on
+    verdict      TEXT NOT NULL,           -- ok | lossy_source | suspect | upsampled | unknown | error
+    cutoff_hz    INTEGER,                 -- where the content stops (null = reaches Nyquist)
+    source_guess TEXT,                    -- e.g. "MP3 ~128 kbps", "CD 44.1 kHz"
+    detail       TEXT,
+    checked_at   TEXT NOT NULL,
+    dismissed    INTEGER NOT NULL DEFAULT 0   -- an admin said "it's fine"
 );

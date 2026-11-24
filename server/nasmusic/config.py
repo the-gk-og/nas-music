@@ -85,6 +85,11 @@ class Config:
     lrclib_enabled: bool = True                 # lyrics fallback from lrclib.net when a file has none
     artist_info_enabled: bool = True            # artist pages: photo/bio/links from MusicBrainz + Wikipedia/Wikidata
     explicit_deezer: bool = True                # explicit-content job asks Deezer (free API) about untagged tracks
+    # ---- library cleanup (nasmusic/library/cleanup.py, admin console "Cleanup") ----
+    trash_days: int = 30                        # removed songs stay restorable this long, then are purged
+    # Purging deletes the music files themselves. Off = they stay hidden and go on a delete list instead.
+    # Needs the music folder mounted read-write (no `:ro`); this is the ONLY code that ever writes to it.
+    library_delete_files: bool = False
     lan_public_url: str | None = None           # public LAN address incl. port, if not https://lan_host:https_port
     # ---- uploads (nasmusic/library/uploads.py): a separate WRITABLE folder, never inside library_root ----
     upload_root: Path | None = None             # e.g. /uploads; unset = uploading is off

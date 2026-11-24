@@ -392,7 +392,9 @@ def test_bug_reports_expire(client, conn, app):
     rid = client.post(f"{API}/me/bug-report", json={"logs": "old"}).json()["id"]
     conn.execute("UPDATE bug_reports SET created_at = '2000-01-01T00:00:00Z' WHERE id = ?", (rid,))
     assert client.get(f"{ADMIN}/reports").json() == []
-    assert app.state.ctx.jobs.run("cleanup")["result"] == {"bugReportsDeleted": 1}
+    res = app.state.ctx.jobs.run("cleanup")["result"]
+    assert res["bugReportsDeleted"] == 1
+    assert res["trash"]["purged"] == 0
 
 
 def test_bug_report_as_the_android_app_sends_it(client, bob):
