@@ -14,7 +14,7 @@ from nasmusic.db import family
 from nasmusic.core import ai_config
 from nasmusic.library import art, queries
 
-HOME_KINDS = ("start_radio", "devices", "recently_played", "continue_listening", "pinned")
+HOME_KINDS = ("start_radio", "devices", "recently_played", "continue_listening", "pinned", "on_this_day")
 FORYOU_KINDS = ("mixes", "radio", "because_you_played", "release_radar", "suggestions", "to_get", "blends", "wrapped")
 PIN_TYPES = ("album", "artist", "playlist", "mix", "queue", "smart_list", "smart_playlist", "genre", "folder")
 SMART_TITLES = {"favourites": "Favourites", "recently_added": "Recently added", "recently_played": "Recently played",
@@ -307,9 +307,22 @@ def home(conn: sqlite3.Connection, cfg: Config, uid: str, me_device: str | None,
         shelf("continue_listening", "continue_listening", "Continue listening",
               _continue_listening(conn, data_dir, uid, playing_queue)),
         shelf("pinned", "pinned", "Pinned", list_pins(conn, data_dir, uid)),
+        _on_this_day(conn, cfg, uid),
     ]
     shelves = [s for s in shelves if s["items"]]
     return {"shelves": _ordered(shelves, userdata.get_settings(conn, uid), "home")}
+
+
+def _on_this_day(conn: sqlite3.Connection, cfg: Config, uid: str) -> dict:
+    from nasmusic.app import onthisday
+
+    try:
+        items = onthisday.items(conn, uid, cfg.timezone)
+    except Exception:  # a side shelf must never break Home
+        log.exception("on this day shelf failed")
+        items = []
+    return shelf("on_this_day", "on_this_day", "On this day", items,
+                 subtitle=onthisday.subtitle(conn, uid, cfg.timezone) if items else None)
 
 
 # ---------- For You ----------

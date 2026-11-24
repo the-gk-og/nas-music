@@ -107,7 +107,7 @@
       <h2 class="h">{s.title}</h2>
       <div class="quick">{#each s.items.slice(0, appearance.form === 'phone' ? 6 : 8) as it (it.type + it.id)}<QuickTile item={it} />{/each}</div>
     {:else}
-      <Shelf title={s.title}>
+      <Shelf title={s.title} subtitle={s.subtitle ?? ''}>
         {#each s.items as it (it.type + it.id)}<Card item={it} siblings={s.items} />{/each}
       </Shelf>
     {/if}

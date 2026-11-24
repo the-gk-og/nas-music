@@ -156,6 +156,41 @@ export interface ScrobbleStatus {
   importedEvents: number;
 }
 
+/** Imports from other services (GET /me/import, POST /me/import/*). */
+export type ImportSource = 'listenbrainz' | 'lastfm' | 'spotify';
+export interface ImportHistoryResult {
+  scanned: number;
+  matched: number;
+  imported: number;
+  alreadyKnown: number;
+  unmatched: number;
+  tooShort?: number;
+  topMissing?: { artist: string; title: string; plays: number }[];
+  toGetAdded?: number;
+}
+export interface ImportedPlaylist {
+  name: string;
+  total: number;
+  matched: number;
+  missing: number;
+  playlistId: string | null;
+  unchanged: boolean;
+  toGetAdded: number;
+  missingSongs?: { artist: string | null; title: string | null }[];
+}
+export interface SpotifyImportResult {
+  files: string[];
+  playlists: ImportedPlaylist[];
+  history: ImportHistoryResult | null;
+  toGetAdded: number;
+}
+export interface ImportStatus {
+  imported: Record<ImportSource, number>;
+  lastfm?: (Partial<ImportHistoryResult> & { state: 'running' | 'done' | 'error'; username?: string; page?: number; pages?: number; error?: string; startedAt?: string; finishedAt?: string }) | null;
+  lastfmAvailable: boolean;
+  lastfmUsername?: string | null;
+}
+
 /** v7 in-app notification (bell list). */
 export interface AppNotification {
   id: string;
@@ -665,6 +700,7 @@ export type ShelfKind =
   | 'recently_played'
   | 'continue_listening'
   | 'pinned'
+  | 'on_this_day'
   | 'mixes'
   | 'radio'
   | 'because_you_played'
@@ -715,6 +751,13 @@ export interface SearchResults {
   queues?: Queue[];
   catalog: CatalogItem[];
   catalogError?: string | null;
+  /** 0.9.0: songs whose lyrics match, with the line that matched (absent from older servers). */
+  lyrics?: LyricsMatch[];
+}
+
+export interface LyricsMatch {
+  track: Track;
+  line: string;
 }
 
 export type ToGetStatus = 'want' | 'got' | 'dismissed';

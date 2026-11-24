@@ -73,5 +73,14 @@ class FeedFixturesTest {
         assertEquals(1, r.tracks.size)
         assertTrue(r.albums.isEmpty())
         assertEquals("deezer timeout", r.catalogError)
+        assertTrue(r.lyrics.isEmpty()) // a server older than api 0.9 sends no lyrics group
+    }
+
+    @Test fun `lyrics matches parse, skipping broken ones`() {
+        val r = LenientJson.search(Json.parseToJsonElement(
+            """{"lyrics":[{"track":{"id":"t1","title":"A"},"line":"we were dancing"},{"line":"no track"},{"track":{"id":"t2","title":"B"}}]}"""))
+        assertEquals(listOf("t1", "t2"), r.lyrics.map { it.track.id })
+        assertEquals("we were dancing", r.lyrics[0].line)
+        assertEquals("", r.lyrics[1].line)
     }
 }
