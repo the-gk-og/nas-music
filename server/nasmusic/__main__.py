@@ -1,4 +1,4 @@
-"""nasmusic CLI: serve | scan | pair-code | hash-password | user | init-config."""
+"""nasmusic CLI: serve | scan | pair-code | hash-password | user | restore | init-config."""
 from __future__ import annotations
 
 import argparse
@@ -231,6 +231,34 @@ def cmd_hash_password(args) -> None:
     print(f'admin_password_hash = "{h}"' if sys.stdout.isatty() else h)
 
 
+def cmd_restore(args) -> None:
+    """Restore the database from a backup: for when the server won't start, or a new machine. Stop the server
+    first if it is running (the admin console's Restore button does the same thing while it runs)."""
+    from nasmusic.app import backups
+    from nasmusic.core import init_db
+
+    cfg = _load(args)
+    if args.name is None:
+        print("Local backups (data folder):")
+        for b in backups.list_all(cfg):
+            print(f"  {b['name']:<48} {b['bytes'] / 1e6:8.1f} MB  {b['createdAt']}")
+        if cfg.backup_copy_to:
+            print(f"Off-site backups ({cfg.backup_copy_to}), restore with --offsite:")
+            try:
+                for b in backups.offsite_list(cfg):
+                    print(f"  {b['name']:<48} {b['bytes'] / 1e6:8.1f} MB  {b['createdAt']}")
+            except backups.BackupError as e:
+                print(f"  can't list: {e.detail}")
+        return
+    init_db(cfg)  # a fresh install: create the empty database the backup is restored over
+    try:
+        res = backups.restore(cfg, "offsite" if args.offsite else "local", args.name)
+    except backups.BackupError as e:
+        sys.exit(f"nasmusic: {e.detail}")
+    print(f"restored {res['restored']} (schema v{res['schemaFrom']} -> v{res['schemaTo']}). "
+          f"The previous database was saved as {res['safetyBackup']}.")
+
+
 def main(argv: list[str] | None = None) -> None:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--config", "-c", default=argparse.SUPPRESS,
@@ -257,6 +285,11 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("name", nargs="?")
     s.add_argument("--admin", action="store_true", help="with add: make the user an admin")
     s.set_defaults(fn=cmd_user)
+    s = sub.add_parser("restore", parents=[common],
+                       help="restore the database from a backup: no NAME lists them; --offsite for off-site ones")
+    s.add_argument("name", nargs="?")
+    s.add_argument("--offsite", action="store_true", help="NAME is an off-site backup (backup_copy_to)")
+    s.set_defaults(fn=cmd_restore)
     s = sub.add_parser("init-config", parents=[common],
                        help="create config.toml from NASMUSIC_* environment variables (first install)")
     s.set_defaults(fn=cmd_init_config)

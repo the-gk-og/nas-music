@@ -7,6 +7,7 @@ import type {
   AutotagSuggestion,
   DuplicateGroup,
   Backup,
+  OffsiteStatus,
   BugReportDetail,
   FailedFile,
   HealthCheck,
@@ -111,6 +112,19 @@ export class MockAdmin {
     { id: 'b2', createdAt: iso(Date.now() - 8 * 86400e3), bytes: 46e6, kind: 'scheduled' },
     { id: 'b1', createdAt: iso(Date.now() - 20 * 86400e3), bytes: 31e6, kind: 'manual', note: 'before v2 migration' },
   ];
+  offsite: OffsiteStatus = {
+    configured: true,
+    destination: '/mnt/backup/nasmusic',
+    kind: 'folder',
+    keep: 14,
+    includeConfig: true,
+    last: { at: iso(Date.now() - 10 * 3600e3), ok: true, error: null, name: 'nasmusic-scheduled-20261124T041500Z.db.gz' },
+    items: [
+      { name: 'nasmusic-scheduled-20261124T041500Z.db.gz', kind: 'scheduled', bytes: 16e6, createdAt: iso(Date.now() - 10 * 3600e3) },
+      { name: 'nasmusic-scheduled-20261123T041500Z.db.gz', kind: 'scheduled', bytes: 16e6, createdAt: iso(Date.now() - 34 * 3600e3) },
+    ],
+    error: null,
+  };
   settings: AdminSettings = { lanUrl: 'https://192.168.68.2:8443', tunnelUrl: 'https://music.example.com', timezone: 'Europe/London', opusCacheMaxGb: 50, lrclib: true };
 
   constructor() {

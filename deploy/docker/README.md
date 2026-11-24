@@ -216,9 +216,41 @@ history are kept.
 
 ## Backups
 
-Back up the **data folder**. It holds the database (users, listening history, likes, playlists), the HTTPS
-certificate the apps are pinned to, and `config.toml`. The Opus and art caches in it can be left out; they are
-rebuilt. If you use uploads, back up that folder as well: it is the only copy of those songs.
+The server backs up its database (users, listening history, likes, playlists, settings) every night at 04:15
+into `backups/` in the data folder, keeping the last 3 nightly ones. You can also make one any time, and restore
+any of them, in **Admin → Backups**.
+
+Those copies sit on the same disk as the database, so also send them somewhere else with `backup_copy_to` in
+`config.toml`. Each nightly backup is then gzipped there too, keeping the newest `backup_keep` (default 14):
+
+- **Another disk or dataset** (simplest). Mount it into the container and point at it:
+  in `.env` set `BACKUP_DIR=/mnt/tank2/music-backups`, uncomment the `/backup` line in `compose.yaml`, and in
+  `config.toml` set `backup_copy_to = "/backup"`. The folder must be writable by `PUID`. A copy of `config.toml`
+  and the HTTPS certificate is kept in `config/` there as well.
+- **A cloud or SFTP remote with rclone** (Backblaze B2, S3, Google Drive, another NAS over SFTP, …; rclone is in
+  the image). Create the remote once:
+  `docker compose exec -it server rclone config` (it is saved as `/data/rclone.conf`), then set
+  `backup_copy_to = "myremote:music-backups"`. `config.toml` holds tokens, so it is **not** copied to a remote
+  unless you set `backup_include_config = true`; use an rclone `crypt` remote if you do.
+
+Restart after changing `config.toml`. Admin → Backups shows where copies go, whether last night's worked, and the
+copies there. **Copy off-site** sends any backup straight away.
+
+**Restoring.** In Admin → Backups, press **Restore** on a backup (local or off-site). The server checks the file,
+saves the current database first (type "Before restore", so you can undo), swaps it in and upgrades it if it came
+from an older version. No restart is needed; phones paired after that backup was made have to pair again.
+
+If the server won't start, or on a new machine: put `config.toml` back in the data folder (from `config/` in the
+backup folder), then
+
+```bash
+docker compose run --rm server nasmusic restore                 # lists local and off-site backups
+docker compose run --rm server nasmusic restore --offsite nasmusic-scheduled-20261124T041500Z.db.gz
+docker compose up -d
+```
+
+Uploads (if you use them) are not in these backups: back that folder up separately, it is the only copy of
+those songs. The Opus and art caches never need backing up; they are rebuilt.
 
 ## Troubleshooting
 

@@ -19,7 +19,8 @@ ENDPOINTS = [("get", "/status"), ("get", "/jobs"), ("post", "/jobs/scan/run"), (
              ("get", "/library/failed"), ("post", "/library/failed/retry"), ("post", "/library/failed/x/retry"),
              ("get", "/health"), ("get", "/health/missing"), ("post", "/health/missing/fix"), ("get", "/server"),
              ("delete", "/opus-cache"), ("get", "/logs"), ("get", "/logs/stream"), ("get", "/backups"),
-             ("post", "/backups"), ("get", "/backups/x/download"), ("get", "/now-playing"), ("get", "/settings"),
+             ("post", "/backups"), ("get", "/backups/x/download"), ("get", "/backups/offsite"),
+             ("post", "/backups/x/offsite"), ("post", "/backups/x/restore"), ("get", "/now-playing"), ("get", "/settings"),
              ("put", "/settings"), ("get", "/reports"), ("get", "/reports/x"), ("patch", "/reports/x"),
              ("get", "/users/x/devices"), ("get", "/users/x/detail")]
 
@@ -97,7 +98,7 @@ def test_run_job_conflict_and_history(client, app, conn):
 
 def test_backup_job(client, app):
     rec = app.state.ctx.jobs.run("backup")
-    assert rec["ok"] and rec["result"]["kind"] == "manual"
+    assert rec["ok"] and rec["result"]["kind"] == "scheduled"
     assert any(b["id"] == rec["result"]["name"] for b in client.get(f"{ADMIN}/backups").json())
 
 
