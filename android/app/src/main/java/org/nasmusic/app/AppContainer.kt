@@ -106,6 +106,8 @@ class AppContainer(val context: Context) {
     val eq = EqRepository(context)
     val listening = org.nasmusic.app.playback.ListeningRepository(context)
     val sleep = org.nasmusic.app.playback.SleepTimerState()
+    /** Wake-up alarm settings (see [org.nasmusic.app.alarm.WakeAlarm]). */
+    val alarm = org.nasmusic.app.alarm.AlarmStore(context)
     val contextCollector = ContextCollector(context, scope)
     val feeds = org.nasmusic.app.data.FeedRepository(api)
     /**

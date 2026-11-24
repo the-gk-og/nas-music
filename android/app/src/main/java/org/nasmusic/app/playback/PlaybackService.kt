@@ -96,6 +96,8 @@ class PlaybackService : MediaLibraryService() {
     private lateinit var library: AutoLibrary
     /** True while this service paused at the end of a track for the sleep timer. */
     private var sleepPausedAtEnd = false
+    /** Wake-up alarm (started by [org.nasmusic.app.alarm.AlarmReceiver] through [onStartCommand]). */
+    private lateinit var alarm: org.nasmusic.app.alarm.AlarmRun
 
     // ---- resume where you left off ----
     private lateinit var resume: ResumeStore
@@ -247,6 +249,7 @@ class PlaybackService : MediaLibraryService() {
             kotlinx.coroutines.flow.combine(c.router.route, c.secureStore.config) { r, cfg -> r to (cfg != null) }
                 .distinctUntilChanged().collect { reloadBrowseTree() }
         }
+        alarm = org.nasmusic.app.alarm.AlarmRun(this, c, player, mixer, scope, alarmHost)
         handler.post(tick)
         resume = ResumeStore(java.io.File(filesDir, "resume"))
         restoreLocal()
@@ -1253,6 +1256,40 @@ class PlaybackService : MediaLibraryService() {
     }.getOrNull()
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
+
+    // ---- Wake-up alarm ----
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            org.nasmusic.app.alarm.AlarmRun.ACTION_START -> { alarm.start(); return START_NOT_STICKY }
+            org.nasmusic.app.alarm.AlarmRun.ACTION_SNOOZE -> { alarm.snooze(); return START_NOT_STICKY }
+            org.nasmusic.app.alarm.AlarmRun.ACTION_STOP -> {
+                alarm.stop()
+                if (!player.playWhenReady) stopSelf(startId) // only started for the button; bound clients keep it alive
+                return START_NOT_STICKY
+            }
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
+    private val alarmHost = object : org.nasmusic.app.alarm.AlarmRun.Host {
+        override fun startForeground(n: android.app.Notification): Boolean = runCatching {
+            androidx.core.app.ServiceCompat.startForeground(
+                this@PlaybackService, org.nasmusic.app.alarm.AlarmNotifications.ID, n,
+                if (android.os.Build.VERSION.SDK_INT >= 29) android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else 0,
+            )
+        }.onFailure { android.util.Log.w(org.nasmusic.app.diag.CrashLog.TAG, "alarm foreground", it) }.isSuccess
+
+        override fun stopForeground() =
+            androidx.core.app.ServiceCompat.stopForeground(this@PlaybackService, androidx.core.app.ServiceCompat.STOP_FOREGROUND_REMOVE)
+
+        override fun showSession() { session?.let { if (!isSessionAdded(it)) addSession(it) } }
+
+        override suspend fun mediaItems(tracks: List<Track>, source: PlaySource, mixId: String?): List<MediaItem> =
+            tracks.map { resolve(MediaItems.fromTrack(it, source, mixId)) }
+
+        override fun playSpoken(item: SpokenItem) = loadSpoken(item, 0.0, play = true)
+    }
 
     companion object {
         /** Custom session command: skip silence on/off for the spoken item playing (`ARG_ON`). */
