@@ -41,6 +41,7 @@ class NasMusicApp : Application(), SingletonImageLoader.Factory {
         }
         EventUploadWorker.enqueue(this)
         org.nasmusic.app.notify.NewMusicWorker.schedule(this)
+        org.nasmusic.app.alarm.AlarmScheduler.apply(this)   // keep the wake-up alarm armed (e.g. after a force-stop)
     }
 
     /** Cover art goes through the routed call factory so it works on LAN (pinned) and tunnel. */
