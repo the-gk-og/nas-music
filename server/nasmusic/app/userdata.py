@@ -54,6 +54,8 @@ def _validate(key: str, value: Any) -> None:
             isinstance(value, str) and len(value) == 7 and value[0] == "#"
             and all(ch in "0123456789abcdefABCDEF" for ch in value[1:]))):
         raise ValueError(f"appearance.accent must be one of {', '.join(ACCENTS)} or #rrggbb")
+    if base == "library.classical" and not isinstance(value, bool):  # v9 classical mode
+        raise ValueError("library.classical must be true or false")
     if base in _SHELF_LISTS and not (isinstance(value, list) and all(isinstance(x, str) for x in value)):
         raise ValueError(f"{base} must be a list of shelf ids")
 

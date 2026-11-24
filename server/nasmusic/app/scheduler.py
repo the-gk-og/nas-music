@@ -59,6 +59,12 @@ class Jobs:
         res = scanner.scan(self.cfg, conn, full=full).as_dict()
         res["togetGot"] = toget.match_owned(conn)  # wanted albums/songs that the library now has
         try:
+            from nasmusic.library import classical
+
+            res["classicalBackfill"] = classical.backfill(self.cfg, conn)  # v9: work tags of older tracks
+        except Exception:
+            log.exception("classical backfill failed")
+        try:
             from nasmusic.app import notify
 
             res["newMusic"] = notify.new_music(conn, getattr(self, "hub", None))

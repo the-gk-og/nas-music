@@ -275,6 +275,7 @@ private fun AppearanceSettings(c: AppContainer, settings: org.nasmusic.app.data.
     Text("Turning off animations in Android's accessibility settings also turns them off here.", style = MaterialTheme.typography.bodySmall)
     Choice("Default view", listOf("grid" to "Grid", "list" to "List"), settings.defaultView) { c.settings.setDefaultView(it) }
     Choice("Album & artist pages", listOf("big" to "Big header", "simple" to "Simple list"), settings.pageStyle) { c.settings.setPageStyle(it) }
+    ClassicalModeSwitch(c)
     Text("Accent colour")
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         org.nasmusic.app.data.prefs.AppSettings.ACCENTS.forEach { argb ->

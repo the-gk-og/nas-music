@@ -1,4 +1,4 @@
--- nas-music shared schema v8 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v9 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
@@ -22,6 +22,9 @@
 -- are upgraded by nasmusic.db.migrations.
 -- v8 adds toget_admin (the admin's check-off of users' want-list items) and continue_dismissed (Continue
 -- listening items the user swiped away; an item comes back once it is played again after that).
+-- v9 adds playlist folders (playlist_folders, playlist_folder_items: each user files the playlists they can
+-- see, their own and shared ones, into their own folder tree) and classical-music fields on tracks (work,
+-- movement, movement_no: from WORK/MOVEMENTNAME/MOVEMENT tags or a "Work: I. Movement" title).
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -128,7 +131,13 @@ CREATE TABLE IF NOT EXISTS tracks (
     rg_album_gain   REAL,
     rg_album_peak   REAL,
     rg_source       TEXT,
-    loudness_lufs   REAL               -- integrated loudness of the track (measured, or derived from the gain)
+    loudness_lufs   REAL,              -- integrated loudness of the track (measured, or derived from the gain)
+    -- v9 classical music (nasmusic.library.classical). `work` is the composition a track belongs to, from the
+    -- WORK tag (ID3 TIT1/GRP1, MP4 \xa9wrk) or a "Work: I. Movement" title; NULL = not read since v9
+    -- (the scanner backfills it), '' = not part of a work. movement_no is the movement's number in the work.
+    work            TEXT,
+    movement        TEXT,
+    movement_no     INTEGER
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist_id);
@@ -266,6 +275,27 @@ CREATE TABLE IF NOT EXISTS playlist_activity (
     detail      TEXT                       -- JSON
 );
 CREATE INDEX IF NOT EXISTS playlist_activity_pl ON playlist_activity(playlist_id, id);
+
+-- v9: playlist folders. Each user has their own tree (parent_id NULL = top level); `position` orders siblings.
+-- playlist_folder_items files a playlist the user can see (own or shared) into one of their folders; a
+-- playlist with no row is at the top level. Deleting a folder moves its contents up (nasmusic.app.playlist_folders).
+CREATE TABLE IF NOT EXISTS playlist_folders (
+    id          TEXT PRIMARY KEY,          -- uuid4 hex
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    parent_id   TEXT REFERENCES playlist_folders(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    position    REAL NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS playlist_folders_user ON playlist_folders(user_id, parent_id);
+
+CREATE TABLE IF NOT EXISTS playlist_folder_items (
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    folder_id   TEXT NOT NULL REFERENCES playlist_folders(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, playlist_id)
+);
+CREATE INDEX IF NOT EXISTS playlist_folder_items_folder ON playlist_folder_items(folder_id);
 
 -- Musicolet-style named queues shared by a user's devices. Max 20 per user.
 CREATE TABLE IF NOT EXISTS queues (

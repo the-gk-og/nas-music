@@ -1,6 +1,6 @@
 <script lang="ts">
   // Library (§3.3): chips Playlists · Albums · Artists · Genres · Folders · Songs; sort; grid/list per chip.
-  import { ArrowUpDown, Ban, ClockPlus, Flame, Heart, History, Plus, Sparkles, Tag } from '@lucide/svelte';
+  import { ArrowUpDown, Ban, ChevronRight, ClockPlus, Ellipsis, Flame, Folder, FolderPlus, Heart, History, Plus, Sparkles, Tag } from '@lucide/svelte';
   import ItemGrid from '../components/ItemGrid.svelte';
   import TopBar from '../components/TopBar.svelte';
   import TrackList from '../components/TrackList.svelte';
@@ -9,23 +9,28 @@
   import { library } from '../lib/library.svelte';
   import { loadJson, saveJson } from '../lib/platform';
   import { session } from '../lib/session.svelte';
-  import type { Album, Artist, ShelfItem, Track } from '../lib/types';
+  import { buildTree, folderPath } from '../lib/playlistFolders';
+  import type { Album, Artist, Composer, PlaylistFolder, ShelfItem, Track } from '../lib/types';
   import { ui } from '../lib/ui.svelte';
   import Folders from './Folders.svelte';
 
-  type Chip = 'playlists' | 'albums' | 'artists' | 'genres' | 'folders' | 'songs';
-  const CHIPS: [Chip, string][] = [
+  type Chip = 'playlists' | 'albums' | 'artists' | 'composers' | 'genres' | 'folders' | 'songs';
+  const ALL_CHIPS: [Chip, string][] = [
     ['playlists', 'Playlists'],
     ['albums', 'Albums'],
     ['artists', 'Artists'],
+    ['composers', 'Composers'],
     ['genres', 'Genres'],
     ['folders', 'Folders'],
     ['songs', 'Songs'],
   ];
+  // v9: Composers only in classical mode
+  const CHIPS = $derived(ALL_CHIPS.filter(([c]) => c !== 'composers' || appearance.prefs.classical));
   const SORTS: Record<Chip, [string, string][]> = {
     playlists: [['recent', 'Recently updated'], ['name', 'Name']],
     albums: [['name', 'Name'], ['year', 'Year'], ['added', 'Recently added'], ['artist', 'Artist']],
     artists: [['name', 'Name'], ['albums', 'Most albums']],
+    composers: [['name', 'Name'], ['works', 'Most works']],
     genres: [['name', 'Name'], ['count', 'Most songs']],
     folders: [],
     songs: [['title', 'Title'], ['added', 'Recently added'], ['year', 'Year']],
@@ -47,6 +52,9 @@
   let artists = $state<Artist[] | null>(null);
   let genres = $state<{ name: string; trackCount?: number }[] | null>(null);
   let songs = $state<Track[] | null>(null);
+  let composers = $state<Composer[] | null>(null);
+  /** v9: the playlist folder being browsed (null = top level). */
+  let inFolder = $state<string | null>(null);
 
   $effect(() => {
     saveJson('nm.libChip', { c: chip });
@@ -57,6 +65,7 @@
     if (chip === 'albums') session.api.albums(sort === 'artist' ? 'name' : (sort as 'name')).then((a) => (albums = a)).catch((e) => ui.toast(e.message));
     if (chip === 'artists' && !artists) session.api.artists().then((a) => (artists = a)).catch((e) => ui.toast(e.message));
     if (chip === 'genres' && !genres) session.api.genres().then((g) => (genres = g.map((x) => (typeof x === 'string' ? { name: x } : x)))).catch((e) => ui.toast(e.message));
+    if (chip === 'composers' && !composers) session.api.composers().then((c) => (composers = c)).catch((e) => ui.toast(e.message));
     if (chip === 'songs') session.api.allTracks(sort as 'title').then((t) => (songs = t)).catch((e) => ui.toast(e.message));
   });
 
@@ -78,9 +87,11 @@
       return a.map((x) => ({ type: 'artist', id: x.id, title: x.name, subtitle: `${x.albumCount} album${x.albumCount === 1 ? '' : 's'}` }));
     }
     if (chip === 'playlists') {
-      const p = library.playlists.slice();
+      const tree = buildTree(library.folders, library.playlists);
+      const here = inFolder ? findNode(tree.roots, inFolder) : null;
+      const p = (here ? here.playlists : tree.loose).slice();
       if (sort === 'name') p.sort((x, y) => x.name.localeCompare(y.name));
-      const smart = library.smartPlaylists.slice();
+      const smart = inFolder ? [] : library.smartPlaylists.slice();
       if (sort === 'name') smart.sort((x, y) => x.name.localeCompare(y.name));
       return [
         ...smart.map((x): ShelfItem => ({ type: 'smart_playlist', id: x.id, title: x.name, subtitle: `Smart · ${x.trackCount} songs`, smartPlaylist: x })),
@@ -89,13 +100,43 @@
     }
     return [];
   });
+  function findNode(ns: ReturnType<typeof buildTree>['roots'], id: string): ReturnType<typeof buildTree>['roots'][number] | null {
+    for (const n of ns) {
+      if (n.folder.id === id) return n;
+      const f = findNode(n.children, id);
+      if (f) return f;
+    }
+    return null;
+  }
+  const crumbs = $derived(folderPath(library.folders, inFolder));
+  const subfolders = $derived(library.folders.filter((f) => f.parentId === inFolder));
+  $effect(() => {
+    // the folder was deleted (here or on another device)
+    if (inFolder && library.folders.length && !library.folders.some((f) => f.id === inFolder)) inFolder = null;
+  });
+
+  async function folderMenu(f: PlaylistFolder) {
+    const act = await ui.choose(f.name, [
+      { value: 'open', label: 'Open' },
+      { value: 'sub', label: 'New folder inside' },
+      { value: 'rename', label: 'Rename' },
+      { value: 'move', label: 'Move to…' },
+      { value: 'delete', label: 'Delete folder' },
+    ]);
+    if (act === 'open') inFolder = f.id;
+    if (act === 'sub') await library.newFolder(f.id);
+    if (act === 'rename') await library.renameFolder(f);
+    if (act === 'move') await library.moveFolderTo(f);
+    if (act === 'delete') await library.deleteFolder(f);
+  }
+  const composerList = $derived((composers ?? []).slice().sort((a, b) => (sort === 'works' ? b.workCount - a.workCount : a.name.localeCompare(b.name))));
   const genreList = $derived((genres ?? []).slice().sort((a, b) => (sort === 'count' ? (b.trackCount ?? 0) - (a.trackCount ?? 0) : a.name.localeCompare(b.name))));
 
   async function newPlaylist() {
     const name = await ui.prompt('New playlist', 'Name', '', 'Create');
     if (!name) return;
     try {
-      const p = await session.api.createPlaylist(name);
+      const p = await session.api.createPlaylist(name, inFolder);
       await library.refreshPlaylists();
       ui.go('playlist', p.id);
     } catch (e) {
@@ -128,19 +169,49 @@
   </div>
 
   {#if chip === 'playlists'}
+    {#if inFolder}
+      <nav class="crumbs" aria-label="Folder">
+        <button onclick={() => (inFolder = null)}>Playlists</button>
+        {#each crumbs as c (c.id)}<ChevronRight size={16} /><button class:here={c.id === inFolder} onclick={() => (inFolder = c.id)}>{c.name}</button>{/each}
+      </nav>
+    {/if}
     <div class="smart">
       {#each SMART as s (s.k)}
         {@const Icon = s.icon}
-        <button class="sm" onclick={() => ui.go('list', s.k)}><Icon size={22} fill={s.k === 'favourites' ? 'currentColor' : 'none'} />{s.label}</button>
+        {#if !inFolder}<button class="sm" onclick={() => ui.go('list', s.k)}><Icon size={22} fill={s.k === 'favourites' ? 'currentColor' : 'none'} />{s.label}</button>{/if}
       {/each}
-      <button class="sm" onclick={() => ui.go('list', 'all')}><Tag size={22} />All songs</button>
-      <button class="sm" onclick={() => ui.go('new')}><Sparkles size={22} />New this week</button>
+      {#if !inFolder}
+        <button class="sm" onclick={() => ui.go('list', 'all')}><Tag size={22} />All songs</button>
+        <button class="sm" onclick={() => ui.go('new')}><Sparkles size={22} />New this week</button>
+      {/if}
       <button class="sm new" onclick={newPlaylist}><Plus size={22} />New playlist</button>
-      <button class="sm new" onclick={() => ui.go('smart-edit', '')}><Sparkles size={22} />New smart playlist</button>
+      <button class="sm new" onclick={() => library.newFolder(inFolder)}><FolderPlus size={22} />New folder</button>
+      {#if !inFolder}<button class="sm new" onclick={() => ui.go('smart-edit', '')}><Sparkles size={22} />New smart playlist</button>{/if}
     </div>
+    {#if subfolders.length}
+      <div class="pfolders">
+        {#each subfolders as f (f.id)}
+          <div class="pf">
+            <button class="pfo" onclick={() => (inFolder = f.id)}><Folder size={22} /><span class="ellipsis">{f.name}</span><span class="muted small">{f.playlistCount}</span></button>
+            <button class="icon-btn" aria-label="Folder options" onclick={() => folderMenu(f)}><Ellipsis size={20} /></button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+    {#if inFolder && !items.length && !subfolders.length}<div class="empty">This folder is empty. Use "Move to folder" on a playlist to file it here.</div>{/if}
     <ItemGrid {items} section="lib.playlists" />
   {:else if chip === 'albums' || chip === 'artists'}
     {#if (chip === 'albums' ? albums : artists) === null}<div class="empty">Loading…</div>{:else}<ItemGrid {items} section="lib.{chip}" />{/if}
+  {:else if chip === 'composers'}
+    {#if !composers}<div class="empty">Loading…</div>
+    {:else if !composers.length}<div class="empty">No works found. Tag tracks with WORK and MOVEMENT, or title them "Work: I. Movement" with a composer.</div>
+    {:else}
+      <div class="pfolders">
+        {#each composerList as c (c.name)}
+          <button class="pfo" onclick={() => ui.go('composer', c.name)}><span class="ellipsis">{c.name}</span><span class="muted small">{c.workCount} work{c.workCount === 1 ? '' : 's'}</span></button>
+        {/each}
+      </div>
+    {/if}
   {:else if chip === 'genres'}
     <div class="genres">
       {#each genreList as g, i (g.name)}
@@ -157,6 +228,43 @@
 </div>
 
 <style>
+  .crumbs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 4px var(--gutter);
+    color: var(--fg-2);
+  }
+  .crumbs button.here {
+    color: var(--fg);
+    font-weight: 700;
+  }
+  .pfolders {
+    display: grid;
+    margin: 4px 0 8px;
+  }
+  .pf {
+    display: flex;
+    align-items: center;
+    padding-right: var(--gutter);
+  }
+  .pfo {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px var(--gutter);
+    text-align: left;
+    font-weight: 600;
+  }
+  .pfo .ellipsis {
+    flex: 1;
+  }
+  .pfo:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
   .lib {
     --gutter: clamp(16px, 3vw, 32px);
   }

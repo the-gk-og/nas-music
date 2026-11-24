@@ -14,6 +14,8 @@ export interface AppearancePrefs {
   albumStyle: PageStyle;
   accent: string;
   homeShelves: ShelfPrefs;
+  /** v9 classical mode (`library.classical`). */
+  classical: boolean;
 }
 
 const DEFAULTS: AppearancePrefs = {
@@ -22,6 +24,7 @@ const DEFAULTS: AppearancePrefs = {
   albumStyle: 'big',
   accent: 'green',
   homeShelves: { order: [...HOME_SHELVES], hidden: [] },
+  classical: false,
 };
 
 /** Settings keys (api/openapi.yaml /me/settings). homeShelves is split into order + hidden. */
@@ -30,6 +33,7 @@ const KEYS: Record<Exclude<keyof AppearancePrefs, 'homeShelves'>, string> = {
   defaultView: 'appearance.defaultView',
   albumStyle: 'appearance.albumPage',
   accent: 'appearance.accent',
+  classical: 'library.classical',
 };
 
 /** Drop shelf ids from older builds (e.g. "recent") so new ids keep their default order. */

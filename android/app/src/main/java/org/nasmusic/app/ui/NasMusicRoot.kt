@@ -78,6 +78,9 @@ import org.nasmusic.app.ui.screens.PodcastScreen
 import org.nasmusic.app.ui.screens.SpokenMiniBar
 import org.nasmusic.app.ui.screens.SpokenScreen
 import org.nasmusic.app.ui.screens.AccountScreen
+import org.nasmusic.app.ui.screens.ComposerScreen
+import org.nasmusic.app.ui.screens.PlaylistFolderScreen
+import org.nasmusic.app.ui.screens.WorkScreen
 import org.nasmusic.app.ui.screens.AdminScreen
 import org.nasmusic.app.ui.screens.AlbumScreen
 import org.nasmusic.app.ui.screens.ArtistScreen
@@ -260,6 +263,10 @@ private fun NavGraphBuilder.routes(c: AppContainer, motion: MotionLevel) {
     composable("artist/{id}") { e -> ArtistScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("genre/{name}") { e -> GenreScreen(c, android.net.Uri.decode(e.arguments?.getString("name").orEmpty())) }
     composable("playlist/{id}") { e -> PlaylistScreen(c, e.arguments?.getString("id").orEmpty()) }
+    // api 0.9: playlist folders and classical works
+    composable("playlist-folder/{id}") { e -> PlaylistFolderScreen(c, e.arguments?.getString("id").orEmpty()) }
+    composable("composer/{name}") { e -> ComposerScreen(c, android.net.Uri.decode(e.arguments?.getString("name").orEmpty())) }
+    composable("work/{id}") { e -> WorkScreen(c, android.net.Uri.decode(e.arguments?.getString("id").orEmpty())) }
     composable("smart/{id}") { e -> SmartPlaylistScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("smart-edit/{param}") { e -> SmartEditorScreen(c, android.net.Uri.decode(e.arguments?.getString("param").orEmpty())) }
     composable("list/{kind}") { e -> SmartListScreen(c, e.arguments?.getString("kind").orEmpty()) }

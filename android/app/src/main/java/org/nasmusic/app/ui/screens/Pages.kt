@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -164,6 +165,8 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
     var more by remember { mutableStateOf<List<ShelfItem>>(emptyList()) }
     var style by rememberPageStyle(c)
     val list = rememberLazyListState()
+    val classical by org.nasmusic.app.data.ClassicalMode.on.collectAsState()
+    LaunchedEffect(Unit) { org.nasmusic.app.data.ClassicalMode.ensure(c.context, c.api) }
     LaunchedEffect(albumId, ui.tagsRev) {
         album = runCatching { c.api.album(albumId) }.getOrNull()
         album?.let { a ->
@@ -193,7 +196,7 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
             if (style == "big") BigHeader(MediaItems.artUrl(a.id, 512), a.title, a.artist, meta, MediaItems.artUrl(a.id, 128), list, play, shuffle, radio, { ui.go("artist/${a.artistId}") }, menu)
             else SimpleHeader(c, a.id, a.title, a.artist, meta, play, shuffle, radio, menu)
         }
-        songItems(c, a.tracks, name, PlaySource.LIBRARY)
+        albumTrackItems(c, a.tracks, name, classical)  // api 0.9: grouped by work in classical mode
         if (style == "big" && more.isNotEmpty()) item { ShelfHeader("More by ${a.artist}"); ShelfRow(c, more) }
         item { Spacer(Modifier.height(24.dp)) }
     }

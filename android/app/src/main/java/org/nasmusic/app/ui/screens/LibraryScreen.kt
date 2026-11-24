@@ -24,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Sell
@@ -63,7 +65,7 @@ import org.nasmusic.app.ui.Message
 import org.nasmusic.app.ui.ShelfCard
 import org.nasmusic.app.ui.SongList
 
-private val CHIPS = listOf("downloaded" to "Downloaded", "playlists" to "Playlists", "albums" to "Albums", "artists" to "Artists", "genres" to "Genres", "folders" to "Folders", "songs" to "Songs")
+private val CHIPS = listOf("downloaded" to "Downloaded", "playlists" to "Playlists", "albums" to "Albums", "artists" to "Artists", "composers" to "Composers", "genres" to "Genres", "folders" to "Folders", "songs" to "Songs")
 
 private val SORTS = mapOf(
     "albums" to listOf("name" to "Title", "year" to "Year", "added" to "Recently added"),
@@ -71,6 +73,7 @@ private val SORTS = mapOf(
     "artists" to listOf("name" to "Name", "albums" to "Most albums"),
     "playlists" to listOf("name" to "Name", "updated" to "Recently updated"),
     "genres" to listOf("name" to "Name", "count" to "Most songs"),
+    "composers" to listOf("name" to "Name", "works" to "Most works"),
 )
 
 /** Library (docs/v3-ux.md §3.3): filter chips, sort menu, grid/list toggle remembered per chip. */
@@ -84,12 +87,15 @@ fun LibraryScreen(c: AppContainer) {
     var sort by rememberSaveable(chip) { mutableStateOf(SORTS[chip]?.first()?.first ?: "") }
     var sortMenu by remember { mutableStateOf(false) }
     val view = settings.viewFor(chip)
+    // api 0.9: the Composers chip only in classical mode
+    val classical by org.nasmusic.app.data.ClassicalMode.on.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { org.nasmusic.app.data.ClassicalMode.ensure(c.context, c.api) }
 
     Column(Modifier.fillMaxSize()) {
         TopBar(c, "Library")
         Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CHIPS.forEach { (k, label) -> FilterChip(chip == k, { chip = k }, label = { Text(label) }) }
+                CHIPS.filter { it.first != "composers" || classical }.forEach { (k, label) -> FilterChip(chip == k, { chip = k }, label = { Text(label) }) }
                 // Spoken word + live radio live apart from music (their own player, no recommendations).
                 FilterChip(false, { ui.go("spoken") }, label = { Text("Podcasts & more") })
             }
@@ -99,7 +105,7 @@ fun LibraryScreen(c: AppContainer) {
                     sorts.forEach { (k, label) -> DropdownMenuItem({ Text(if (k == sort) "✓ $label" else label) }, { sort = k; sortMenu = false }) }
                 }
             } }
-            if (chip != "folders" && chip != "songs" && chip != "downloaded") IconButton(onClick = {
+            if (chip != "folders" && chip != "songs" && chip != "downloaded" && chip != "composers") IconButton(onClick = {
                 scope.launch { c.settings.setLibraryView(chip, if (view == "grid") "list" else "grid") }
             }) { Icon(if (view == "grid") Icons.AutoMirrored.Filled.List else Icons.Default.GridView, if (view == "grid") "List view" else "Grid view") }
         }
@@ -110,6 +116,7 @@ fun LibraryScreen(c: AppContainer) {
                 "albums" -> AlbumsSection(c, view, sort)
                 "artists" -> ArtistsSection(c, view, sort)
                 "genres" -> GenresSection(c, view, sort)
+                "composers" -> ComposersSection(c, sort)
                 "folders" -> FoldersScreen(c, "")
                 "songs" -> SongsSection(c, sort)
             }
@@ -143,9 +150,17 @@ private fun ListRow(title: String, subtitle: String?, leading: @Composable () ->
 private fun PlaylistsSection(c: AppContainer, view: String, sort: String) {
     val ui = LocalUi.current
     var lists by remember { mutableStateOf<List<Playlist>?>(null) }
-    LaunchedEffect(Unit) { lists = runCatching { c.api.playlists() }.getOrDefault(emptyList()) }
+    // api 0.9: playlists filed in folders show inside their folder, not here
+    var folders by remember { mutableStateOf<List<org.nasmusic.app.data.api.PlaylistFolder>>(emptyList()) }
+    val folderActions = remember { FolderActions() }
+    suspend fun reload() {
+        lists = runCatching { c.api.playlists() }.getOrDefault(emptyList())
+        folders = runCatching { c.api.playlistFolders() }.getOrDefault(emptyList())
+    }
+    LaunchedEffect(Unit) { reload() }
     if (view == "list") { PlaylistsScreen(c); return }
-    val sorted = lists.orEmpty().let { if (sort == "updated") it.sortedByDescending { p -> p.updatedAt } else it.sortedBy { p -> p.name.lowercase() } }
+    val folderIds = folders.map { it.id }.toSet()
+    val sorted = lists.orEmpty().filter { it.folderId == null || it.folderId !in folderIds }.let { if (sort == "updated") it.sortedByDescending { p -> p.updatedAt } else it.sortedBy { p -> p.name.lowercase() } }
     var smart by remember { mutableStateOf<List<org.nasmusic.app.data.api.SmartPlaylist>>(emptyList()) }
     LaunchedEffect(Unit) { smart = runCatching { c.api.smartPlaylists() }.getOrDefault(emptyList()) }
     val smartSorted = if (sort == "updated") smart else smart.sortedBy { it.name.lowercase() }
@@ -153,11 +168,24 @@ private fun PlaylistsSection(c: AppContainer, view: String, sort: String) {
         smartSorted.map { ShelfItem("smart_playlist", it.id, it.name, "Smart · ${it.trackCount} songs", artUrl = org.nasmusic.app.data.FeedRepository.art(it.tracks.firstOrNull()?.albumId), smartPlaylist = it) } +
         sorted.map { ShelfItem("playlist", it.id, it.name, "${it.trackCount} songs") }
     Column {
-        androidx.compose.material3.TextButton(onClick = { ui.go("smart-edit/new") }, modifier = Modifier.padding(start = 8.dp)) {
-            Icon(Icons.Default.AutoAwesome, null); Text("  New smart playlist")
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.TextButton(onClick = { ui.go("smart-edit/new") }) {
+                Icon(Icons.Default.AutoAwesome, null); Text("  New smart playlist")
+            }
+            androidx.compose.material3.TextButton(onClick = { folderActions.newIn = "" }) {
+                Icon(Icons.Default.CreateNewFolder, null); Text("  New folder")
+            }
+        }
+        val top = org.nasmusic.app.data.PlaylistFolders.children(folders, null)
+        if (top.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            top.forEach { f ->
+                androidx.compose.material3.AssistChip(onClick = { ui.go("playlist-folder/${f.id}") }, label = { Text(f.name) },
+                    leadingIcon = { Icon(Icons.Default.Folder, null) })
+            }
         }
         GridOrList(items, true, { it.type + it.id }, cell = { ShelfCard(c, it, width = 150.dp) }, row = {})
     }
+    FolderDialogs(c, folderActions, folders) { reload() }
 }
 
 @Composable

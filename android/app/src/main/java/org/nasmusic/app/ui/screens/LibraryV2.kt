@@ -204,8 +204,15 @@ fun PlaylistsScreen(c: AppContainer) {
     var lists by remember { mutableStateOf<List<Playlist>?>(null) }
     var creating by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
-    suspend fun reload() { lists = runCatching { c.api.playlists() }.getOrDefault(emptyList()) }
+    // api 0.9: folders first; playlists filed in a folder show inside it
+    var folders by remember { mutableStateOf<List<org.nasmusic.app.data.api.PlaylistFolder>>(emptyList()) }
+    val folderActions = remember { FolderActions() }
+    suspend fun reload() {
+        lists = runCatching { c.api.playlists() }.getOrDefault(emptyList())
+        folders = runCatching { c.api.playlistFolders() }.getOrDefault(emptyList())
+    }
     LaunchedEffect(Unit) { reload() }
+    val folderIds = folders.map { it.id }.toSet()
     LazyColumn(Modifier.fillMaxSize().padding(top = 8.dp)) {
         items(smartLists, key = { it.kind }) { s ->
             Row(Modifier.fillMaxWidth().clickable { ui.go("list/${s.kind}") }.padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -215,7 +222,8 @@ fun PlaylistsScreen(c: AppContainer) {
             }
         }
         item { Text("Your playlists", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 4.dp)) }
-        items(lists.orEmpty(), key = { it.id }) { p ->
+        playlistFolderRows(folders, null, onOpen = { ui.go("playlist-folder/${it.id}") }, onMenu = { folderActions.menuFor = it })
+        items(lists.orEmpty().filter { it.folderId == null || it.folderId !in folderIds }, key = { it.id }) { p ->
             Row(Modifier.fillMaxWidth().clickable { ui.go("playlist/${p.id}") }.padding(horizontal = 20.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.AutoMirrored.Filled.List, null)
                 Spacer(Modifier.width(24.dp))
@@ -224,11 +232,17 @@ fun PlaylistsScreen(c: AppContainer) {
             }
         }
         item {
-            OutlinedButton(onClick = { creating = true }, modifier = Modifier.padding(20.dp)) {
-                Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary); Text("  New Playlist")
+            Row(Modifier.padding(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = { creating = true }) {
+                    Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary); Text("  New Playlist")
+                }
+                OutlinedButton(onClick = { folderActions.newIn = "" }) {
+                    Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary); Text("  New folder")
+                }
             }
         }
     }
+    FolderDialogs(c, folderActions, folders) { reload() }
     if (creating) {
         AlertDialog(
             onDismissRequest = { creating = false },
@@ -277,6 +291,9 @@ fun PlaylistScreen(c: AppContainer, id: String) {
     var renaming by remember { mutableStateOf(false) }
     var membersOpen by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    // api 0.9: "Move to folder" (each user files playlists, shared ones too, in their own folders)
+    val folderActions = remember { FolderActions() }
+    var folders by remember { mutableStateOf<List<org.nasmusic.app.data.api.PlaylistFolder>>(emptyList()) }
     suspend fun reload() { p = runCatching { c.api.playlist(id) }.getOrNull() }
     LaunchedEffect(id, ui.tagsRev) { reload() }
     // v5: live changes by other members (Connect `playlist`)
@@ -305,6 +322,13 @@ fun PlaylistScreen(c: AppContainer, id: String) {
                 DropdownMenu(menu, { menu = false }) {
                     DropdownMenuItem({ Text(if (isOwner) "Share / members" else "Members & activity") }, { menu = false; membersOpen = true })
                     if (isOwner) DropdownMenuItem({ Text("Rename") }, { menu = false; newName = pl.name; renaming = true })
+                    DropdownMenuItem({ Text("Move to folder") }, {
+                        menu = false
+                        scope.launch {
+                            folders = runCatching { c.api.playlistFolders() }.getOrDefault(emptyList())
+                            folderActions.filing = pl
+                        }
+                    })
                     DropdownMenuItem({ Text("Pin to Home") }, { menu = false; scope.launch { runCatching { c.api.pin(org.nasmusic.app.data.api.NewPin("playlist", id)) }; ui.toast = "Pinned to Home" } })
                     KeepOfflineItem(c, "playlist", id, pl.name, pl.tracks) { menu = false }
                     if (isOwner) DropdownMenuItem({ Text("Delete playlist") }, {
@@ -340,6 +364,10 @@ fun PlaylistScreen(c: AppContainer, id: String) {
                 }
             }
         }
+    }
+    FolderDialogs(c, folderActions, folders) {
+        folders = runCatching { c.api.playlistFolders() }.getOrDefault(emptyList())
+        reload()
     }
     if (membersOpen) {
         org.nasmusic.app.ui.PlaylistMembersDialog(c, id, isOwner, onLeft = { membersOpen = false; ui.nav.popBackStack() }) {

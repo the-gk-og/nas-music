@@ -42,6 +42,10 @@ class TrackTags:
     rg_track_peak: float | None = None   # linear
     rg_album_gain: float | None = None
     rg_album_peak: float | None = None
+    # v9 classical music (see nasmusic.library.classical)
+    work: str | None = None
+    movement: str | None = None
+    movement_no: int | None = None
 
 
 _NUM = re.compile(r"\d+")
@@ -133,6 +137,10 @@ def read(path: Path) -> tuple[TrackTags, mutagen.FileType | None]:
         t.track_no = trkn[0][0] if trkn and trkn[0][0] else None
         t.disc_no = disk[0][0] if disk and disk[0][0] else None
         t.year = _year(tags.get("\xa9day"))
+        t.work = _first(_decode(tags.get("\xa9wrk")))
+        t.movement = _first(_decode(tags.get("\xa9mvn")))
+        mvi = tags.get("\xa9mvi")
+        t.movement_no = int(mvi[0]) if mvi and isinstance(mvi[0], int) and mvi[0] > 0 else None
     elif isinstance(tags, ID3):
         for attr, key in _ID3.items():
             fr = tags.get(key)
@@ -143,6 +151,7 @@ def read(path: Path) -> tuple[TrackTags, mutagen.FileType | None]:
         t.year = _year(str(day.text[0]) if day is not None and day.text else None)
         comms = [fr for fr in tags.getall("COMM") if fr.text and not fr.desc.startswith("iTun")]
         t.comment = _first(comms[0].text) if comms else None
+        _id3_classical(t, tags)
         ufid = tags.get("UFID:http://musicbrainz.org")
         if ufid is not None:
             t.mb_track = _first(ufid.data.decode("ascii", "replace"))
@@ -155,8 +164,23 @@ def read(path: Path) -> tuple[TrackTags, mutagen.FileType | None]:
         t.disc_no = _int(tags.get("discnumber"))
         t.year = _year(tags.get("date") or tags.get("originaldate") or tags.get("year"))
         t.comment = _first(tags.get("comment") or tags.get("description"))
+        t.work = _first(tags.get("work"))
+        t.movement = _first(tags.get("movementname"))
+        t.movement_no = _int(tags.get("movement") or tags.get("movementnumber"))
     _replaygain(t, f, tags)
     return t, f
+
+
+def _id3_classical(t: TrackTags, tags) -> None:
+    txxx = {fr.desc.casefold(): fr.text for fr in tags.getall("TXXX")}
+    mvnm, mvin = tags.get("MVNM"), tags.get("MVIN")
+    t.movement = _first(mvnm.text if mvnm is not None else txxx.get("movementname"))
+    t.movement_no = _int(mvin.text if mvin is not None else txxx.get("movement"))
+    t.work = _first(txxx.get("work"))
+    if t.work is None and (t.movement or t.movement_no):
+        # iTunes and Picard (iTunes-compatible grouping) write the work to TIT1 next to MVNM/MVIN.
+        tit1 = tags.get("TIT1")
+        t.work = _first(tit1.text if tit1 is not None else None)
 
 
 def _float(v) -> float | None:

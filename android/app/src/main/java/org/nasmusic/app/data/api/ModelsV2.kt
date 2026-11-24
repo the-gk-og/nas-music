@@ -124,6 +124,8 @@ data class Playlist(
     val collaborative: Boolean = false,
     /** Parallel to [tracks]. */
     val entries: List<PlaylistEntry> = emptyList(),
+    /** api 0.9: the folder of this user's it is filed in (null = top level). */
+    val folderId: String? = null,
 )
 
 @Serializable

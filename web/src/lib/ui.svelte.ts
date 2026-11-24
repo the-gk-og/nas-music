@@ -35,6 +35,8 @@ const TAB_OF: Record<string, TabId> = {
   album: 'library',
   artist: 'library',
   genre: 'library',
+  composer: 'library',
+  work: 'library',
   playlist: 'library',
   list: 'library',
   smart: 'library',
@@ -85,7 +87,16 @@ export type Dialog =
   | { kind: 'vibe' }
   | { kind: 'catalog'; item: import('./types').CatalogItem }
   | { kind: 'prompt'; title: string; label: string; value: string; ok: string; resolve: (v: string | null) => void }
-  | { kind: 'confirm'; title: string; message: string; ok: string; resolve: (v: boolean) => void };
+  | { kind: 'confirm'; title: string; message: string; ok: string; resolve: (v: boolean) => void }
+  | { kind: 'choose'; title: string; options: ChooseOption[]; resolve: (v: string | null) => void };
+
+export interface ChooseOption {
+  value: string;
+  label: string;
+  /** Indent (folder trees). */
+  depth?: number;
+  current?: boolean;
+}
 
 class UiStore {
   route = $state<Route>(parseHash(typeof location !== 'undefined' ? location.hash : ''));
@@ -149,6 +160,12 @@ class UiStore {
     this.dialog = null;
     if (d?.kind === 'prompt') d.resolve(null);
     if (d?.kind === 'confirm') d.resolve(false);
+    if (d?.kind === 'choose') d.resolve(null);
+  }
+
+  /** Pick one of `options`; null = cancelled. */
+  choose(title: string, options: ChooseOption[]): Promise<string | null> {
+    return new Promise((resolve) => (this.dialog = { kind: 'choose', title, options, resolve }));
   }
 
   prompt(title: string, label: string, value = '', ok = 'OK'): Promise<string | null> {

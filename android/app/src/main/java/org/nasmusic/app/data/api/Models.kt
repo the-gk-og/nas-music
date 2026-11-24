@@ -91,6 +91,14 @@ data class Track(
     val familyHidden: Boolean = false,
     /** api 0.7: DJ automix analysis (beat grid, key, mix points); null until the server has analysed the track. */
     val mix: TrackMix? = null,
+    /** api 0.9 (schema v9): only when tagged. */
+    val composer: String? = null,
+    /** api 0.9 classical: the work this track is a movement of; null when it is not part of one. */
+    val work: String? = null,
+    val workId: String? = null,
+    /** api 0.9: the movement name without its number ("Allegro con brio"). */
+    val movement: String? = null,
+    val movementNo: Int? = null,
 ) {
     val isExplicit: Boolean get() = explicit == "explicit"
 }

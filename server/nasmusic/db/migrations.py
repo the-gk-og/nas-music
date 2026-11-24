@@ -486,3 +486,42 @@ def migrate_v7_to_v8(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
         raise
     log.warning("schema v7 -> v8 done")
     return True
+
+
+# ---------- v8 -> v9 (additive: playlist folders, classical-music track fields) ----------
+
+V9_TABLES = ("playlist_folders", "playlist_folder_items")
+V9_TRACK_COLUMNS = (("work", "TEXT"), ("movement", "TEXT"), ("movement_no", "INTEGER"))
+
+
+def migrate_v8_to_v9(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """New tables and track columns for the v9 features (additive). Returns True if it migrated.
+    tracks.work stays NULL ("not read yet"); the next library scan backfills it from the files."""
+    if current_version(conn) != 8:
+        return False
+    if make_backup:
+        dest = backup(conn, "v8-backup")
+        if dest:
+            log.warning("schema v8 -> v9: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 8:
+            conn.execute("ROLLBACK")
+            return False
+        have = _columns(conn, "tracks")
+        for col, decl in V9_TRACK_COLUMNS:
+            if col not in have:
+                conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} {decl}")
+        for t in V9_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (9)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v8 -> v9 done")
+    return True

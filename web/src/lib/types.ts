@@ -45,6 +45,46 @@ export interface Track {
   familyHidden?: boolean;
   /** v7 DJ automix analysis (beat grid, key, mix points); absent until the server has analysed the track. */
   mix?: TrackMix | null;
+  /** v9: only when tagged. */
+  composer?: string | null;
+  /** v9 classical: the work this track is a movement of (absent when it is not part of one). */
+  work?: string;
+  workId?: string;
+  /** v9: the movement name without its number ("Allegro con brio"). */
+  movement?: string;
+  movementNo?: number;
+}
+
+/** v9 classical: the tracks of one album that share a work. */
+export interface Work {
+  id: string;
+  title: string;
+  composer?: string | null;
+  albumId: string;
+  album: string;
+  /** The album artist: the performers. */
+  artist: string;
+  year?: number | null;
+  trackCount: number;
+  durationS: number;
+  hasArt: boolean;
+  tracks?: Track[];
+}
+
+export interface Composer {
+  name: string;
+  workCount: number;
+  albumCount: number;
+  trackCount: number;
+}
+
+/** v9: one of the user's own playlist folders. */
+export interface PlaylistFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt?: string;
+  playlistCount: number;
 }
 
 export interface AutomixTransition {
@@ -359,6 +399,8 @@ export interface Playlist {
   collaborative?: boolean;
   /** Parallel to `tracks`. */
   entries?: PlaylistEntry[];
+  /** v9: the folder of the caller's it is filed in (null = top level). */
+  folderId?: string | null;
 }
 
 export interface PlaylistMember {

@@ -1,6 +1,7 @@
 // Shared library state for the shell: playlists (sidebar) and pins (Home, "Pin to Home").
 import { session } from './session.svelte';
-import type { PinType, Playlist, ShelfItem, SmartPlaylist } from './types';
+import { folderChoices } from './playlistFolders';
+import type { PinType, Playlist, PlaylistFolder, ShelfItem, SmartPlaylist } from './types';
 import { ui } from './ui.svelte';
 
 const PIN_TYPES = new Set<string>(['album', 'artist', 'playlist', 'mix', 'queue', 'smart_list', 'smart_playlist', 'genre', 'folder']);
@@ -11,6 +12,8 @@ export function isPinType(t: string): t is PinType {
 
 class LibraryStore {
   playlists = $state<Playlist[]>([]);
+  /** v9 playlist folders (the user's own); [] on older servers. */
+  folders = $state<PlaylistFolder[]>([]);
   /** v7 smart playlists (rule-based); [] on servers without them. */
   smartPlaylists = $state<SmartPlaylist[]>([]);
   pins = $state<ShelfItem[]>([]);
@@ -48,10 +51,92 @@ class LibraryStore {
   }
 
   async refreshPlaylists() {
+    await Promise.all([
+      session.api.playlists().then((p) => (this.playlists = p), () => {}),
+      this.refreshFolders(),
+    ]);
+  }
+
+  async refreshFolders() {
     try {
-      this.playlists = await session.api.playlists();
+      this.folders = await session.api.playlistFolders();
     } catch {
-      /* offline */
+      /* offline, or an older server without folders */
+    }
+  }
+
+  async newFolder(parentId: string | null = null): Promise<PlaylistFolder | null> {
+    const name = await ui.prompt('New folder', 'Name', '', 'Create');
+    if (!name) return null;
+    try {
+      const f = await session.api.createPlaylistFolder(name, parentId);
+      await this.refreshFolders();
+      return f;
+    } catch (e) {
+      ui.toast((e as Error).message);
+      return null;
+    }
+  }
+
+  async renameFolder(f: PlaylistFolder) {
+    const name = await ui.prompt('Rename folder', 'Name', f.name, 'Save');
+    if (!name || name === f.name) return;
+    try {
+      await session.api.updatePlaylistFolder(f.id, { name });
+      await this.refreshFolders();
+    } catch (e) {
+      ui.toast((e as Error).message);
+    }
+  }
+
+  async deleteFolder(f: PlaylistFolder) {
+    if (!(await ui.confirm('Delete folder', `Delete "${f.name}"? Its playlists and folders move up a level; no playlist is deleted.`, 'Delete'))) return;
+    try {
+      await session.api.deletePlaylistFolder(f.id);
+      await this.refreshPlaylists();
+    } catch (e) {
+      ui.toast((e as Error).message);
+    }
+  }
+
+  /** Move a folder into another one (or to the top level), picked from a list. */
+  async moveFolderTo(f: PlaylistFolder) {
+    const choice = await ui.choose(`Move "${f.name}" to`, folderChoices(this.folders, f.id).map((c) => ({ ...c, current: c.value === (f.parentId ?? '') })));
+    if (choice === null || choice === (f.parentId ?? '')) return;
+    await this.moveFolder(f.id, choice || null);
+  }
+
+  async moveFolder(id: string, parentId: string | null) {
+    try {
+      await session.api.updatePlaylistFolder(id, { parentId });
+      await this.refreshFolders();
+    } catch (e) {
+      ui.toast((e as Error).message);
+    }
+  }
+
+  /** File a playlist into a folder (null = top level), picked from a list when `folderId` is undefined. */
+  async movePlaylist(p: Playlist, folderId?: string | null) {
+    if (folderId === undefined) {
+      if (!this.folders.length) await this.refreshFolders();
+      if (!this.folders.length) {
+        const f = await this.newFolder();
+        if (!f) return;
+        folderId = f.id;
+      } else {
+        const choice = await ui.choose(`Move "${p.name}" to`, folderChoices(this.folders).map((c) => ({ ...c, current: c.value === (p.folderId ?? '') })));
+        if (choice === null) return;
+        folderId = choice || null;
+      }
+    }
+    if (folderId === (p.folderId ?? null)) return;
+    try {
+      await session.api.setPlaylistFolder(p.id, folderId);
+      await this.refreshPlaylists();
+      const name = this.folders.find((f) => f.id === folderId)?.name;
+      ui.toast(name ? `Moved to "${name}"` : 'Moved to the top level');
+    } catch (e) {
+      ui.toast((e as Error).message);
     }
   }
 
