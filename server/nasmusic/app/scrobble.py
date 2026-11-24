@@ -551,35 +551,6 @@ IMPORT_PAGE = 1000
 IMPORT_MAX = 100_000
 
 
-def _norm(s: str | None) -> str:
-    from nasmusic.library.scanner import normalise
-
-    return normalise(s or "")
-
-
-def _library_index(conn: sqlite3.Connection) -> tuple[dict[str, str], dict[tuple[str, str], str], dict[str, float]]:
-    by_mbid, by_name, dur = {}, {}, {}
-    for r in conn.execute("SELECT t.id, t.title, t.mbid, t.duration_s, t.album_artist, ar.name AS artist "
-                          "FROM tracks t JOIN artists ar ON ar.id = t.artist_id WHERE t.missing = 0"):
-        dur[r["id"]] = float(r["duration_s"] or 0)
-        if r["mbid"]:
-            by_mbid.setdefault(r["mbid"].lower(), r["id"])
-        for a in {r["artist"], r["album_artist"]}:
-            if a:
-                by_name.setdefault((_norm(a), _norm(r["title"])), r["id"])
-    return by_mbid, by_name, dur
-
-
-def match_listen(listen: dict, by_mbid, by_name) -> str | None:
-    tm = listen.get("track_metadata") or {}
-    info = tm.get("additional_info") or {}
-    mapping = tm.get("mbid_mapping") or {}
-    for mbid in (mapping.get("recording_mbid"), info.get("recording_mbid")):
-        if mbid and mbid.lower() in by_mbid:
-            return by_mbid[mbid.lower()]
-    return by_name.get((_norm(tm.get("artist_name")), _norm(tm.get("track_name"))))
-
-
 def import_listenbrainz(conn: sqlite3.Connection, uid: str, transport=None, max_listens: int = IMPORT_MAX,
                         progress=None) -> dict:
     """Copy the user's ListenBrainz listens that match library tracks into `events` as imported plays
@@ -587,10 +558,11 @@ def import_listenbrainz(conn: sqlite3.Connection, uid: str, transport=None, max_
     a = account(conn, uid, "listenbrainz")
     if not a or not a["token"] or not a["username"]:
         raise ScrobbleError("auth", "connect ListenBrainz first")
-    by_mbid, by_name, dur = _library_index(conn)
+    from nasmusic.app import imports
+
+    matcher = imports.Matcher(conn)
     res = {"scanned": 0, "matched": 0, "imported": 0, "alreadyKnown": 0, "unmatched": 0}
     max_ts = None
-    received = now_iso()
     with _client(transport) as client:
         while res["scanned"] < max_listens:
             params: dict[str, Any] = {"count": IMPORT_PAGE}
@@ -604,38 +576,7 @@ def import_listenbrainz(conn: sqlite3.Connection, uid: str, transport=None, max_
             listens = ((_lb_check(r).get("payload") or {}).get("listens")) or []
             if not listens:
                 break
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                for li in listens:
-                    res["scanned"] += 1
-                    ts = int(li.get("listened_at") or 0)
-                    tid = match_listen(li, by_mbid, by_name)
-                    if not tid or not ts:
-                        res["unmatched"] += 1
-                        continue
-                    res["matched"] += 1
-                    d = dur.get(tid, 0)
-                    at = iso(datetime.fromtimestamp(ts, UTC))
-                    lo = iso(datetime.fromtimestamp(ts - max(MIN_TRACK_S, d), UTC))
-                    hi = iso(datetime.fromtimestamp(ts + max(MIN_TRACK_S, d) * 2, UTC))
-                    if conn.execute("SELECT 1 FROM events WHERE user_id = ? AND track_id = ? AND type = 'play' "
-                                    "AND imported IS NULL AND at BETWEEN ? AND ?", (uid, tid, lo, hi)).fetchone():
-                        res["alreadyKnown"] += 1
-                        continue
-                    cur = conn.execute(
-                        "INSERT OR IGNORE INTO events (id, user_id, device_id, type, track_id, at, position_s, "
-                        "duration_s, offline, received_at, imported) VALUES (?, ?, NULL, 'play', ?, ?, ?, ?, 1, ?, "
-                        "'listenbrainz')", (f"import:listenbrainz:{uid}:{ts}:{tid}", uid, tid, at, d, d, received))
-                    if cur.rowcount:
-                        res["imported"] += 1
-                        conn.execute("INSERT OR IGNORE INTO user_tracks (user_id, track_id) VALUES (?, ?)", (uid, tid))
-                        conn.execute("UPDATE user_tracks SET play_count = play_count + 1, "
-                                     "last_played = MAX(COALESCE(last_played, ''), ?) WHERE user_id = ? AND track_id = ?",
-                                     (at, uid, tid))
-                conn.execute("COMMIT")
-            except BaseException:
-                conn.execute("ROLLBACK")
-                raise
+            imports.store_listens(conn, uid, "listenbrainz", (_lb_row(li) for li in listens), matcher, res)
             if progress:
                 progress(res)
             oldest = min(int(li.get("listened_at") or 0) for li in listens)
@@ -647,23 +588,19 @@ def import_listenbrainz(conn: sqlite3.Connection, uid: str, transport=None, max_
     return res
 
 
+def _lb_row(li: dict) -> dict:
+    tm = li.get("track_metadata") or {}
+    info = tm.get("additional_info") or {}
+    mapping = tm.get("mbid_mapping") or {}
+    return {"ts": int(li.get("listened_at") or 0), "artist": tm.get("artist_name"), "title": tm.get("track_name"),
+            "mbid": mapping.get("recording_mbid") or info.get("recording_mbid")}
+
+
 def remove_imported(conn: sqlite3.Connection, uid: str, source: str = "listenbrainz") -> int:
-    """Delete the user's imported events and recompute play counts / last played for the affected tracks."""
-    conn.execute("BEGIN IMMEDIATE")
-    try:
-        tids = [r[0] for r in conn.execute("SELECT DISTINCT track_id FROM events WHERE user_id = ? AND imported = ?",
-                                           (uid, source))]
-        n = conn.execute("DELETE FROM events WHERE user_id = ? AND imported = ?", (uid, source)).rowcount
-        for tid in tids:
-            c, last = conn.execute("SELECT COUNT(*), MAX(at) FROM events WHERE user_id = ? AND track_id = ? "
-                                   "AND type = 'play'", (uid, tid)).fetchone()
-            conn.execute("UPDATE user_tracks SET play_count = ?, last_played = ? WHERE user_id = ? AND track_id = ?",
-                         (c, last, uid, tid))
-        conn.execute("COMMIT")
-    except BaseException:
-        conn.execute("ROLLBACK")
-        raise
-    return n
+    """Delete the user's imported events from `source` and recompute play counts (see app.imports)."""
+    from nasmusic.app import imports
+
+    return imports.remove_imported(conn, uid, source)
 
 
 def imported_count(conn: sqlite3.Connection, uid: str) -> int:
