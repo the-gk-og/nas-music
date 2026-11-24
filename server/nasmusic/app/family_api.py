@@ -7,7 +7,7 @@ Admin: GET /admin/family             - every user's family mode
        POST /admin/explicit          - set or clear an admin verdict on tracks and/or whole albums (bulk)
 
 A LOCKED user may only tighten their filter. Loosening it (turning it off, or showing probable/unknown
-tracks again) needs the PIN an admin set (5 wrong PINs a minute -> 429); without a PIN only an admin can.
+tracks again) needs the PIN an admin set (5 wrong PINs in 15 minutes -> 429); without a PIN only an admin can.
 Turning family mode off with the PIN also removes the lock. The filter itself is nasmusic.db.family."""
 from __future__ import annotations
 
@@ -81,13 +81,13 @@ def put_family(body: FamilyBody, me: Device = Depends(device), conn: Conn = Depe
               (cur.hide_unknown and not new.hide_unknown)
     if cur.locked and loosens:
         key = f"family:{me.user_id}"
-        if c.login_limiter.blocked(key):
-            raise HTTPException(429, "too many wrong PINs; try again in a minute")
+        if c.pin_limiter.blocked(key):
+            raise HTTPException(429, "too many wrong PINs; try again in 15 minutes")
         row = conn.execute("SELECT pin_hash FROM family_mode WHERE user_id = ?", (me.user_id,)).fetchone()
         if not row or not row[0]:
             raise HTTPException(403, "family mode is locked by an admin")
         if not body.pin or not verify_password(body.pin, row[0]):
-            c.login_limiter.fail(key)
+            c.pin_limiter.fail(key)
             raise HTTPException(403, "wrong PIN")
         if not new.enabled:  # the PIN turns it off: that unlocks it too
             new = family.Policy(enabled=False, hide_probable=new.hide_probable, hide_unknown=new.hide_unknown,

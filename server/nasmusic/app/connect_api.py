@@ -1,13 +1,14 @@
 """WebSocket /api/v1/connect (docs/v2.md §5) and the Hub's database callbacks."""
 from __future__ import annotations
 
+import asyncio
 import json
 
 from fastapi import APIRouter, WebSocket
 
 from nasmusic import auth
 from nasmusic.app import collections as coll
-from nasmusic.app.context import SESSION_COOKIE, AppContext
+from nasmusic.app.context import SESSION_COOKIE, AppContext, origin_allowed
 from nasmusic.config import Config
 from nasmusic.connect import Hub, state_from_json
 from nasmusic.core import now_iso, open_db
@@ -95,13 +96,17 @@ def _token(ws: WebSocket) -> str | None:
 async def connect(ws: WebSocket):
     c: AppContext = ws.app.state.ctx
     token = _token(ws)
-    dev = None
-    if token:
+    if token and token == ws.cookies.get(SESSION_COOKIE) and not origin_allowed(ws.headers, c.cfg):
+        token = None  # the cookie on a handshake from another site's page (cross-site WebSocket hijacking)
+
+    def resolve():
         conn = open_db(c.cfg)
         try:
-            dev = auth.device_for_token(conn, token)
+            return auth.device_for_token(conn, token)
         finally:
             conn.close()
+
+    dev = await asyncio.to_thread(resolve) if token else None
     await ws.accept()
     if dev is None:
         await ws.close(code=4401, reason="invalid or missing token")

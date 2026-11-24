@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from nasmusic import auth, jam
 from nasmusic.app import collections as coll
-from nasmusic.app.context import AppContext, client_ip, ctx, db, device, request_token
+from nasmusic.app.context import AppContext, client_ip, ctx, db, device, origin_allowed, request_token
 from nasmusic.auth import Device
 from nasmusic.auth.users import RateLimiter
 from nasmusic.connect import state_from_json
@@ -396,6 +396,8 @@ async def jam_ws(ws: WebSocket):
         header = ws.headers.get("authorization", "")
         scheme, _, t = header.partition(" ")
         tok = t.strip() if scheme.lower() == "bearer" and t.strip() else ws.cookies.get("nm_session")
+        if tok and tok == ws.cookies.get("nm_session") and not origin_allowed(ws.headers, c.cfg):
+            tok = None  # the host's cookie on a handshake from another site's page
     jam_id = ws.query_params.get("jam")
 
     def resolve() -> Sock | None:

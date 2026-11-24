@@ -80,7 +80,7 @@ def cmd_serve(args) -> None:
                                ssl_keyfile=str(files.key), **common)),
     ]
     if cfg.http_port:
-        servers.append(_Server(uvicorn.Config(app, port=cfg.http_port, **common)))
+        servers.append(_Server(uvicorn.Config(app, port=cfg.http_port, **{**common, "host": cfg.http_bind_host or cfg.bind_host})))
     if cfg.cast_enabled and cfg.cast_port:
         from nasmusic.app.cast_api import cast_app
 
@@ -89,7 +89,7 @@ def cmd_serve(args) -> None:
     if not args.no_scheduler:
         jobs.start(initial_scan=not args.no_scan)
     log.info("serving HTTPS on %s:%d%s", cfg.bind_host, cfg.https_port,
-             f" and HTTP on {cfg.bind_host}:{cfg.http_port}" if cfg.http_port else "")
+             f" and HTTP on {cfg.http_bind_host or cfg.bind_host}:{cfg.http_port}" if cfg.http_port else "")
     if cfg.cast_enabled and cfg.cast_port:
         log.info("casting: speakers fetch media from %s (cast port %d)", cfg.cast_base_url, cfg.cast_port)
     try:

@@ -141,11 +141,16 @@ class PasswordBody(BaseModel):
 
 
 @router.put("/me/password", status_code=204)
-def change_password(body: PasswordBody, me: Device = Depends(device), conn: Conn = Depends(db)):
+def change_password(body: PasswordBody, me: Device = Depends(device), conn: Conn = Depends(db),
+                    c: AppContext = Depends(ctx)):
+    """Changing your password signs out every other device (this one stays signed in)."""
     try:
         users.change_password(conn, me.user_id, body.current, body.new)
     except users.UserError as e:
         _err(e)
+    for d in auth.revoke_user_devices(conn, me.user_id, except_device=me.id):
+        if c.hub:
+            c.hub.disconnect_device(d)
     return Response(status_code=204)
 
 

@@ -32,7 +32,7 @@ from nasmusic.app.context import AppContext, ctx, db, device
 from nasmusic.auth import Device
 from nasmusic.config import Config
 from nasmusic.core import iso, now_iso
-from nasmusic.spoken import audiobooks, covers, net, podcasts, stations
+from nasmusic.spoken import audiobooks, covers, net, podcasts, stations, trust
 from nasmusic.spoken import progress as prog
 
 log = logging.getLogger(__name__)
@@ -90,6 +90,16 @@ async def proxy_url(url: str, range_header: str | None, transport=None, media_ty
     return StreamingResponse(body(), status_code=r.status_code, media_type=ctype, headers=out_headers)
 
 
+def _trusted(c: AppContext, kind: str, ident: str) -> bool:
+    from nasmusic.core import open_db
+
+    conn = open_db(c.cfg)
+    try:
+        return trust.podcast_ok(conn, ident) if kind == "podcast" else trust.station_ok(conn, ident)
+    finally:
+        conn.close()
+
+
 async def serve_episode(c: AppContext, row, range_header: str | None):
     if row["local_path"]:
         p = podcasts.podcast_dir(c.cfg) / row["local_path"]
@@ -97,7 +107,9 @@ async def serve_episode(c: AppContext, row, range_header: str | None):
             ctype = row["enclosure_type"] if (row["enclosure_type"] or "").startswith(("audio/", "video/")) else None
             return FileResponse(p, media_type=ctype or audiobooks.media_type(p.name),
                                 headers={"Cache-Control": "private, max-age=86400"})
-    return await proxy_url(row["enclosure_url"], range_header, c.http_transport, row["enclosure_type"])
+    ok = await run_in_threadpool(_trusted, c, "podcast", row["podcast_id"])
+    with net.local_allowed(ok):
+        return await proxy_url(row["enclosure_url"], range_header, c.http_transport, row["enclosure_type"])
 
 
 def serve_book_part(cfg: Config, conn: Conn, bid: str, part: int):
@@ -115,8 +127,10 @@ def serve_book_part(cfg: Config, conn: Conn, bid: str, part: int):
 
 
 async def serve_station(c: AppContext, sid: str, url: str):
+    ok = await run_in_threadpool(_trusted, c, "station", sid)
     try:
-        client, r = await stations.open_stream(url, c.http_transport)
+        with net.local_allowed(ok):
+            client, r = await stations.open_stream(url, c.http_transport)
     except (stations.StationError, net.BadUrl) as e:
         raise HTTPException(502, str(e)) from e
     except httpx.HTTPError as e:
@@ -132,14 +146,16 @@ def cover_file(c: AppContext, conn: Conn, kind: str, ident: str, size: int):
         r = conn.execute("SELECT image_url FROM podcasts WHERE id = ?", (ident,)).fetchone()
         if r is None:
             _404()
-        src = covers.fetch_remote(c.data_dir, podcasts.image_key(ident), r["image_url"], c.http_transport)
+        with trust.for_podcast(conn, ident):
+            src = covers.fetch_remote(c.data_dir, podcasts.image_key(ident), r["image_url"], c.http_transport)
         key = podcasts.image_key(ident)
     elif kind == "station":
         r = conn.execute("SELECT favicon FROM web_stations WHERE id = ?", (ident,)).fetchone()
         if r is None:
             _404()
         key = f"station_{ident}"
-        src = covers.fetch_remote(c.data_dir, key, r["favicon"], c.http_transport)
+        with trust.for_station(conn, ident):
+            src = covers.fetch_remote(c.data_dir, key, r["favicon"], c.http_transport)
     else:
         r = conn.execute("SELECT * FROM audiobooks WHERE id = ?", (ident,)).fetchone()
         if r is None:
@@ -399,15 +415,19 @@ def search_stations(q: str | None = Query(None, max_length=200), tag: str | None
 def add_station(body: StationBody, me: Device = Depends(device), conn: Conn = Depends(db),
                 c: AppContext = Depends(ctx)):
     url, info = body.streamUrl, {}
+    # Home-network streams: admins only (or a station an admin already added).
+    ok = trust.is_admin(conn, me.user_id) or trust.station_ok(conn, net.short_id(url.strip()))
     try:
-        if body.probe:
-            info = stations.probe(url, c.http_transport)
-            url = info["streamUrl"]
-        sid = stations.add(conn, me.user_id, url, body.name or info.get("name"), homepage=body.homepage or info.get("homepage"),
-                           favicon=body.imageUrl, country=body.country,
-                           tags=",".join(body.tags) if body.tags is not None else info.get("tags"),
-                           codec=body.codec or info.get("codec"), bitrate=body.bitrate or info.get("bitrate"),
-                           explicit=body.explicit, radiobrowser_uuid=body.radiobrowserUuid)
+        with net.local_allowed(ok):
+            if body.probe:
+                info = stations.probe(url, c.http_transport)
+                url = info["streamUrl"]
+            sid = stations.add(conn, me.user_id, url, body.name or info.get("name"),
+                               homepage=body.homepage or info.get("homepage"),
+                               favicon=body.imageUrl, country=body.country,
+                               tags=",".join(body.tags) if body.tags is not None else info.get("tags"),
+                               codec=body.codec or info.get("codec"), bitrate=body.bitrate or info.get("bitrate"),
+                               explicit=body.explicit, radiobrowser_uuid=body.radiobrowserUuid)
     except net.BadUrl as e:
         raise HTTPException(422, str(e)) from e
     except stations.StationError as e:
@@ -444,7 +464,8 @@ async def station_now_playing(station_id: str, me: Device = Depends(device), con
         _404()
     np = stations.now_playing(station_id)
     if np is None or time.time() - np.at > 60:
-        await stations.fetch_now_playing(station_id, got[0]["stream_url"], c.http_transport)
+        with trust.for_station(conn, station_id):
+            await stations.fetch_now_playing(station_id, got[0]["stream_url"], c.http_transport)
         np = stations.now_playing(station_id)
     return {"stationId": station_id, "title": np.title if np else None,
             "updatedAt": None if np is None else iso(datetime.fromtimestamp(np.at, UTC))}
