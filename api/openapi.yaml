@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.8.1
+  version: 0.9.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,6 +10,13 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    0.9.0 (schema v9): (1) search by lyrics. The server keeps a full-text index of the lyrics everyone sees by
+    default (admin edit, else the file's own, else cached LRCLIB; per-user edits are private and not indexed),
+    filled by the scan job. GET /search gains `scope=lyrics` (only lyric matches, in `lyrics`) and every library
+    search returns up to 5 lyric matches in the new optional `lyrics` group: [{track, line}], `line` being the
+    lyric line that matched. (2) Home gains the `on_this_day` shelf: track items the user played within 3 days
+    of today's date in earlier years (most recent year first; imported history counts), subtitle like
+    "Artist · 2 years ago, played 5 times". It can be hidden or reordered like any Home shelf.
     0.8.1 (no schema change): synced lyric lines may carry `words` (word-by-word timings from enhanced LRC)
     for karaoke-style highlighting. Optional and additive; clients that ignore it keep line-level sync.
     0.8.0 (schema v8): resume and Continue listening. (1) Podcast episodes, audiobooks and internet radio play
@@ -1896,7 +1903,8 @@ paths:
       summary: |
         Home (docs/v3-ux.md §3.1): typed shelves in the user's order (settings `home.shelves`, hidden ones in
         `home.hidden`). Empty shelves are omitted, except `start_radio`, which always has its buttons (v6: smart shuffle first, then random radio).
-        Shelf kinds here: start_radio, devices, recently_played, continue_listening, pinned.
+        Shelf kinds here: start_radio, devices, recently_played, continue_listening, pinned, on_this_day (0.9.0:
+        track items played around today's date in earlier years; see info.description).
       responses:
         '200':
           description: shelves
@@ -1953,9 +1961,12 @@ paths:
         all|catalog — an online catalogue (Deezer public search + MusicBrainz) for "Not in your library".
         Catalogue results are cached server-side and rate-limited; if the catalogue is unreachable the library
         results still come back and `catalogError` says why.
+        0.9.0: lyrics. scope all|library also returns up to 5 songs whose lyrics contain every word of `q`
+        (`lyrics`); scope=lyrics returns only those, up to `limit`, best first (the other groups are empty).
+        Words match case- and accent-insensitively; the last word also matches as a prefix (3+ letters).
       parameters:
         - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } }
-        - { name: scope, in: query, schema: { type: string, enum: [all, library, catalog], default: all } }
+        - { name: scope, in: query, schema: { type: string, enum: [all, library, catalog, lyrics], default: all } }
         - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 }, description: per group }
       responses:
         '200':
@@ -4143,7 +4154,7 @@ components:
       required: [id, kind, title, items]
       properties:
         id: { type: string, description: 'stable id for ordering/hiding (e.g. "recently_played", "byp:album:<id>")' }
-        kind: { type: string, enum: [start_radio, devices, recently_played, continue_listening, pinned, mixes, radio, because_you_played, release_radar, suggestions, to_get, blends, wrapped] }
+        kind: { type: string, enum: [start_radio, devices, recently_played, continue_listening, pinned, on_this_day, mixes, radio, because_you_played, release_radar, suggestions, to_get, blends, wrapped] }
         title: { type: string }
         subtitle: { type: [string, 'null'] }
         layout: { type: string, enum: [button, row, grid2], description: 'hint: grid2 = 2-row quick-pick grid (Recently played)' }
@@ -4421,6 +4432,16 @@ components:
         queues: { type: array, items: { $ref: '#/components/schemas/Queue' } }
         catalog: { type: array, items: { $ref: '#/components/schemas/CatalogItem' }, description: '"Not in your library" — owned items are filtered out unless scope=catalog' }
         catalogError: { type: [string, 'null'] }
+        lyrics:
+          type: array
+          description: '0.9.0: songs whose lyrics match (optional; absent from older servers)'
+          items: { $ref: '#/components/schemas/LyricsMatch' }
+    LyricsMatch:
+      type: object
+      required: [track, line]
+      properties:
+        track: { $ref: '#/components/schemas/Track' }
+        line: { type: string, description: the lyric line that matched best (no timestamps) }
     CatalogItem:
       type: object
       description: |

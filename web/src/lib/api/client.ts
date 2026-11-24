@@ -474,7 +474,7 @@ export class ApiClient {
   // ---- v3: feeds, global search, To get, pins, radio ----
   home = () => this.get<Feed>('/home');
   forYou = () => this.get<Feed>('/foryou');
-  globalSearch = (q: string, limit = 20, scope: 'all' | 'library' | 'catalog' = 'all') => this.get<SearchResults>('/search', { q, limit, scope });
+  globalSearch = (q: string, limit = 20, scope: 'all' | 'library' | 'catalog' | 'lyrics' = 'all') => this.get<SearchResults>('/search', { q, limit, scope });
 
   /** Image for a relative `artUrl` ("art/<id>", "catalog/<id>/cover", "suggestions/<id>/cover"). */
   relArtSrc(rel: string, size = 256): Promise<string> {

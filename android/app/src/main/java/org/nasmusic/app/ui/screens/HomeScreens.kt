@@ -106,7 +106,7 @@ fun TopBar(c: AppContainer, title: String) {
 /** Shelf kinds this app knows how to draw; others are skipped (contract rule). */
 private val KNOWN_KINDS = setOf(
     "start_radio", "devices", "recently_played", "continue_listening", "pinned", "mixes", "radio", "because_you_played",
-    "release_radar", "suggestions", "to_get", "blends", "wrapped",
+    "release_radar", "suggestions", "to_get", "blends", "wrapped", "on_this_day",
 )
 
 private fun greeting(): String = when (LocalTime.now().hour) {
@@ -184,6 +184,10 @@ fun HomeScreen(c: AppContainer) {
 private fun HomeShelf(c: AppContainer, shelf: Shelf, onChanged: () -> Unit) {
     val scope = rememberCoroutineScope()
     ShelfHeader(shelf.title)
+    shelf.subtitle?.takeIf { shelf.kind == "on_this_day" }?.let {
+        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 6.dp))
+    }
     when {
         shelf.layout == "grid2" || shelf.kind == "recently_played" -> QuickPicks(c, shelf.items)
         shelf.kind == "pinned" -> ShelfRow(c, shelf.items, onUnpin = { item ->

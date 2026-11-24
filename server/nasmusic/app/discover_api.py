@@ -15,11 +15,12 @@ from nasmusic.app import discover, suggestions, toget
 from nasmusic.app import playlists as playlists_mod
 from nasmusic.app.context import AppContext, ctx, db, device
 from nasmusic.auth import Device
-from nasmusic.library import art, queries
+from nasmusic.library import art, lyrics_index, queries
 
 log = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(device)])
 Conn = sqlite3.Connection
+LYRICS_IN_ALL = 5  # lyric matches shown alongside the other groups in an ordinary search
 PinType = Literal["album", "artist", "playlist", "mix", "queue", "smart_list", "smart_playlist", "genre", "folder"]
 
 
@@ -98,10 +99,14 @@ def _top(q: str, res: dict, cat: list[dict], data_dir) -> dict | None:
 
 
 @router.get("/search")
-def search(q: str = Query(..., min_length=1, max_length=200), scope: Literal["all", "library", "catalog"] = "all",
+def search(q: str = Query(..., min_length=1, max_length=200),
+           scope: Literal["all", "library", "catalog", "lyrics"] = "all",
            limit: int = Query(20, ge=1, le=100), me: Device = Depends(device), conn: Conn = Depends(db),
            c: AppContext = Depends(ctx)):
     uid = me.user_id
+    if scope == "lyrics":  # the "Lyrics" filter: only songs whose words match
+        return {"query": q, "top": None, "tracks": [], "albums": [], "artists": [], "playlists": [], "queues": [],
+                "catalog": [], "catalogError": None, "lyrics": lyrics_index.search(conn, uid, q, limit)}
     empty = {"tracks": [], "albums": [], "artists": []}
     lib = queries.search(conn, uid, q, limit, c.data_dir) if scope != "catalog" else empty
     words = [w.casefold() for w in q.split()]
@@ -127,8 +132,11 @@ def search(q: str = Query(..., min_length=1, max_length=200), scope: Literal["al
                     i.get("artist"), i["title"])))))
             cat_items = cat_items[:limit * 3]
     res = {**lib, "playlists": playlists, "queues": queues}
+    # A few lyric matches under the usual groups ("In lyrics"); scope=lyrics lists them all.
+    in_lyrics = lyrics_index.search(conn, uid, q, min(limit, LYRICS_IN_ALL)) if scope != "catalog" else []
     return {"query": q, "top": _top(q, res, cat_items, c.data_dir), **res, "catalog": cat_items,
-            "catalogError": "online catalogue unavailable" if cat_error and not cat_items else None}
+            "catalogError": "online catalogue unavailable" if cat_error and not cat_items else None,
+            "lyrics": in_lyrics}
 
 
 # ---------- catalogue samples + covers ----------
