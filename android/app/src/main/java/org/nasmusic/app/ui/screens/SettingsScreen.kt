@@ -206,6 +206,11 @@ fun SettingsScreen(c: AppContainer) {
         Section("Playback")
         PlaybackSettings(c)
 
+        DjVoiceSettings(c) {
+            HorizontalDivider()
+            Section("Radio DJ")
+        }
+
         HorizontalDivider()
         Section("Appearance")
         AppearanceSettings(c, settings)
