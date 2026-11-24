@@ -78,6 +78,19 @@ export class MockBackend {
     listenbrainz: { connected: false, enabled: false, nowPlaying: true, username: null },
     lastfm: { connected: false, enabled: false, nowPlaying: true, username: null },
   };
+  private importMock(path: string, method: string) {
+    const status = { imported: { listenbrainz: 0, lastfm: 0, spotify: 0 }, lastfm: null, lastfmAvailable: true, lastfmUsername: null };
+    const hist = { scanned: 120, matched: 80, imported: 78, alreadyKnown: 2, unmatched: 40, tooShort: 12, topMissing: [{ artist: 'Somebody', title: 'Elsewhere', plays: 9 }], toGetAdded: 0 };
+    const playlist = { name: 'Imported', total: 3, matched: 2, missing: 1, playlistId: 'p1', unchanged: false, toGetAdded: 1, missingSongs: [{ artist: 'Somebody', title: 'Elsewhere' }] };
+    if (path === '/me/import') return status;
+    if (path === '/me/import/spotify') return { files: ['Streaming_History_Audio_2024.json'], playlists: [], history: hist, toGetAdded: 0 };
+    if (path === '/me/import/lastfm/csv') return hist;
+    if (path === '/me/import/lastfm') return { ...status, lastfm: { state: 'done', username: 'me', ...hist } };
+    if (path === '/me/import/m3u') return playlist;
+    if (path.startsWith('/me/import/history/') && method === 'DELETE') return { removed: 0, ...status };
+    throw new HttpError(404, 'not found');
+  }
+
   private scrobbleMock(path: string, method: string, body: Record<string, unknown>) {
     const parts = path.split('/'); // ['', 'me', 'scrobble', service?, action?]
     const svc = parts[3];
@@ -286,7 +299,7 @@ export class MockBackend {
     const method = (init.method ?? 'GET').toUpperCase();
     const auth = new Headers(init.headers).get('Authorization');
     const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-    const body = init.body ? JSON.parse(String(init.body)) : {};
+    const body = typeof init.body === 'string' && init.body ? JSON.parse(init.body) : {};
     const path = url.pathname.replace(/^.*\/api\/v1/, '');
     try {
       const out = this.route(method, path, url.searchParams, body, token);
@@ -346,6 +359,7 @@ export class MockBackend {
       return { settings: this.settings };
     }
     if (path === '/me/scrobble' || path.startsWith('/me/scrobble/')) return this.scrobbleMock(path, method, body);
+    if (path === '/me/import' || path.startsWith('/me/import/')) return this.importMock(path, method);
     if (path === '/me/notifications') return { items: this.notes, unread: this.notes.filter((n) => !n.read).length };
     if (path === '/me/notifications/read') {
       const n = this.notes.filter((x) => !x.read).length;
@@ -643,6 +657,7 @@ export class MockBackend {
       this.getP(r[1]);
       return [{ userId: me.id, username: me.username, role: 'owner' }];
     }
+    if (m(/^\/playlists\/([^/]+)\/m3u$/)) return '#EXTM3U\n';
     if ((r = m(/^\/playlists\/([^/]+)\/activity$/))) {
       this.getP(r[1]);
       return [];
