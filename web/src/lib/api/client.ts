@@ -2,6 +2,8 @@ import type {
   AutoEqEntry,
   AutomixTransition,
   TrackMixDetail,
+  DjIntro,
+  DjStatus,
   AutoEqProfile,
   Feed,
   Blend,
@@ -540,6 +542,11 @@ export class ApiClient {
   automixOrder = (trackIds: string[], opts: { keepFirst?: boolean; window?: number; arc?: boolean } = {}) =>
     this.post<{ trackIds: string[]; transitions: AutomixTransition[] }>('/automix/order', { trackIds, ...opts });
   trackMix = (trackId: string) => this.get<TrackMixDetail>(`/tracks/${encodeURIComponent(trackId)}/mix`);
+  // ---- 0.8.2: radio DJ voice ----
+  djStatus = () => this.get<DjStatus>('/dj/status');
+  /** The intro before a song; null when the DJ stays quiet there (204). */
+  djIntro = (b: { trackId: string; previousTrackId?: string | null; queueId?: string | null; position: number; force?: boolean }) =>
+    this.post<DjIntro | undefined>('/dj/intro', b).then((r) => r ?? null);
 
   // ---- v5: Release Radar, Wrapped, Blend ----
   releaseRadar = () => this.get<ReleaseRadar>('/release-radar');

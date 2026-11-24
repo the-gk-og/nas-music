@@ -52,6 +52,7 @@ def test_user_devices_detail_and_revoke(client, bob, conn):
 
 
 def test_status_shape(client, app):
+    app.state.ctx.jobs.chain = False  # no background analysis after the scan (it would race analysis.done)
     app.state.ctx.jobs.run("scan")
     s = client.get(f"{ADMIN}/status").json()
     for k in ("version", "uptimeS", "cpuPct", "load", "memUsedBytes", "memTotalBytes", "disks", "dataBytes",
@@ -62,8 +63,7 @@ def test_status_shape(client, app):
     assert all(d["usedBytes"] <= d["totalBytes"] for d in s["disks"])
     assert s["library"]["tracks"] == 5 and s["library"]["missing"] == 0 and s["library"]["lastScan"]["ok"]
     a = s["analysis"]
-    # the scan chains an analyse job in the background, which may already have finished a track or two
-    assert a["total"] == 5 and a["failed"] == 0 and 0 <= a["done"] <= 5 and "etaS" in a and "modelVersion" in a
+    assert (a["done"], a["total"], a["failed"]) == (0, 5, 0) and "etaS" in a and "modelVersion" in a
     scan = {j["name"]: j for j in s["jobs"]}["scan"]
     assert scan["state"] == "idle" and scan["ok"] is True and scan["finishedAt"] and "nextRunAt" in scan
     assert s["lyrics"]["lrclibEnabled"] is True

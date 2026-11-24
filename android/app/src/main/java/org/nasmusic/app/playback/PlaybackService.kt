@@ -94,6 +94,9 @@ class PlaybackService : MediaLibraryService() {
     private lateinit var mixer: VolumeMixer
     private lateinit var crossfader: Crossfader
     private lateinit var library: AutoLibrary
+    private lateinit var djVoice: DjVoice
+    /** The song that played before the current one (the DJ back-announces it). */
+    private var djLastId: String? = null
     /** True while this service paused at the end of a track for the sleep timer. */
     private var sleepPausedAtEnd = false
     /** Wake-up alarm (started by [org.nasmusic.app.alarm.AlarmReceiver] through [onStartCommand]). */
@@ -152,6 +155,17 @@ class PlaybackService : MediaLibraryService() {
                 .setAudioAttributes(attributes, /* handleAudioFocus = */ false)
                 .build()
         }
+        val speech = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build()
+        djVoice = DjVoice(
+            scope, { c.api },
+            buildPlayer = {
+                ExoPlayer.Builder(this).setMediaSourceFactory(DefaultMediaSourceFactory(dataSources))
+                    .setAudioAttributes(speech, /* handleAudioFocus = */ false).build()
+            },
+            duck = { mixer.duck = it },
+            userVolume = { mixer.user },
+        )
+        scope.launch { DjVoiceState.refresh(c.api) }
         library = AutoLibrary(
             api = { c.api },
             hints = { AiRadio.context(this) },
@@ -166,6 +180,9 @@ class PlaybackService : MediaLibraryService() {
         player.addListener(object : Player.Listener {
             override fun onEvents(p: Player, events: Player.Events) = onPlayerEvents(events)
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                djVoice.stop()
+                val prevId = djLastId
+                djLastId = mediaItem?.mediaId
                 // Family mode: the server flags tracks already in a queue that this user may not hear.
                 if (mediaItem?.mediaMetadata?.extras?.getBoolean(MediaItems.EXTRA_FAMILY_HIDDEN) == true) {
                     if (player.hasNextMediaItem()) player.seekToNextMediaItem() else player.pause()
@@ -178,6 +195,13 @@ class PlaybackService : MediaLibraryService() {
                 loadArtworkData(player.currentMediaItemIndex)
                 loadArtworkData(player.currentMediaItemIndex + 1)
                 c.abRepeat.clear()
+                // Radio DJ: talk over songs that start on their own, and over the first song of a radio.
+                // (A crossfade / DJ automix moves on with a seek of its own: that counts as automatic too.)
+                val auto = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                    (reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK && crossfadeSeeking)
+                val started = reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
+                    player.currentMediaItemIndex == 0 && player.playWhenReady && player.currentPosition < 2_000
+                if (auto || started) djSpot(player.currentMediaItemIndex, if (auto) prevId else null)?.let { djVoice.announce(it) }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 // Pressing play on this phone makes it the Connect active device (§5 rule 1).
@@ -186,7 +210,7 @@ class PlaybackService : MediaLibraryService() {
                     c.connect.claimPlayback()
                 }
                 // A user pause stops a fade; buffering (e.g. the seek into the next song's mix-in) doesn't.
-                if (!isPlaying && !player.playWhenReady) cancelCrossfade()
+                if (!isPlaying && !player.playWhenReady) { cancelCrossfade(); djVoice.stop() }
                 if (isPlaying) { handler.removeCallbacks(fastTick); handler.post(fastTick) }
                 if (!isPlaying) { saveResume(); saveSpoken(flush = true) }
             }
@@ -848,6 +872,7 @@ class PlaybackService : MediaLibraryService() {
             // Casting: the local player is paused, so poll the speaker (track changes, pause from its screen).
             if (ext != null && now - lastStateSentMs > 2_000) sendState()
             maybeExtendRadio()
+            maybePrefetchDj()
             if (player.isPlaying && now - lastProgressMs > 15_000) {
                 lastProgressMs = now
                 if (!spokenMode) c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)
@@ -856,6 +881,27 @@ class PlaybackService : MediaLibraryService() {
             if (player.isPlaying && spokenMode && now - lastSpokenSaveMs > 5_000) saveSpoken(flush = now - lastSpokenFlushMs > 30_000)
             handler.postDelayed(this, 250)
         }
+    }
+
+    /** Where the DJ might talk: item [index] of a radio/mix queue that this phone plays itself. */
+    private fun djSpot(index: Int, prevId: String?): DjVoice.Spot? {
+        if (spokenMode || ext != null || !DjVoiceState.on || index !in 0 until player.mediaItemCount) return null
+        val item = player.getMediaItemAt(index)
+        val x = item.mediaMetadata.extras
+        if (x?.getBoolean(MediaItems.EXTRA_FAMILY_HIDDEN) == true) return null
+        val qid = c.queueSync.currentId.value
+        if (!DjLogic.eligible(c.queueSync.isRadio(qid), x?.getString(MediaItems.EXTRA_SOURCE))) return null
+        return DjVoice.Spot(qid, index, item.mediaId, prevId)
+    }
+
+    /** ~25 s before the next song, ask the server for its intro so it's ready on time. */
+    private fun maybePrefetchDj() {
+        if (!player.isPlaying || !DjVoiceState.on) return
+        val dur = player.duration
+        if (dur <= 0 || dur - player.currentPosition > DjLogic.PREFETCH_MS) return
+        val next = player.nextMediaItemIndex
+        if (next == C.INDEX_UNSET || next == player.currentMediaItemIndex) return
+        djSpot(next, player.currentMediaItem?.mediaId)?.let { djVoice.prefetch(it) }
     }
 
     private var errorRetries = 0
@@ -1309,6 +1355,7 @@ class PlaybackService : MediaLibraryService() {
         handler.removeCallbacks(tick)
         handler.removeCallbacks(fastTick)
         crossfader.release()
+        djVoice.release()
         if (::resume.isInitialized) { handler.removeCallbacks(saveQueueSoon); saveResume() }
         saveSpoken(flush = true)
         if (!spokenMode) c.queueSync.progress(player.currentMediaItemIndex, player.currentPosition)

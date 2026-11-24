@@ -447,6 +447,14 @@ interface NasMusicApi {
     @POST("automix/order")
     suspend fun automixOrder(@Body body: AutomixOrderRequest): AutomixOrderResponse
 
+    // ---- api 0.8.2: radio DJ voice ----
+    @GET("dj/status")
+    suspend fun djStatus(): DjStatus
+
+    /** 204 (no body) = the DJ stays quiet before this song. */
+    @POST("dj/intro")
+    suspend fun djIntro(@Body body: DjIntroRequest): Response<DjIntro>
+
     // ---- AI radio (api 0.6): describe-a-vibe, station, steering ----
     @POST("radio/vibe/parse")
     suspend fun parseVibe(@Body body: VibeParseRequest): VibeParse
