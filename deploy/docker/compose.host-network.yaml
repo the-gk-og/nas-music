@@ -1,0 +1,15 @@
+# Optional: host networking, so the server can FIND Chromecast and DLNA speakers on its own (mDNS/SSDP
+# multicast doesn't cross Docker's bridge network). Use it with:
+#   docker compose -f compose.yaml -f compose.host-network.yaml up -d
+# or put  COMPOSE_FILE=compose.yaml:compose.host-network.yaml  in .env.
+# Ports are then opened on the NAS directly: 8443, 8090 and 8080 (8080 is reachable from the LAN too)
+# must be free, and LAN_PORT / CAST_PORT / HTTP_PORT in .env don't apply. Needs Docker Compose 2.24+.
+# With the tunnel, point Cloudflare's public hostname at http://localhost:8080 instead of http://server:8080.
+
+services:
+  server:
+    network_mode: host
+    ports: !reset []
+
+  cloudflared:
+    network_mode: host

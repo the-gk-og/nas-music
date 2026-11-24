@@ -21,3 +21,4 @@ models/
 deploy/.env
 deploy/relay/private/
 server/pytest-report.xml
+deploy/docker/.env
