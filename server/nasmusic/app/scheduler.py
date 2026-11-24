@@ -48,6 +48,9 @@ class Jobs:
         # one is running makes it go round once more, so no finished upload waits for the 5-minute scan.
         self._upload_scan_again = threading.Event()
         self.scheduler = None
+        # Follow-up jobs (scan -> analyse/loudness/explicit, nightly -> pretranscode, ...). Tests that check
+        # a job's own result turn this off so a background analysis can't race their assertions.
+        self.chain = True
 
     # ----- job bodies -----
 
@@ -270,6 +273,8 @@ class Jobs:
             finally:
                 conn.close()
                 lock.release()
+        if not self.chain:
+            return rec
         if name in ("scan", "full_scan") and rec["ok"]:
             if self.cfg.audiobooks_root is not None:
                 self.trigger("audiobooks", "chained")
