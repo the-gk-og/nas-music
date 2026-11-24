@@ -15,6 +15,7 @@ import {
   type EqGraph,
   type EqSettings,
 } from './eq';
+import { buildKaraoke, type KaraokeNode } from './karaoke';
 import { EventQueue, PlaybackTracker, WEB_SIGNALS, buildContext, signalSetting, uuid, type PlayMeta, type SignalKey } from './events';
 import { APP_VERSION, defaultDeviceName, deviceKind, loadJson, preferredFormat, saveJson, storage } from './platform';
 import { loadQuality, netKind, originalLabel, resolveQuality, saveQuality, specLabel, type NetKind, type QualitySettings, type StreamSpec } from './quality';
@@ -140,6 +141,9 @@ export class Player {
   speed = $state(1);
   pitch = $state(0); // semitones
   pitchAvailable = $state(false);
+  /** Karaoke: vocals turned down (lib/karaoke.ts). Not remembered: it's easy to forget it's on. */
+  karaoke = $state(false);
+  karaokeAvailable = $state(false);
   ab = $state<{ a: number | null; b: number | null }>({ a: null, b: null });
 
   // ---- Connect ----
@@ -198,6 +202,7 @@ export class Player {
   private ctx: AudioContext | null = null;
   private graph: EqGraph | null = null;
   private pitchNode: AudioWorkletNode | null = null;
+  private karaokeNode: KaraokeNode | null = null;
   private profiles: Record<string, EqSettings> = {};
   private connect: ConnectClient | null = null;
   private tracker: PlaybackTracker;
@@ -872,6 +877,10 @@ export class Player {
       });
       this.deckGain(this.otherDeck())!.gain.value = 0;
       this.applyDeckGain();
+      this.karaokeNode = buildKaraoke(this.ctx);
+      this.graph.insert(this.karaokeNode.input, this.karaokeNode.output);
+      this.karaokeNode.set(this.karaoke);
+      this.karaokeAvailable = true;
       this.applyEq();
       void this.applySink();
       void this.loadPitchWorklet();
@@ -1420,6 +1429,12 @@ export class Player {
     for (const d of this.decks) d.playbackRate = s;
     this.saveLocal();
     this.stateChanged();
+  }
+
+  setKaraoke(on: boolean) {
+    this.ensureGraph();
+    this.karaoke = on && !!this.karaokeNode;
+    this.karaokeNode?.set(this.karaoke);
   }
 
   setPitch(semitones: number) {

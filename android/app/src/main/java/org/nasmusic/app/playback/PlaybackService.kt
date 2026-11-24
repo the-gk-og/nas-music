@@ -66,6 +66,7 @@ import org.nasmusic.app.data.api.Track
 import org.nasmusic.app.eq.BassShelfProcessor
 import kotlin.math.abs
 import org.nasmusic.app.eq.EqAudioProcessor
+import org.nasmusic.app.eq.KaraokeProcessor
 import org.nasmusic.app.spoken.SpokenItem
 import org.nasmusic.app.spoken.SpokenMedia
 
@@ -132,7 +133,7 @@ class PlaybackService : MediaLibraryService() {
         fun renderers(bass: BassShelfProcessor) = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink =
                 DefaultAudioSink.Builder(context)
-                    .setAudioProcessors(arrayOf(EqAudioProcessor { c.eq.active.value }, bass))
+                    .setAudioProcessors(arrayOf(KaraokeProcessor { c.eq.karaoke.value }, EqAudioProcessor { c.eq.active.value }, bass))
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
                     .build()

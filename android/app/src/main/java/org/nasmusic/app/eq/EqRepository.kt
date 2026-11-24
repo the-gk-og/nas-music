@@ -38,6 +38,9 @@ class EqRepository(context: Context) {
     /** Settings applied to the audio right now (current output's profile). Read on the audio thread. */
     val active: StateFlow<EqSettings> = _active.asStateFlow()
 
+    /** Karaoke: vocals turned down (KaraokeProcessor). Read on the audio thread. Not saved: easy to forget it's on. */
+    val karaoke = MutableStateFlow(false)
+
     private val _edited = MutableStateFlow(_active.value)
     val edited: StateFlow<EqSettings> = _edited.asStateFlow()
 
