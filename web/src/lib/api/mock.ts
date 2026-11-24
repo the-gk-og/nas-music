@@ -802,6 +802,9 @@ export class MockBackend {
       this.pinsList = this.pinsList.filter((p) => !(p.type === r![1] && p.id === decodeURIComponent(r![2])));
       return undefined;
     }
+    // 0.8.2 radio DJ voice: the mock has no voice (no audio in mock mode), but the switch and settings work.
+    if (path === '/dj/status') return { state: 'unavailable', voice: 'en_GB-cori-medium', detail: 'mock server', enabled: this.settings['dj.voice'] === true, every: typeof this.settings['dj.every'] === 'number' ? this.settings['dj.every'] : 3 };
+    if (path === '/dj/intro' && method === 'POST') throw new HttpError(503, "the DJ voice isn't ready: mock server");
     if (path === '/radio/vibe/parse' && method === 'POST') {
       const text = String(body.text ?? '');
       const words = text.toLowerCase();
