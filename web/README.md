@@ -30,6 +30,23 @@ with a simulated phone ("Pixel 8 (mock)") so transfer in/out and remote mode can
 - Built against server core's v3 contract (claude/server-core-b7e7a3): typed shelves, `artUrl`, pins as
   ShelfItems, `/search` with catalogue, `/toget`, `/radio` + `/radio/{id}/more` (topped up when ≤ 5 remain).
 
+## Installable app (PWA)
+`public/manifest.webmanifest` + a service worker (`src/sw.ts`, built to `/sw.js` by the plugin in
+`vite.config.ts`, which fills in this build's precache list and version). Chromium/Edge/Android offer
+"Install" (also Settings → This device → Install as an app). The worker keeps the app shell (index.html, the
+hashed build, icons) so the player opens when the server can't be reached; a banner says so and retries
+`/health` (3 s → 1 min backoff), then reloads data when it's back. It never caches `/api/*` (no audio, no
+JSON), `/admin` or other origins (`src/lib/swroutes.ts`). Navigations are network-first with a 4 s fallback.
+Service workers need a secure context with a trusted certificate: the tunnel address works; the LAN address
+works only if the NAS certificate is trusted by the OS (an "accept the risk" exception isn't enough). Not
+registered in dev, in the desktop app, or on the Jam guest page.
+
+## Now Playing visualiser
+The bars button in full-screen Now Playing (off by default, remembered per device) draws a spectrum behind
+the player from an `AnalyserNode` tapped after the deck mix, before EQ and volume (`player.analyser()`,
+`components/Visualiser.svelte`, maths in `lib/visualiser.ts`). It only runs while music plays on this device,
+and is hidden when the OS asks for reduced motion.
+
 ## Admin console (`#/admin/<section>`)
 Dashboard (health, now playing, analysis ETA, nightly, jobs), Users & invites (devices, last activity, admin
 roles with last-admin protection), Library (scan / nightly / discovery now, failed files + retry), Health &

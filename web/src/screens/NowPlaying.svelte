@@ -1,5 +1,6 @@
 <script lang="ts">
   import {
+    AudioLines,
     ChevronDown,
     Ellipsis,
     Heart,
@@ -29,12 +30,21 @@
   import { ui } from '../lib/ui.svelte';
   import Lyrics from './Lyrics.svelte';
   import ExplicitBadge from '../components/ExplicitBadge.svelte';
+  import Visualiser from '../components/Visualiser.svelte';
+  import { loadJson, saveJson } from '../lib/platform';
 
   const s = $derived(player.shown);
   const t = $derived(s.track);
   let bg = $state<string | null>(null);
   let dragging = $state<number | null>(null);
   let volOpen = $state(false);
+  // Visualiser: off by default, remembered on this device. Off when the system asks for reduced motion.
+  let viz = $state(loadJson('nm.visualiser', { on: false }).on);
+  const vizOn = $derived(viz && !appearance.reducedMotion && !player.isRemote);
+  const toggleViz = () => {
+    viz = !viz;
+    saveJson('nm.visualiser', { on: viz });
+  };
 
   // Blurred, darkened cover as the background (§1: the one exception to true black).
   $effect(() => {
@@ -62,6 +72,7 @@
 
 <div class="np" class:wide class:tall={wide && appearance.portrait}>
   <div class="bg" aria-hidden="true">{#if bg}<img src={bg} alt="" />{/if}</div>
+  {#if vizOn}<Visualiser />{/if}
   <div class="top">
     <button class="icon-btn" aria-label="Minimise" title="Minimise" onclick={minimise}><ChevronDown size={28} /></button>
     {#if player.remoteDevice}
@@ -69,6 +80,9 @@
       {#if player.castSpeaker}<button class="stopcast" onclick={() => player.stopCasting()}>{player.castConnecting ? 'Cancel' : 'Stop casting'}</button>{/if}
     {:else}<span></span>{/if}
     <div class="topr">
+      {#if !player.remoteDevice && !appearance.reducedMotion}
+        <button class="icon-btn" class:on={viz} aria-pressed={viz} aria-label="Visualiser" title={viz ? 'Hide visualiser' : 'Show visualiser'} onclick={toggleViz}><AudioLines size={22} /></button>
+      {/if}
       {#if !player.remoteDevice}
         <button class="icon-btn" class:on={!!player.sleep} aria-label="Sleep timer" title={player.sleep ? `Sleep timer: ${sleepLabel(player.sleep, player.sleepNow)}` : 'Sleep timer'} onclick={() => ui.open({ kind: 'sleep' })}><Moon size={22} /></button>
       {/if}

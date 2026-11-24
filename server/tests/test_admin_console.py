@@ -64,7 +64,8 @@ def test_status_shape(client, app):
     assert all(d["usedBytes"] <= d["totalBytes"] for d in s["disks"])
     assert s["library"]["tracks"] == 5 and s["library"]["missing"] == 0 and s["library"]["lastScan"]["ok"]
     a = s["analysis"]
-    assert (a["done"], a["total"], a["failed"]) == (0, 5, 0) and "etaS" in a and "modelVersion" in a
+    # The scan chains an analysis run in a background thread, so some tracks may already be done here.
+    assert a["total"] == 5 and 0 <= a["done"] + a["failed"] <= 5 and "etaS" in a and "modelVersion" in a
     scan = {j["name"]: j for j in s["jobs"]}["scan"]
     assert scan["state"] == "idle" and scan["ok"] is True and scan["finishedAt"] and "nextRunAt" in scan
     assert s["lyrics"]["lrclibEnabled"] is True

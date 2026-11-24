@@ -2,12 +2,15 @@
 //! Extras over the browser: tray icon (play/pause, next, previous, show, quit), global media keys,
 //! a native notification on track change, single instance, the window size/position remembered, and
 //! optional "start with the computer", which launches straight into the tray (`--minimized`).
-//! The web app listens for `nm-control` events and calls `track_changed`.
+//! Optional: Discord "Listening to" status (`discord.rs`, off by default).
+//! The web app listens for `nm-control` events and calls `track_changed`, `autostart_*`, `discord_*`.
+
+mod discord;
 
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, WindowEvent,
+    AppHandle, Emitter, Manager, State, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
@@ -64,6 +67,18 @@ fn autostart_set(app: AppHandle, on: bool) -> Result<bool, String> {
     a.is_enabled().map_err(|e| e.to_string())
 }
 
+/// Turn the Discord status on (with the user's Discord application ID) or off (`None`).
+#[tauri::command]
+fn discord_configure(discord: State<discord::Discord>, app_id: Option<String>) {
+    let _ = discord.0.send(discord::Msg::Configure(app_id));
+}
+
+/// What's playing now, or `None` when paused/stopped (the status is cleared).
+#[tauri::command]
+fn discord_update(discord: State<discord::Discord>, now: Option<discord::NowPlaying>) {
+    let _ = discord.0.send(discord::Msg::Update(now));
+}
+
 pub fn run() {
     tauri::Builder::default()
         // Must be first: a second launch focuses the running window instead.
@@ -95,7 +110,14 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![track_changed, autostart_get, autostart_set])
+        .manage(discord::Discord::spawn())
+        .invoke_handler(tauri::generate_handler![
+            track_changed,
+            autostart_get,
+            autostart_set,
+            discord_configure,
+            discord_update
+        ])
         .setup(|app| {
             // Started with the computer: stay in the tray until the user opens the window.
             if !std::env::args().any(|a| a == MINIMIZED_ARG) {
