@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.8.0
+  version: 0.8.1
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,6 +10,8 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    0.8.1 (no schema change): synced lyric lines may carry `words` (word-by-word timings from enhanced LRC)
+    for karaoke-style highlighting. Optional and additive; clients that ignore it keep line-level sync.
     0.8.0 (schema v8): resume and Continue listening. (1) Podcast episodes, audiobooks and internet radio play
     through the same player and Connect as music: PlaybackState gains `media` ({kind: episode|book|station, id};
     queueId/trackId are then null and positionMs is the book-wide position), and Connect gains the command
@@ -5317,6 +5319,18 @@ components:
             properties:
               timeMs: { type: [integer, 'null'], description: 'start time in ms (LRC offset tag already applied); null when unsynced' }
               text: { type: string, description: 'may be empty for instrumental gaps' }
+              words:
+                type: array
+                description: >-
+                  0.8.1, optional: word-by-word timings when the lyrics are enhanced LRC
+                  (`[00:12.00]<00:12.00>Hello <00:12.50>world`). Each entry is a piece of `text` (with its trailing
+                  space) and when it starts; the pieces joined give `text`. Absent for plain line-synced lyrics.
+                items:
+                  type: object
+                  required: [timeMs, text]
+                  properties:
+                    timeMs: { type: integer, description: 'start time in ms, offset applied like the line''s' }
+                    text: { type: string }
         text: { type: string, description: 'plain lyrics without timestamps, one line per lyric line' }
     MixTrack:
       type: object

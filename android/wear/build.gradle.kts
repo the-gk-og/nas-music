@@ -42,6 +42,7 @@ val phoneShared = tasks.register<Sync>("syncPhoneSharedSources") {
             "org/nasmusic/app/pairing/SecureStore.kt",
             "org/nasmusic/app/auth/AuthRepository.kt",
             "org/nasmusic/app/sync/Downloader.kt",
+            "org/nasmusic/app/lyrics/LyricsTimeline.kt", // current lyric line on Now Playing
         )
     }
     into(layout.buildDirectory.dir("generated/phoneShared"))

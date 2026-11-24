@@ -50,4 +50,28 @@ class LyricsTimelineTest {
         assertTrue(LyricsTimeline.isInstrumental(LyricLine(9_000, "  ")))
         assertFalse(LyricsTimeline.isInstrumental(LyricLine(9_000, "la")))
     }
+
+    @Test fun `karaoke word index follows the position`() {
+        val words = listOf(org.nasmusic.app.data.api.LyricWord(1_000, "a "), org.nasmusic.app.data.api.LyricWord(1_500, "b"))
+        assertEquals(-1, LyricsTimeline.currentWordIndex(words, 999))
+        assertEquals(0, LyricsTimeline.currentWordIndex(words, 1_499))
+        assertEquals(1, LyricsTimeline.currentWordIndex(words, 9_000))
+    }
+
+    @Test fun `timing nudge label`() {
+        assertEquals("In sync", LyricsTimeline.formatOffset(0))
+        assertEquals("+0.5 s", LyricsTimeline.formatOffset(500))
+        assertEquals("−1.25 s", LyricsTimeline.formatOffset(-1_250))
+    }
+
+    @Test fun `word timings decode and survive the editor`() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val l = json.decodeFromString(
+            org.nasmusic.app.data.api.Lyrics.serializer(),
+            """{"trackId":"t","synced":true,"source":"embedded","text":"Hi there",
+               "lines":[{"timeMs":1000,"text":"Hi there","words":[{"timeMs":1000,"text":"Hi "},{"timeMs":1500,"text":"there"}]}]}""",
+        )
+        assertEquals(2, l.lines[0].words?.size)
+        assertEquals("[00:01.00]<00:01.00>Hi <00:01.50>there", LrcFormat.toEditable(l))
+    }
 }

@@ -108,9 +108,19 @@ const LINES = [
 function syncedLyrics(title: string, dur: number): string {
   const step = Math.max(4, Math.floor((dur - 10) / LINES.length));
   const out = [`[ti:${title}]`];
+  const ts = (sec: number) => {
+    const cs = Math.round(sec * 100);
+    const mm = Math.floor(cs / 6000);
+    const ss = Math.floor((cs % 6000) / 100);
+    return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}.${String(cs % 100).padStart(2, '0')}`;
+  };
   LINES.forEach((l, i) => {
     const t = 5 + i * step;
-    out.push(`[${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}.00]${l}`);
+    // Enhanced LRC (word stamps) so the karaoke highlight shows in mock mode.
+    const words = l.split(' ').filter(Boolean);
+    const per = Math.min(0.6, (step * 0.8) / Math.max(1, words.length));
+    const body = words.map((w, j) => `<${ts(t + j * per)}>${w}${j < words.length - 1 ? ' ' : ''}`).join('');
+    out.push(`[${ts(t)}]${body}`);
   });
   return out.join('\n');
 }

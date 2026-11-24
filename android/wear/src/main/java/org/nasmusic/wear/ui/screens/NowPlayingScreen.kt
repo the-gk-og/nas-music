@@ -45,16 +45,19 @@ import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
 import kotlinx.coroutines.delay
 import org.nasmusic.wear.WearContainer
+import org.nasmusic.wear.nowplaying.rememberLyricLine
 import org.nasmusic.wear.ui.Art
 
 /**
  * Now playing, here or on another device (then the watch is a Connect remote): cover, title, where
- * it plays, a progress ring around the edge, prev / play-pause / next, and volume on the crown/bezel.
+ * it plays, the lyric line being sung (synced lyrics only), a progress ring around the edge,
+ * prev / play-pause / next, and volume on the crown/bezel.
  */
 @Composable
 fun NowPlayingScreen(c: WearContainer, openQueue: () -> Unit, openDevices: () -> Unit) {
     val ui by c.player.ui.collectAsState()
     val connected by c.connect.connected.collectAsState()
+    val lyricLine = rememberLyricLine(c.api, ui.track?.id, ui.positionMs)
     LaunchedEffect(Unit) {
         c.player.connectLocal()
         while (true) { c.player.refreshLocal(); delay(1_000) }
@@ -109,7 +112,17 @@ fun NowPlayingScreen(c: WearContainer, openQueue: () -> Unit, openDevices: () ->
                     color = MaterialTheme.colors.onSurfaceVariant,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                 )
-                Spacer(Modifier.height(6.dp))
+                if (lyricLine != null) {
+                    Text(
+                        lyricLine,
+                        style = MaterialTheme.typography.caption2,
+                        color = MaterialTheme.colors.primary,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                } else {
+                    Spacer(Modifier.height(6.dp))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Small(Icons.Filled.SkipPrevious, "Previous") { c.player.prev() }
                     Button(

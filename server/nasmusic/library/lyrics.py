@@ -17,7 +17,7 @@ from mutagen.mp4 import MP4
 _STAMP = re.compile(r"\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]")
 _OFFSET = re.compile(r"^\[offset:\s*([+-]?\d+)\s*\]\s*$", re.IGNORECASE)
 _META = re.compile(r"^\[(ar|ti|al|au|by|re|ve|length|tool|#):.*\]\s*$", re.IGNORECASE)  # LRC header tags only
-_WORD_STAMP = re.compile(r"<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>")  # enhanced-LRC word timings
+_WORD_STAMP = re.compile(r"<(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?>")  # enhanced-LRC word timings
 
 _VORBIS_SYNCED = ("syncedlyrics", "lyrics", "unsyncedlyrics", "lyric")
 _MP4_KEY = "\xa9lyr"
@@ -27,7 +27,8 @@ _MP4_KEY = "\xa9lyr"
 class Lyrics:
     synced: bool
     source: str                      # "embedded" | "lrc_file"
-    lines: list[dict] = field(default_factory=list)   # {"timeMs": int|None, "text": str}
+    # {"timeMs": int|None, "text": str} plus "words": [{"timeMs", "text"}] for enhanced LRC (0.8.1)
+    lines: list[dict] = field(default_factory=list)
 
     def as_api(self, track_id: str) -> dict:
         text = "\n".join(ln["text"] for ln in self.lines if not self.synced or ln["text"].strip())
@@ -43,13 +44,44 @@ def _ms(m: re.Match) -> int:
     return (mins * 60 + secs) * 1000 + ms
 
 
+def _words(body: str, line_ms: int) -> tuple[str, list[dict] | None]:
+    """Split an enhanced-LRC line body into (plain text, word timings or None).
+
+    "<00:12.00>Hello <00:12.50>world <00:13.10>" -> ("Hello world", [{12000, "Hello "}, {12500, "world"}]).
+    Text before the first word stamp starts at the line's time; a trailing stamp with no text (the end of
+    the last word) is dropped. Each piece keeps its trailing space so the pieces join back into `text`.
+    """
+    stamps = list(_WORD_STAMP.finditer(body))
+    if not stamps:
+        return body.strip(), None
+    pieces: list[tuple[int, str]] = []
+    head = body[:stamps[0].start()]
+    if head.strip():
+        pieces.append((line_ms, head))
+    for i, m in enumerate(stamps):
+        end = stamps[i + 1].start() if i + 1 < len(stamps) else len(body)
+        piece = body[m.end():end]
+        if piece.strip():
+            pieces.append((_ms(m), piece))
+    if not pieces:
+        return "", None
+    text = "".join(p for _, p in pieces).strip()
+    words, prev = [], line_ms
+    for n, (ms, piece) in enumerate(pieces):
+        piece = piece.lstrip() if n == 0 else piece
+        piece = piece.rstrip() if n == len(pieces) - 1 else piece
+        prev = max(prev, ms)            # never go backwards within a line
+        words.append({"timeMs": prev, "text": piece})
+    return text, (words if len(words) > 1 or words[0]["timeMs"] != line_ms else None)
+
+
 def parse(raw: str) -> tuple[bool, list[dict]] | None:
     """Parse LRC or plain text. Returns (synced, lines) or None when there is nothing to show."""
     if not raw or not raw.strip():
         return None
     raw = raw.replace("\r\n", "\n").replace("\r", "\n").lstrip("﻿")
     offset = 0
-    timed: list[tuple[int, int, str]] = []
+    timed: list[tuple[int, int, str, list[dict] | None]] = []
     plain: list[str] = []
     for i, line in enumerate(raw.split("\n")):
         om = _OFFSET.match(line.strip())
@@ -65,9 +97,13 @@ def parse(raw: str) -> tuple[bool, list[dict]] | None:
             lead.append(m)
             pos = m.end()
         if lead:
-            text = _WORD_STAMP.sub("", line[pos:]).strip()
+            first = _ms(lead[0])
+            text, words = _words(line[pos:], first)
             for m in lead:
-                timed.append((_ms(m), i, text))
+                # a line repeated at several times: its word timings move along with it
+                delta = _ms(m) - first
+                timed.append((_ms(m), i, text,
+                              [{"timeMs": w["timeMs"] + delta, "text": w["text"]} for w in words] if words else None))
             continue
         if _META.match(line.strip()):
             continue
@@ -75,7 +111,12 @@ def parse(raw: str) -> tuple[bool, list[dict]] | None:
     if timed:
         # LRC [offset:+n] means the lyrics are shown n ms earlier.
         timed.sort(key=lambda t: (t[0], t[1]))
-        lines = [{"timeMs": max(0, t - offset), "text": text} for t, _, text in timed]
+        lines = []
+        for t, _, text, words in timed:
+            line: dict = {"timeMs": max(0, t - offset), "text": text}
+            if words:
+                line["words"] = [{"timeMs": max(0, w["timeMs"] - offset), "text": w["text"]} for w in words]
+            lines.append(line)
         if not any(ln["text"] for ln in lines):
             return None
         return True, lines

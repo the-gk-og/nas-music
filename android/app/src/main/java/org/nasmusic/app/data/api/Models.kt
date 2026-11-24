@@ -188,7 +188,15 @@ data class Mix(
 )
 
 @Serializable
-data class LyricLine(val timeMs: Long? = null, val text: String)
+data class LyricLine(
+    val timeMs: Long? = null,
+    val text: String,
+    /** 0.8.1: word-by-word timings (enhanced LRC); the pieces joined give [text]. Null = line sync only. */
+    val words: List<LyricWord>? = null,
+)
+
+@Serializable
+data class LyricWord(val timeMs: Long, val text: String)
 
 @Serializable
 data class Lyrics(

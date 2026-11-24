@@ -1,7 +1,19 @@
 <script lang="ts">
-  import { ChevronDown, Pencil, Type, X } from '@lucide/svelte';
+  import { ChevronDown, Pencil, Timer, Type, X } from '@lucide/svelte';
   import { ApiError } from '../lib/api/client';
-  import { currentLineIndex, lyricsAttribution, noLyricsMessage, SOURCE_LABEL, toLrc } from '../lib/lyrics';
+  import {
+    currentLineIndex,
+    currentWordIndex,
+    formatOffset,
+    loadOffset,
+    lyricsAttribution,
+    noLyricsMessage,
+    OFFSET_STEP_MS,
+    saveOffset,
+    shiftLines,
+    SOURCE_LABEL,
+    toLrc,
+  } from '../lib/lyrics';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
   import type { Lyrics, LyricsSource, Track } from '../lib/types';
@@ -46,11 +58,24 @@
 
   $effect(() => {
     fileName = '';
+    offset = loadOffset(track.id);
     void load(track.id);
   });
 
+  // Timing nudge: positive = lines appear later. Remembered per song on this device.
+  let offset = $state(0);
+  let timingOpen = $state(false);
+  function nudge(ms: number) {
+    offset = ms === 0 ? 0 : offset + ms;
+    saveOffset(track.id, offset);
+    userScrolledAt = 0;
+  }
+
   const posMs = $derived(player.shown.position * 1000);
-  const active = $derived(lyrics?.synced ? currentLineIndex(lyrics.lines, posMs) : -1);
+  const active = $derived(lyrics?.synced ? currentLineIndex(lyrics.lines, posMs - offset) : -1);
+  // Karaoke: the word being sung in the active line (enhanced LRC only).
+  const activeWords = $derived(active >= 0 ? lyrics?.lines[active]?.words : undefined);
+  const activeWord = $derived(activeWords ? currentWordIndex(activeWords, posMs - offset) : -1);
 
   // Auto-scroll the active line to the middle, unless the user scrolled in the last 4 s.
   $effect(() => {
@@ -61,7 +86,8 @@
   });
 
   function edit() {
-    const raw = lyrics ? (lyrics.synced ? toLrc(lyrics.lines) : lyrics.text) : '';
+    // A nudged song opens in the editor already shifted, so saving keeps the fix on every device.
+    const raw = lyrics ? (lyrics.synced ? toLrc(shiftLines(lyrics.lines, offset)) : lyrics.text) : '';
     ui.open({ kind: 'lyricsEditor', track, raw });
   }
 
@@ -108,10 +134,21 @@
         </div>
       {/if}
     </div>
+    {#if lyrics?.synced}
+      <button class="icon-btn" class:on={timingOpen || offset !== 0} aria-label="Lyrics timing" aria-expanded={timingOpen} onclick={() => (timingOpen = !timingOpen)}><Timer size={20} /></button>
+    {/if}
     <button class="icon-btn" aria-label="Edit lyrics" onclick={edit}><Pencil size={20} /></button>
     <button class="icon-btn" aria-label="Text size" onclick={() => (ui.lyricsSize = ui.lyricsSize >= 1.5 ? 0.8 : +(ui.lyricsSize + 0.175).toFixed(3))}><Type size={20} /></button>
     {#if !embedded}<button class="icon-btn" aria-label="Close lyrics" onclick={() => (ui.lyricsOpen = false)}><X size={22} /></button>{/if}
   </div>
+
+  {#if timingOpen && lyrics?.synced}
+    <div class="timing" role="group" aria-label="Lyrics timing">
+      <button class="nudge" onclick={() => nudge(-OFFSET_STEP_MS)} title="Lines show up too late">Earlier</button>
+      <button class="reset" onclick={() => nudge(0)} disabled={offset === 0} title="Back to the original timing">{formatOffset(offset)}</button>
+      <button class="nudge" onclick={() => nudge(OFFSET_STEP_MS)} title="Lines show up too early">Later</button>
+    </div>
+  {/if}
 
   <div
     class="body"
@@ -136,9 +173,13 @@
           data-line={i}
           onclick={() => {
             userScrolledAt = 0;
-            player.seek((l.timeMs ?? 0) / 1000);
+            player.seek(Math.max(0, (l.timeMs ?? 0) + offset) / 1000);
           }}
-        >{l.text || '♪'}</button>
+        >{#if i === active && l.words?.length}{#each l.words as w, j}<span
+                class="word"
+                class:sung={j < activeWord}
+                class:now={j === activeWord}>{w.text}</span
+              >{/each}{:else}{l.text || '♪'}{/if}</button>
       {/each}
       {#if attribution}<p class="attr">{attribution}</p>{/if}
       <div class="pad"></div>
@@ -197,6 +238,32 @@
   .item.sel {
     color: var(--accent);
   }
+  .icon-btn.on {
+    color: var(--accent);
+  }
+  .timing {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px 0 4px;
+  }
+  .nudge,
+  .reset {
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: var(--bg-2);
+    font-size: 0.9rem;
+  }
+  .reset {
+    min-width: 84px;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-2);
+  }
+  .reset:disabled {
+    opacity: 0.7;
+    cursor: default;
+  }
   .body {
     flex: 1;
     overflow-y: auto;
@@ -228,6 +295,18 @@
   .synced.active {
     color: #fff;
     font-weight: 700;
+  }
+  /* Karaoke: upcoming words in the active line stay dim until they're sung. */
+  .synced.active .word {
+    color: rgba(255, 255, 255, 0.5);
+    transition: color 0.15s;
+  }
+  .synced.active .word.sung,
+  .synced.active .word.now {
+    color: #fff;
+  }
+  .synced.active .word.now {
+    color: var(--accent);
   }
   .synced:hover {
     color: #fff;
