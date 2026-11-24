@@ -26,6 +26,11 @@ import type {
   NewMusic,
   ScrobbleServiceId,
   ScrobbleStatus,
+  ImportHistoryResult,
+  ImportSource,
+  ImportStatus,
+  ImportedPlaylist,
+  SpotifyImportResult,
   AdminUser,
   Album,
   Artist,
@@ -177,6 +182,43 @@ export class ApiClient {
   async fetchRaw(url: string, init: RequestInit): Promise<Response> {
     const res = await this.fetchImpl(url, init);
     if (res.status === 401) this.onUnauthorized?.();
+    return res;
+  }
+
+  /** POST a raw body (an uploaded file) with query parameters and parse the JSON reply. */
+  async postRaw<T>(path: string, body: Blob, contentType: string, query?: Record<string, unknown>): Promise<T> {
+    const res = await this.rawRequest('POST', path, query, body, contentType);
+    return (await res.json()) as T;
+  }
+
+  /** GET a non-JSON response (e.g. an .m3u8 export) as a Blob. */
+  async getBlob(path: string, query?: Record<string, unknown>): Promise<Blob> {
+    return (await this.rawRequest('GET', path, query)).blob();
+  }
+
+  private async rawRequest(method: string, path: string, query?: Record<string, unknown>, body?: Blob, contentType?: string): Promise<Response> {
+    let url = this.base + path;
+    if (query) {
+      const q = new URLSearchParams();
+      for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null) q.set(k, String(v));
+      const qs = q.toString();
+      if (qs) url += '?' + qs;
+    }
+    const headers: Record<string, string> = { Accept: '*/*' };
+    if (contentType) headers['Content-Type'] = contentType;
+    if (this.mode === 'bearer' && this.token) headers.Authorization = `Bearer ${this.token}`;
+    const res = await this.fetchImpl(url, { method, headers, body, credentials: this.mode === 'cookie' ? 'include' : 'omit' });
+    if (res.status === 401) this.onUnauthorized?.();
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const j = await res.json();
+        if (typeof j?.detail === 'string') detail = j.detail;
+      } catch {
+        /* not JSON */
+      }
+      throw new ApiError(res.status, detail);
+    }
     return res;
   }
 
@@ -340,6 +382,21 @@ export class ApiClient {
   retryScrobbles = () => this.post<ScrobbleStatus>('/me/scrobble/retry');
   importListenBrainz = () => this.post<ScrobbleStatus>('/me/scrobble/listenbrainz/import', {});
   removeImported = () => this.del<ScrobbleStatus & { removed: number }>('/me/scrobble/listenbrainz/import');
+
+  // ---- imports from other services (Spotify, Last.fm, M3U) ----
+  importStatus = () => this.get<ImportStatus>('/me/import');
+  /** One file of a Spotify data export (zip, history/Playlist JSON) or an Exportify CSV. */
+  importSpotify = (file: Blob, name: string, opts: { addMissing?: boolean; missingMinPlays?: number } = {}) =>
+    this.postRaw<SpotifyImportResult>('/me/import/spotify', file, 'application/octet-stream', { name, addMissing: opts.addMissing, missingMinPlays: opts.missingMinPlays });
+  importLastfm = (username?: string) => this.post<ImportStatus>('/me/import/lastfm', username ? { username } : {});
+  importLastfmCsv = (file: Blob, missingMinPlays = 0) =>
+    this.postRaw<ImportHistoryResult>('/me/import/lastfm/csv', file, 'text/csv', { missingMinPlays });
+  importM3u = (file: Blob, name: string, addMissing = true) =>
+    this.postRaw<ImportedPlaylist>('/me/import/m3u', file, 'audio/x-mpegurl', { name, addMissing });
+  removeImportedHistory = (source: ImportSource) =>
+    this.del<ImportStatus & { removed: number }>(`/me/import/history/${encodeURIComponent(source)}`);
+  playlistM3u = (id: string, paths: 'library' | 'absolute' | 'url' = 'library') =>
+    this.getBlob(`/playlists/${encodeURIComponent(id)}/m3u`, { paths });
 
   // ---- v7 notifications ----
   notifications = (since?: string, limit = 50) =>

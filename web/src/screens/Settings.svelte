@@ -2,6 +2,7 @@
   import { ArrowDown, ArrowLeft, ArrowUp } from '@lucide/svelte';
   import { appearance } from '../lib/appearance.svelte';
   import ScrobbleSettings from '../components/ScrobbleSettings.svelte';
+  import ImportSettings from '../components/ImportSettings.svelte';
   import { family } from '../lib/family.svelte';
   import { ACCENTS, HOME_SHELVES, HOME_SHELF_TITLES, moveInList, type Motion } from '../lib/v3';
   import { WEB_SIGNALS, type SignalKey } from '../lib/events';
@@ -248,6 +249,7 @@
 
   <VoiceSettings />
   <ScrobbleSettings />
+  <ImportSettings />
 
   <div class="section-title">Data &amp; recommendations</div>
   <p class="pad muted small">

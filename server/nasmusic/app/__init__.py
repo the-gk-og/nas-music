@@ -111,6 +111,8 @@ def install_token_redaction() -> None:
 
 
 MAX_BODY_BYTES = 20 * 1024 * 1024  # largest legitimate body: a 16 MiB upload chunk
+# Paths that take a bigger body; their handlers authenticate before streaming it to a temp file.
+LARGE_BODY_PATHS = {"/api/v1/me/import/spotify": 512 * 1024 * 1024}
 SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 
 
@@ -125,10 +127,11 @@ class BodyLimit:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
+        limit = LARGE_BODY_PATHS.get(scope.get("path", ""), self.limit)
         for k, v in scope.get("headers") or ():
             if k == b"content-length":
                 try:
-                    too_big = int(v) > self.limit
+                    too_big = int(v) > limit
                 except ValueError:
                     too_big = True
                 if too_big:
@@ -141,7 +144,7 @@ class BodyLimit:
             msg = await receive()
             if msg["type"] == "http.request":
                 seen += len(msg.get("body", b""))
-                if seen > self.limit:
+                if seen > limit:
                     raise _TooLarge()
             return msg
 
@@ -176,8 +179,8 @@ PLAYER_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-i
 def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None = None) -> FastAPI:
     from nasmusic import web
     from nasmusic.app import (account_api, admin_api, api, automix_api, autotag_api, cast_api, collections_api,
-                              connect_api, continuing, discover_api, family_api, insights_api, jam_api, logbuffer,
-                              scrobble_api, smart_api, spoken_api, tags_api, uploads_api, voice_api)
+                              connect_api, continuing, discover_api, family_api, imports_api, insights_api, jam_api,
+                              logbuffer, scrobble_api, smart_api, spoken_api, tags_api, uploads_api, voice_api)
     from nasmusic.web import spa
 
     install_token_redaction()
@@ -189,7 +192,7 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
               tags_api.router, autotag_api.router, connect_api.router, cast_api.media_router, cast_api.router,
               family_api.router, family_api.admin, jam_api.public, jam_api.host, voice_api.public,
               voice_api.router, uploads_api.router, uploads_api.admin, smart_api.router, scrobble_api.router,
-              spoken_api.router, automix_api.router, continuing.router):
+              spoken_api.router, automix_api.router, continuing.router, imports_api.router):
         app.include_router(r, prefix="/api/v1")
     app.include_router(web.router)
     app.include_router(spa.router_for(cfg, web.render_join))  # catch-all: must stay last
