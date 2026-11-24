@@ -206,6 +206,7 @@ fun QueuePanel(c: AppContainer, onOpenFull: (() -> Unit)? = null) {
 /** Queue list with a drag handle (☰) per row. Dropping commits one move to the player + server. */
 @Composable
 private fun ReorderableQueue(c: AppContainer, tracks: List<Track>, playing: Int, enabled: Boolean, modifier: Modifier = Modifier, onPlay: (Int) -> Unit) {
+    val ui = org.nasmusic.app.ui.LocalUi.current
     // Local copy so rows move under the finger; keys are positions at load time.
     var order by remember(tracks) { mutableStateOf(tracks.indices.toList()) }
     var dragKey by remember { mutableStateOf<Int?>(null) }
@@ -220,7 +221,7 @@ private fun ReorderableQueue(c: AppContainer, tracks: List<Track>, playing: Int,
             val t = tracks.getOrNull(k) ?: return@itemsIndexed
             val isPlaying = k == playing
             val dragging = dragKey == k
-            SwipeToRemove(enabled = enabled, onRemove = { c.player.removeItem(order.indexOf(k)) }) {
+            SwipeToRemove(enabled = enabled, onRemove = { org.nasmusic.app.ui.removeFromQueueWithUndo(c, ui, order.indexOf(k), t) }) {
             SongRow(
                 c, t, onClick = { onPlay(i) }, highlighted = isPlaying,
                 menuTarget = if (enabled) org.nasmusic.app.ui.SongMenuTarget(t, queueIndex = order.indexOf(k)) else null,
