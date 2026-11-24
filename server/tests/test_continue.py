@@ -12,13 +12,7 @@ from tests.conftest import track_ids
 from tests.test_cast import FakeSpeaker
 from tests.test_connect import URL, hello, token, until
 from tests.test_spoken import (  # noqa: F401 - fixtures
-    FEED_URL,
-    RSS,
-    alice,
-    books_root,
-    sapp,
-    sconn,
-    up,
+    FEED_URL, RSS, alice, books_root, sapp, sconn, up,
 )
 
 API = "/api/v1"
@@ -111,14 +105,12 @@ def test_play_spoken_and_media_state(sapp, sconn, alice, up):  # noqa: F811
         while got["positionMs"] != 125_000:
             got = until(watch, "state")["state"]
         assert got["media"] == {"kind": "episode", "id": eid}
-        # The state is broadcast before the throttled save (persist_every_s, then a worker thread), so
-        # give the save a moment on a slow runner instead of reading straight after the broadcast.
-        deadline = time.monotonic() + 3
-        while True:
-            pr = alice.get(f"{API}/podcasts/episodes/{eid}").json()["progress"]
-            if pr and pr["positionS"] == 125.0 or time.monotonic() > deadline:
-                break
+        # The hub broadcasts the state first and saves it afterwards in a worker thread: wait for the save.
+        deadline = time.monotonic() + 5
+        pr = alice.get(f"{API}/podcasts/episodes/{eid}").json()["progress"]
+        while pr["positionS"] != 125.0 and time.monotonic() < deadline:
             time.sleep(0.05)
+            pr = alice.get(f"{API}/podcasts/episodes/{eid}").json()["progress"]
         assert pr["positionS"] == 125.0
         # An old client that reports a track (no `media` field) is playing music again.
         phone.send_json({"type": "state", "state": {"queueId": None, "trackId": "t", "positionMs": 0}})

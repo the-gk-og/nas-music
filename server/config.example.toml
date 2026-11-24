@@ -8,6 +8,8 @@ lan_host = "192.168.1.50"          # the NAS's static LAN IP (cert SAN + pairing
 https_port = 8443                  # LAN HTTPS, self-signed cert pinned by the app
 http_port = 8080                   # plain HTTP for cloudflared only; never publish this port
 # bind_host = "0.0.0.0"
+# http_bind_host = "127.0.0.1"     # keep port 8080 off the LAN: set this when the container uses
+                                   # network_mode: host (casting) and nothing outside the NAS needs 8080
 server_name = "Home NAS"           # shown in the app after pairing
 
 # Cloudflare Tunnel + Access service token. Only ever handed to the app inside the pairing QR.

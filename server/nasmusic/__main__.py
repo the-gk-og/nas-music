@@ -1,4 +1,4 @@
-"""nasmusic CLI: serve | scan | pair-code | hash-password | user."""
+"""nasmusic CLI: serve | scan | pair-code | hash-password | user | init-config."""
 from __future__ import annotations
 
 import argparse
@@ -7,12 +7,13 @@ import contextlib
 import getpass
 import json
 import logging
+import os
 import signal
 import sys
 
 import uvicorn
 
-from nasmusic.config import ConfigError, load
+from nasmusic.config import ConfigError, load, resolve_path
 
 
 def _load(args):
@@ -45,11 +46,38 @@ async def _run_servers(servers) -> None:
     await asyncio.gather(*(s.serve() for s in servers))
 
 
+def _bootstrap(path, force: bool = False) -> None:
+    """Write config.toml from the NASMUSIC_* environment (first Docker start). Never overwrites a config."""
+    from nasmusic import bootstrap
+
+    if path.exists() and not force:
+        return
+    try:
+        generated = bootstrap.write_config(path)
+    except ConfigError as e:
+        sys.exit(f"nasmusic: {e}")
+    except OSError as e:
+        sys.exit(f"nasmusic: can't write {path}: {e}. The data folder must be writable by the container's "
+                 f"user (uid {os.getuid()}); see deploy/docker/README.md \"Permissions\".")
+    username = load(path).admin_username
+    print(bootstrap.banner(path, username, generated), flush=True)
+
+
+def cmd_init_config(args) -> None:
+    path = resolve_path(args.config)
+    if path.exists():
+        sys.exit(f"nasmusic: {path} already exists; edit it instead (nothing was changed)")
+    _bootstrap(path)
+
+
 def cmd_serve(args) -> None:
     from nasmusic.app import build_context, create_app
     from nasmusic.app.scheduler import Jobs
     from nasmusic.auth import tls
 
+    path = resolve_path(args.config)
+    if not path.exists() and os.environ.get("NASMUSIC_LAN_HOST", "").strip():
+        _bootstrap(path)
     cfg = _load(args)
     if not cfg.library_root.is_dir():
         logging.getLogger("nasmusic").warning("library_root %s does not exist yet", cfg.library_root)
@@ -80,7 +108,7 @@ def cmd_serve(args) -> None:
                                ssl_keyfile=str(files.key), **common)),
     ]
     if cfg.http_port:
-        servers.append(_Server(uvicorn.Config(app, port=cfg.http_port, **common)))
+        servers.append(_Server(uvicorn.Config(app, port=cfg.http_port, **{**common, "host": cfg.http_bind_host or cfg.bind_host})))
     if cfg.cast_enabled and cfg.cast_port:
         from nasmusic.app.cast_api import cast_app
 
@@ -89,7 +117,7 @@ def cmd_serve(args) -> None:
     if not args.no_scheduler:
         jobs.start(initial_scan=not args.no_scan)
     log.info("serving HTTPS on %s:%d%s", cfg.bind_host, cfg.https_port,
-             f" and HTTP on {cfg.bind_host}:{cfg.http_port}" if cfg.http_port else "")
+             f" and HTTP on {cfg.http_bind_host or cfg.bind_host}:{cfg.http_port}" if cfg.http_port else "")
     if cfg.cast_enabled and cfg.cast_port:
         log.info("casting: speakers fetch media from %s (cast port %d)", cfg.cast_base_url, cfg.cast_port)
     try:
@@ -229,6 +257,9 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("name", nargs="?")
     s.add_argument("--admin", action="store_true", help="with add: make the user an admin")
     s.set_defaults(fn=cmd_user)
+    s = sub.add_parser("init-config", parents=[common],
+                       help="create config.toml from NASMUSIC_* environment variables (first install)")
+    s.set_defaults(fn=cmd_init_config)
     args = p.parse_args(argv)
     if not hasattr(args, "config"):
         args.config = None
