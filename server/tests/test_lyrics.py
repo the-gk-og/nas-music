@@ -83,3 +83,34 @@ def test_api_lyrics(client, conn, cfg):
 def test_api_lyrics_requires_auth(anon, conn):
     ids = track_ids(conn)
     assert anon.get(f"/api/v1/tracks/{ids['Song 1']}/lyrics").status_code == 401
+
+
+# ---------- 0.8.1: enhanced LRC word timings ----------
+
+def test_enhanced_lrc_keeps_word_timings():
+    from nasmusic.library import lyrics as L
+
+    synced, lines = L.parse("[00:12.00]<00:12.00>Hello <00:12.50>big <00:13.00>world <00:13.80>\n[00:15.00]plain line")
+    assert synced
+    assert lines[0]["text"] == "Hello big world"
+    assert lines[0]["words"] == [
+        {"timeMs": 12000, "text": "Hello "}, {"timeMs": 12500, "text": "big "}, {"timeMs": 13000, "text": "world"},
+    ]
+    assert "".join(w["text"] for w in lines[0]["words"]) == lines[0]["text"]
+    assert "words" not in lines[1]
+
+
+def test_enhanced_lrc_leading_text_offset_and_repeats():
+    from nasmusic.library import lyrics as L
+
+    _, lines = L.parse("[offset:+500]\n[00:10.00][00:30.00]Oh <00:11.00>yeah")
+    assert [ln["timeMs"] for ln in lines] == [9500, 29500]
+    assert lines[0]["words"] == [{"timeMs": 9500, "text": "Oh "}, {"timeMs": 10500, "text": "yeah"}]
+    assert lines[1]["words"] == [{"timeMs": 29500, "text": "Oh "}, {"timeMs": 30500, "text": "yeah"}]
+
+
+def test_word_stamps_never_go_backwards():
+    from nasmusic.library import lyrics as L
+
+    _, lines = L.parse("[00:20.00]<00:19.00>a <00:21.00>b")
+    assert [w["timeMs"] for w in lines[0]["words"]] == [20000, 21000]

@@ -3,7 +3,9 @@ package org.nasmusic.app.ui.screens
 import android.os.SystemClock
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,15 +16,27 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -33,22 +47,60 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.nasmusic.app.data.api.Lyrics
+import org.nasmusic.app.lyrics.LyricsOffsets
 import org.nasmusic.app.lyrics.LyricsTimeline
 
 private const val USER_SCROLL_PAUSE_MS = 4000L
 
-/** Synced lyrics follow playback (tap a line to seek); unsynced lyrics are plain scrollable text. */
+/**
+ * Synced lyrics follow playback (tap a line to seek), with word-by-word highlighting for enhanced LRC and
+ * an Earlier / Later timing nudge remembered per song; unsynced lyrics are plain scrollable text.
+ */
 @Composable
 fun LyricsView(lyrics: Lyrics, positionMs: Long, onSeek: (Long) -> Unit, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val offsets = remember(context) { LyricsOffsets(context) }
+    var offset by remember(lyrics.trackId) { mutableLongStateOf(offsets.get(lyrics.trackId)) }
+    var timingOpen by remember { mutableStateOf(false) }
+    val synced = lyrics.synced && lyrics.lines.isNotEmpty()
+    fun nudge(to: Long) { offset = LyricsOffsets.clamp(to); offsets.set(lyrics.trackId, offset) }
+
     Column(modifier.fillMaxSize()) {
-        if (lyrics.synced && lyrics.lines.isNotEmpty()) SyncedLyrics(lyrics, positionMs, onSeek, Modifier.weight(1f))
+        if (synced) SyncedLyrics(lyrics, positionMs - offset, { ms -> onSeek((ms + offset).coerceAtLeast(0)) }, Modifier.weight(1f))
         else PlainLyrics(lyrics, Modifier.weight(1f))
-        Text(
-            if (lyrics.source == "lrc_file") "Lyrics from .lrc file" else "Lyrics from file tags",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            modifier = Modifier.padding(16.dp),
-        )
+        if (synced && timingOpen) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilledTonalButton(onClick = { nudge(offset - LyricsOffsets.STEP_MS) }) { Text("Earlier") }
+                TextButton(onClick = { nudge(0) }, enabled = offset != 0L) { Text(LyricsTimeline.formatOffset(offset)) }
+                FilledTonalButton(onClick = { nudge(offset + LyricsOffsets.STEP_MS) }) { Text("Later") }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when (lyrics.source) {
+                    "lrc_file" -> "Lyrics from .lrc file"
+                    "lrclib" -> "Lyrics from LRCLIB"
+                    "user" -> "Your edit"
+                    else -> "Lyrics from file tags"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.weight(1f).padding(16.dp),
+            )
+            if (synced) {
+                IconButton(onClick = { timingOpen = !timingOpen }) {
+                    Icon(
+                        Icons.Filled.Timer, "Lyrics timing",
+                        tint = if (timingOpen || offset != 0L) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -101,8 +153,11 @@ private fun SyncedLyrics(lyrics: Lyrics, positionMs: Long, onSeek: (Long) -> Uni
             val scale by androidx.compose.animation.core.animateFloatAsState(
                 if (active && motion.expressive) 1.06f else 1f, motion.spec(1.5f), label = "lyric",
             )
+            val words = line.words
             Text(
-                if (instrumental) "♪" else line.text,
+                if (instrumental) "♪"
+                else if (active && !words.isNullOrEmpty()) karaoke(words, LyricsTimeline.currentWordIndex(words, positionMs), colors.primary, colors.onSurface.copy(alpha = 0.5f))
+                else androidx.compose.ui.text.AnnotatedString(line.text),
                 style = if (active) MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                 else MaterialTheme.typography.titleLarge,
                 color = when {
@@ -120,6 +175,12 @@ private fun SyncedLyrics(lyrics: Lyrics, positionMs: Long, onSeek: (Long) -> Uni
         }
     }
 }
+
+/** The active line, word by word: sung words in [sung], upcoming ones dimmed. */
+private fun karaoke(words: List<org.nasmusic.app.data.api.LyricWord>, current: Int, sung: androidx.compose.ui.graphics.Color, upcoming: androidx.compose.ui.graphics.Color) =
+    buildAnnotatedString {
+        words.forEachIndexed { j, w -> withStyle(SpanStyle(color = if (j <= current) sung else upcoming)) { append(w.text) } }
+    }
 
 /** Scroll so item [index] is vertically centred. */
 private suspend fun LazyListState.centerOn(index: Int) {

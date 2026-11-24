@@ -226,9 +226,17 @@ export interface TrackInfo extends Track {
 
 export type LyricsSource = 'embedded' | 'lrc_file' | 'user' | 'lrclib';
 
+export interface LyricWord {
+  timeMs: number;
+  /** A piece of the line's text with its trailing space; the pieces joined give `text`. */
+  text: string;
+}
+
 export interface LyricLine {
   timeMs?: number | null;
   text: string;
+  /** 0.8.1: word-by-word timings (enhanced LRC), for karaoke highlighting. */
+  words?: LyricWord[];
 }
 
 export interface Lyrics {

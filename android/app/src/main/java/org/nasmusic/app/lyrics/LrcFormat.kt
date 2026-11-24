@@ -5,7 +5,12 @@ import org.nasmusic.app.data.api.Lyrics
 object LrcFormat {
     /** Text for the editor: LRC ("[mm:ss.xx]line") when synced, else plain lines. */
     fun toEditable(l: Lyrics): String =
-        if (l.synced && l.lines.any { it.timeMs != null }) l.lines.joinToString("\n") { line -> "${stamp(line.timeMs ?: 0)}${line.text}" }
+        if (l.synced && l.lines.any { it.timeMs != null }) l.lines.joinToString("\n") { line ->
+            val body = line.words?.takeIf { it.isNotEmpty() }
+                ?.joinToString("") { w -> "<${stamp(w.timeMs).removeSurrounding("[", "]")}>${w.text}" }
+                ?: line.text
+            "${stamp(line.timeMs ?: 0)}$body"
+        }
         else l.text.ifBlank { l.lines.joinToString("\n") { it.text } }
 
     fun stamp(ms: Long): String {
