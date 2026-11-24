@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Pencil, Trash2, Users, X } from '@lucide/svelte';
+  import { Download, Pencil, Trash2, Users, X } from '@lucide/svelte';
   import PageHeader from '../components/PageHeader.svelte';
   import { fmtTime } from '../lib/format';
   import type { ShelfItem } from '../lib/types';
@@ -9,6 +9,7 @@
   import type { Playlist } from '../lib/types';
   import { library } from '../lib/library.svelte';
   import { ui } from '../lib/ui.svelte';
+  import { selection } from '../lib/selection.svelte';
 
   let { id }: { id: string } = $props();
   let pl = $state<Playlist | null>(null);
@@ -17,6 +18,19 @@
     session.api.playlist(id).then((p) => (pl = p)).catch((e) => (error = e.message));
   }
   $effect(load);
+  async function exportM3u() {
+    try {
+      const blob = await session.api.playlistM3u(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(pl?.name ?? 'playlist').replace(/[\\/:*?"<>|]+/g, '_')}.m3u8`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) {
+      ui.toast((e as Error).message);
+    }
+  }
   // v5: live updates from other members (Connect `playlist`), and admin tag edits
   $effect(() => {
     const c = library.changed;
@@ -53,19 +67,28 @@
   }
   // Entry-based edits (v5) keep their meaning if others changed the list meanwhile; index-based fallback
   // for servers without entries. A 409 means our view was stale: just reload.
-  async function run(p: Promise<Playlist | void>) {
+  async function run(p: Promise<Playlist | void>): Promise<boolean> {
     try {
       const r = await p;
       if (r && 'id' in r) pl = r;
       else load();
+      return true;
     } catch (e) {
       ui.toast((e as Error).message);
       load();
+      return false;
     }
   }
   function removeAt(i: number) {
     const e = entries[i];
-    void run(e ? session.api.removePlaylistEntry(id, e.id) : session.api.removeFromPlaylist(id, i));
+    const t = tracks[i];
+    const after = i > 0 ? entries[i - 1]?.id : '';
+    void run(e ? session.api.removePlaylistEntry(id, e.id) : session.api.removeFromPlaylist(id, i)).then((ok) => {
+      if (!ok || !t) return;
+      ui.undoable(`Removed "${t.title}"`, () =>
+        run(e && after != null ? session.api.addToPlaylistAfter(id, [t.id], after) : session.api.addToPlaylist(id, [t.id], i)),
+      );
+    });
   }
   function move(i: number, d: number) {
     const to = i + d;
@@ -96,6 +119,7 @@
     >
       {#snippet menu()}
         <button onclick={() => ui.open({ kind: 'playlistShare', playlistId: id })}><Users size={18} /> {isOwner ? 'Share / members' : 'Members & activity'}</button>
+        <button onclick={exportM3u}><Download size={18} /> Export as M3U</button>
         {#if isOwner}
           <button onclick={rename}><Pencil size={18} /> Rename</button>
           <button onclick={del}><Trash2 size={18} /> Delete playlist</button>
@@ -110,6 +134,9 @@
             current={t.id === currentId}
             onplay={() => player.playList(tracks, i, `Playlist: ${pl!.name}`, { source: 'library', addedFrom: 'playlist' })}
             onmenu={() => ui.open({ kind: 'songMenu', ctx: { track: t, list: tracks } })}
+            selected={selection.active && selection.has(t.id)}
+            selecting={selection.active}
+            onselect={(range) => selection.pick(tracks, i, range)}
           />
         </div>
         {#if pl.collaborative && entries[i]?.addedBy}<span class="by muted small" title="Added {new Date(entries[i].addedAt).toLocaleString()}">{entries[i].addedBy}</span>{/if}

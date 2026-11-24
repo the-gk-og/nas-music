@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtBytes, fmtTime, formatLine, unknown } from './format';
+import { fmtBytes, fmtTime, formatLine, tabTitle, unknown } from './format';
 
 describe('fmtTime', () => {
   it('formats m:ss and h:mm:ss', () => {
@@ -49,5 +49,13 @@ describe('formatLine', () => {
   });
   it('says unknown when nothing is known', () => {
     expect(formatLine({})).toBe('[unknown]');
+  });
+});
+
+describe('tabTitle', () => {
+  it('shows the song while something is loaded', () => {
+    expect(tabTitle({ title: 'Song', artist: 'Band' }, true)).toBe('▶ Song · Band — nas-music');
+    expect(tabTitle({ title: 'Song', artist: null }, false)).toBe('Song — nas-music');
+    expect(tabTitle(null, false)).toBe('nas-music');
   });
 });

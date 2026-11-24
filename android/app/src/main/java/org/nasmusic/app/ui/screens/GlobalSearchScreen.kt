@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
@@ -49,6 +52,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.nasmusic.app.AppContainer
 import org.nasmusic.app.data.api.CatalogItem
+import org.nasmusic.app.data.api.LyricsMatch
 import org.nasmusic.app.data.api.SearchResults
 import org.nasmusic.app.data.api.NewToGet
 import org.nasmusic.app.data.api.ShelfItem
@@ -72,15 +76,18 @@ fun GlobalSearchScreen(c: AppContainer) {
     val ui = LocalUi.current
     val scope = rememberCoroutineScope()
     var query by rememberSaveable { mutableStateOf("") }
+    var lyricsOnly by rememberSaveable { mutableStateOf(false) }
     var result by remember { mutableStateOf<SearchResults?>(null) }
     var previewing by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(query) {
+    LaunchedEffect(query, lyricsOnly) {
         if (query.isBlank()) { result = null; return@LaunchedEffect }
         delay(300)
-        result = runCatching { c.api.globalSearch(query.trim()) }.recoverCatching { e ->
+        result = runCatching {
+            if (lyricsOnly) c.api.globalSearch(query.trim(), scope = "lyrics", limit = 50) else c.api.globalSearch(query.trim())
+        }.recoverCatching { e ->
             // Server without /search yet: library-only search.
             if (e is HttpException && e.code() == 404) c.api.search(query.trim()).let { SearchResults(tracks = it.tracks, albums = it.albums, artists = it.artists) } else throw e
-        }.getOrNull()
+        }.getOrElse { if (lyricsOnly) SearchResults() else null }  // a server older than api 0.9 has no lyrics search
     }
     // 30 s samples play on their own player (proxied by the server, never stored), leaving the queue alone.
     val sampler = remember {
@@ -105,8 +112,21 @@ fun GlobalSearchScreen(c: AppContainer) {
             shape = RoundedCornerShape(28.dp),
             modifier = Modifier.fillMaxWidth().padding(12.dp),
         )
+        if (query.isNotBlank()) Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(!lyricsOnly, { lyricsOnly = false }, label = { Text("All") })
+            FilterChip(lyricsOnly, { lyricsOnly = true }, label = { Text("Lyrics") })
+        }
         val r = result ?: return@Column Message(if (query.isBlank()) "Search your library and beyond." else "Searching…")
         val q = query.trim()
+        val lyricTracks = r.lyrics.map { it.track }
+        fun playLyric(i: Int) = c.player.play(lyricTracks, i, PlaySource.SEARCH, "Lyrics: ${q.take(12)}", searchQuery = q)
+        if (lyricsOnly) {
+            if (r.lyrics.isEmpty()) return@Column Message("No song has “$q” in its lyrics.")
+            LazyColumn(Modifier.fillMaxSize()) {
+                itemsIndexed(r.lyrics, key = { i, m -> "ly:$i:${m.track.id}" }) { i, m -> LyricsRow(m, onClick = { playLyric(i) }) }
+            }
+            return@Column
+        }
         LazyColumn(Modifier.fillMaxSize()) {
             r.top?.let { top -> item(key = "top") { ShelfHeader("Top result"); TopResult(c, top, onSample = ::toggleSample, previewing = previewing) } }
             if (r.tracks.isNotEmpty()) item(key = "h-songs") { ShelfHeader("Songs") }
@@ -123,13 +143,17 @@ fun GlobalSearchScreen(c: AppContainer) {
                 ShelfHeader("Playlists")
                 ShelfRow(c, r.playlists.map { ShelfItem("playlist", it.id, it.name, "${it.trackCount} songs") })
             }
+            if (r.lyrics.isNotEmpty()) item(key = "h-lyrics") {
+                ShelfHeader("In lyrics") { if (r.lyrics.size >= 5) TextButton(onClick = { lyricsOnly = true }) { Text("See all") } }
+            }
+            itemsIndexed(r.lyrics, key = { i, m -> "ly:$i:${m.track.id}" }) { i, m -> LyricsRow(m, onClick = { playLyric(i) }) }
             val notOwned = r.catalog.filterNot { it.owned }
             if (notOwned.isNotEmpty()) item(key = "h-cat") { ShelfHeader("Not in your library") }
             itemsIndexed(notOwned, key = { i, it -> "cat:$i:${it.id}" }) { _, item ->
                 CatalogRow(item, previewing == item.id, onSample = { toggleSample(item) }, onAdd = { addToGet(item) }, onSimilar = { item.artist?.let { query = it } })
             }
             r.catalogError?.let { err -> item(key = "caterr") { Text("Online catalogue unavailable: $err", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp)) } }
-            if (r.tracks.isEmpty() && r.albums.isEmpty() && r.artists.isEmpty() && r.catalog.isEmpty()) item { Message("No results.") }
+            if (r.tracks.isEmpty() && r.albums.isEmpty() && r.artists.isEmpty() && r.catalog.isEmpty() && r.lyrics.isEmpty()) item { Message("No results.") }
         }
     }
 }
@@ -150,6 +174,22 @@ private fun TopResult(c: AppContainer, top: ShelfItem, onSample: (CatalogItem) -
             top.catalog?.takeIf { it.hasPreview }?.let { cat ->
                 IconButton(onClick = { onSample(cat) }) { Icon(if (previewing == cat.id) Icons.Default.Stop else Icons.Default.PlayArrow, "Play sample") }
             }
+        }
+    }
+}
+
+/** A song whose lyrics matched, with the line that matched under its title. */
+@Composable
+private fun LyricsRow(m: LyricsMatch, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        ShelfArt(ShelfItem("track", m.track.id, m.track.title, artUrl = org.nasmusic.app.data.FeedRepository.art(m.track.albumId)), 52.dp)
+        Column(Modifier.weight(1f)) {
+            Text(m.track.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(m.track.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("“${m.line}”", style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic, maxLines = 1,
+                overflow = TextOverflow.Ellipsis)
         }
     }
 }

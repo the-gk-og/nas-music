@@ -60,7 +60,7 @@ data class AppSettings(
     companion object {
         const val SYNC_WINDOW_HOURS = 2
         /** Shelf ids as in the contract (`home.shelves`). */
-        val DEFAULT_HOME_SHELVES = listOf("start_radio", "devices", "recently_played", "continue_listening", "pinned")
+        val DEFAULT_HOME_SHELVES = listOf("start_radio", "devices", "recently_played", "continue_listening", "pinned", "on_this_day")
         private val RENAMED = mapOf("recent" to "recently_played", "continue" to "continue_listening")
         fun migrateShelfId(entry: String): String {
             val hidden = entry.startsWith("-")

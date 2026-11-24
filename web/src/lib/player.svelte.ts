@@ -1475,7 +1475,10 @@ export class Player {
   }
 
   async removeFromQueue(id: string, pos: number) {
+    const q = id === this.queue?.id ? this.queue : id === this.viewQueue?.id ? this.viewQueue : null;
+    const t = q?.tracks[pos];
     await this.mutate(id, (q) => removeTrack(q, pos), () => session.api.removeFromQueue(id, pos));
+    if (t) ui.undoable(`Removed "${t.title}" from the queue`, () => this.mutate(id, (q) => insertTracks(q, [t], pos), () => session.api.addToQueue(id, [t.id], pos)));
   }
 
   async addToQueue(tracks: Track[], position: 'next' | 'end', queueId?: string) {
@@ -2035,7 +2038,8 @@ export class Player {
       ui.toast((e as Error).message);
     }
     this.events.push({ id: uuid(), type: on ? 'star' : 'unstar', trackId: t.id, at: new Date().toISOString() });
-    ui.toast(on ? 'Added to favourites' : 'Removed from favourites');
+    if (on) ui.toast('Added to favourites');
+    else ui.undoable('Removed from favourites', () => (t.starred ? undefined : this.toggleStar(t)));
   }
 
   flushEvents() {
