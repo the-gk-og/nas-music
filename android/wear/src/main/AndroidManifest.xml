@@ -13,6 +13,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Sleep detection (opt-in): heart rate, and a "health" foreground service while it watches.
+         HIGH_SAMPLING_RATE_SENSORS is a normal (install-time) permission; it also satisfies the health
+         service type's prerequisites, so detection still runs by stillness alone if heart rate is refused. -->
+    <uses-permission android:name="android.permission.BODY_SENSORS" />
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-feature android:name="android.hardware.sensor.heartrate" android:required="false" />
 
     <application
         android:name=".WearApp"
@@ -53,6 +60,11 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+
+        <service
+            android:name=".sleep.SleepWatchService"
+            android:exported="false"
+            android:foregroundServiceType="health" />
 
         <service
             android:name=".tile.NowPlayingTileService"

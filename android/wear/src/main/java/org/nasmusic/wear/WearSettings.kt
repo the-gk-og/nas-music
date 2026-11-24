@@ -13,6 +13,14 @@ data class WearPrefs(
     val storageCapMb: Int = 2048,
     /** Opus bitrate for streaming and downloads. The watch is short on bandwidth and storage. */
     val opusKbps: Int = 96,
+    /** Sleep detection (opt-in): pause when the watch thinks you fell asleep. */
+    val sleepEnabled: Boolean = false,
+    /** Only pause podcasts and audiobooks, not music. */
+    val sleepSpokenOnly: Boolean = true,
+    /** Start watching by itself when the app is opened at night with something playing. */
+    val sleepAutoAtNight: Boolean = true,
+    /** Move a podcast/audiobook back to where it was when you last moved. */
+    val sleepRewind: Boolean = true,
 ) {
     companion object {
         const val RESERVE_MB = 500L
@@ -31,6 +39,10 @@ class WearSettings(context: Context) {
         downloadWifiOnly = prefs.getBoolean("wifiOnly", true),
         storageCapMb = prefs.getInt("capMb", 2048),
         opusKbps = prefs.getInt("kbps", 96),
+        sleepEnabled = prefs.getBoolean("sleepEnabled", false),
+        sleepSpokenOnly = prefs.getBoolean("sleepSpokenOnly", true),
+        sleepAutoAtNight = prefs.getBoolean("sleepAuto", true),
+        sleepRewind = prefs.getBoolean("sleepRewind", true),
     )
 
     fun update(f: (WearPrefs) -> WearPrefs) {
@@ -39,6 +51,10 @@ class WearSettings(context: Context) {
             .putBoolean("wifiOnly", n.downloadWifiOnly)
             .putInt("capMb", n.storageCapMb)
             .putInt("kbps", n.opusKbps)
+            .putBoolean("sleepEnabled", n.sleepEnabled)
+            .putBoolean("sleepSpokenOnly", n.sleepSpokenOnly)
+            .putBoolean("sleepAuto", n.sleepAutoAtNight)
+            .putBoolean("sleepRewind", n.sleepRewind)
             .apply()
         _state.value = n
     }
