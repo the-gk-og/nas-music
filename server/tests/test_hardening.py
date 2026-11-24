@@ -133,3 +133,68 @@ def test_connect_socket_ignores_cookie_from_other_sites(app, conn):
             with c.websocket_connect(f"{API}/connect", headers={"Origin": "https://evil.example"}) as ws:
                 ws.receive_json()
         assert e.value.code == 4401
+
+
+# ---------- follow-ups: password change, idle expiry, home-network fetches, http_bind_host ----------
+
+
+def test_password_change_signs_out_other_devices(app, conn):
+    make_user(conn, "gina", password="password123")
+    a = user_client(app, conn, "gina", admin=False)
+    b = user_client(app, conn, "gina", admin=False)
+    with a, b:
+        assert b.get(f"{API}/me").status_code == 200
+        r = a.put(f"{API}/me/password", json={"current": "password123", "new": "newpassword456"})
+        assert r.status_code == 204
+        assert a.get(f"{API}/me").status_code == 200
+        assert b.get(f"{API}/me").status_code == 401
+
+
+def test_idle_device_login_expires(conn):
+    from datetime import UTC, datetime, timedelta
+
+    from nasmusic.core import iso
+
+    u = make_user(conn, "hank")
+    dev, tok = auth.create_device(conn, u.id, "old phone", "android")
+    assert auth.device_for_token(conn, tok) is not None
+    old = iso(datetime.now(UTC) - timedelta(days=400))
+    conn.execute("UPDATE devices SET last_seen = ?, created_at = ? WHERE id = ?", (old, old, dev))
+    assert auth.device_for_token(conn, tok) is None
+    assert conn.execute("SELECT revoked FROM devices WHERE id = ?", (dev,)).fetchone()[0] == 1
+
+
+def test_home_network_urls_need_an_admin():
+    for url in ("http://192.168.1.1/", "http://10.0.0.5/feed", "http://nas.local/x", "http://router/",
+                "http://100.101.102.103/"):
+        with pytest.raises(net.BadUrl):
+            net.check_url(url)
+        with net.local_allowed():
+            assert net.check_url(url) == url
+    with net.local_allowed(), pytest.raises(net.BadUrl):
+        net.check_url("http://127.0.0.1/")          # never, even for admins
+    assert net.check_url("https://feeds.example.com/x") == "https://feeds.example.com/x"
+
+
+def test_station_on_home_network_admin_only(app, conn, client, bob):
+    calls = []
+
+    def handler(request):
+        calls.append(str(request.url))
+        return httpx.Response(200, headers={"content-type": "audio/mpeg"}, content=b"\xff\xfb" * 100)
+
+    app.state.ctx.http_transport = httpx.MockTransport(handler)
+    body = {"streamUrl": "http://192.168.1.20:8000/live", "name": "Kitchen", "probe": False}
+    assert bob.post(f"{API}/stations", json=body).status_code == 422
+    r = client.post(f"{API}/stations", json=body)
+    assert r.status_code == 201, r.text
+    # once an admin added it, anyone may favourite it
+    assert bob.post(f"{API}/stations", json=body).status_code == 201
+
+
+def test_http_bind_host_setting(tmp_path):
+    from nasmusic import config as config_mod
+
+    p = tmp_path / "c.toml"
+    p.write_text(f'library_root = "{tmp_path}"\ndata_dir = "{tmp_path / "d"}"\nhttp_bind_host = "127.0.0.1"\n')
+    assert config_mod.load(p).http_bind_host == "127.0.0.1"

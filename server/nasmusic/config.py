@@ -62,6 +62,11 @@ class Config:
     https_port: int = 8443
     http_port: int = 8080                 # plain HTTP for cloudflared only; don't publish it
     bind_host: str = "0.0.0.0"
+    # Where the plain-HTTP port listens; default bind_host. Set "127.0.0.1" when cloudflared runs on the host
+    # network (or the container uses network_mode: host for casting), so other machines on the LAN can't reach
+    # it and fake the visitor address the tunnel adds. Leave unset when cloudflared is a separate container
+    # that connects to nasmusic:8080.
+    http_bind_host: str | None = None
     server_name: str = "Home NAS"
     tunnel_url: str | None = None
     cf_access_client_id: str | None = None      # only ever put into the pairing QR

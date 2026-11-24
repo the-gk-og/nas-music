@@ -20,7 +20,7 @@ import httpx
 from nasmusic.config import Config
 from nasmusic.core import now_iso
 from nasmusic.db import family
-from nasmusic.spoken import feeds, net
+from nasmusic.spoken import feeds, net, trust
 from nasmusic.spoken import progress as prog
 
 log = logging.getLogger(__name__)
@@ -100,7 +100,7 @@ def poll_one(conn: sqlite3.Connection, pid: str, transport=None, force: bool = F
     if row is None:
         raise KeyError(pid)
     try:
-        with net.client(transport) as c:
+        with trust.for_podcast(conn, pid), net.client(transport) as c:
             feed, r = _fetch_feed(c, row["feed_url"], None if force else row["etag"],
                                   None if force else row["last_modified"])
     except (httpx.HTTPError, PodcastError, feeds.FeedError, net.BadUrl) as e:
@@ -115,7 +115,15 @@ def poll_one(conn: sqlite3.Connection, pid: str, transport=None, force: bool = F
 
 
 def subscribe(conn: sqlite3.Connection, uid: str, feed_url: str, transport=None) -> str:
-    """Subscribe `uid` to a feed (fetched now if the server does not know it yet). Returns the podcast id."""
+    """Subscribe `uid` to a feed (fetched now if the server does not know it yet). Returns the podcast id.
+    Only admins may add feeds on the home network (or join one an admin already subscribed to)."""
+    known = conn.execute("SELECT id FROM podcasts WHERE feed_url = ?", ((feed_url or "").strip(),)).fetchone()
+    ok = trust.is_admin(conn, uid) or (known is not None and trust.podcast_ok(conn, known["id"]))
+    with net.local_allowed(ok):
+        return _subscribe(conn, uid, feed_url, transport)
+
+
+def _subscribe(conn: sqlite3.Connection, uid: str, feed_url: str, transport=None) -> str:
     feed_url = net.check_url(feed_url)
     row = conn.execute("SELECT id FROM podcasts WHERE feed_url = ?", (feed_url,)).fetchone()
     if row is None:
@@ -128,7 +136,7 @@ def subscribe(conn: sqlite3.Connection, uid: str, feed_url: str, transport=None)
             raise PodcastError(f"not a podcast feed: {e}") from e
         if feed.new_feed_url and feed.new_feed_url != feed_url:
             try:
-                return subscribe(conn, uid, feed.new_feed_url, transport)
+                return _subscribe(conn, uid, feed.new_feed_url, transport)
             except (PodcastError, net.BadUrl):
                 pass
         pid, _ = store_feed(conn, feed_url, feed, r.headers.get("etag"), r.headers.get("last-modified"))
@@ -251,7 +259,8 @@ def sync_downloads(conn: sqlite3.Connection, cfg: Config, transport=None,
                 if used + est > cap:
                     continue
             try:
-                rel, size = _download(cfg, c, ep)
+                with trust.for_podcast(conn, ep["podcast_id"]):
+                    rel, size = _download(cfg, c, ep)
             except (httpx.HTTPError, PodcastError, net.BadUrl, OSError) as e:
                 failed += 1
                 conn.execute("UPDATE podcast_episodes SET download_error = ? WHERE id = ?", (str(e)[:300], ep["id"]))
@@ -290,7 +299,7 @@ def chapters(conn: sqlite3.Connection, cfg: Config, ep: sqlite3.Row, transport=N
     out: list[dict] | None = None
     if ep["chapters_url"]:
         try:
-            with net.client(transport) as c:
+            with trust.for_podcast(conn, ep["podcast_id"]), net.client(transport) as c:
                 r = net.get_limited(c, ep["chapters_url"], 2 * 1024 * 1024)
             if r.status_code == 200:
                 out = feeds.parse_json_chapters(r.content)
