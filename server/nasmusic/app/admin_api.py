@@ -21,7 +21,7 @@ from nasmusic.app.context import AppContext, admin_device, ctx, db
 from nasmusic.app.logbuffer import BUFFER
 from nasmusic.app.scheduler import JOB_NAMES
 from nasmusic.auth import users
-from nasmusic.core import get_setting, set_setting
+from nasmusic.core import get_setting, now_iso, set_setting
 from nasmusic.library import explicit, lrclib, queries
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(admin_device)])
@@ -392,6 +392,13 @@ def list_backups(conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
     return _with_notes(conn, backups.list_all(c.cfg))
 
 
+@router.get("/backups/offsite")
+def offsite_backups(conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    """Where off-site copies go, the last copy's outcome, and the copies there (listing an rclone remote can take a
+    few seconds)."""
+    return backups.offsite_status(c.cfg, conn)
+
+
 class BackupBody(BaseModel):
     note: str | None = Field(default=None, max_length=200)
 
@@ -422,6 +429,64 @@ def download_backup(backup_id: str, c: AppContext = Depends(ctx)):
 @router.get("/backups/{backup_id}")
 def download_backup_legacy(backup_id: str, c: AppContext = Depends(ctx)):
     return _download(c, backup_id)
+
+
+class RestoreBody(BaseModel):
+    source: Literal["local", "offsite"] = "local"
+
+
+def _err(e: backups.BackupError) -> HTTPException:
+    return HTTPException(e.status, e.detail)
+
+
+@router.post("/backups/{backup_id}/offsite")
+def copy_backup_offsite(backup_id: str, conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    try:
+        res = backups.copy_offsite(c.cfg, backup_id)
+    except backups.BackupError as e:
+        set_setting(conn, backups.STATUS_KEY, {"at": now_iso(), "ok": False, "error": e.detail, "name": None})
+        raise _err(e) from e
+    set_setting(conn, backups.STATUS_KEY, {"at": now_iso(), "ok": True, "error": None, "name": res["name"]})
+    return res
+
+
+@router.post("/backups/{backup_id}/restore")
+def restore_backup(backup_id: str, body: RestoreBody | None = None, c: AppContext = Depends(ctx)):
+    """Replace the database with this backup (a safety copy is taken first). Everyone keeps playing; devices
+    paired after the backup was made have to pair again."""
+    source = (body or RestoreBody()).source
+    job_lock = c.jobs._locks["backup"] if c.jobs is not None else None
+    if job_lock is not None and not job_lock.acquire(blocking=False):
+        raise HTTPException(409, "the backup job is running; try again in a minute")
+    try:
+        res = backups.restore(c.cfg, source, backup_id)
+    except backups.BackupError as e:
+        raise _err(e) from e
+    finally:
+        if job_lock is not None:
+            job_lock.release()
+    _reload_after_restore(c)
+    return res
+
+
+def _reload_after_restore(c: AppContext) -> None:
+    """The restored database brings its own admin-console settings, server id and web secret."""
+    from nasmusic.app import _web_secret
+    from nasmusic.core import open_db, server_id
+
+    conn = open_db(c.cfg)
+    try:
+        old_tz = c.cfg.timezone
+        c.cfg = serversettings.apply(c.base_cfg or c.cfg, serversettings.overrides(conn))
+        c.opus.max_bytes = int(c.cfg.opus_cache_gb * 1024**3)
+        c.server_id = server_id(conn)
+        c.web_secret = _web_secret(conn)
+    finally:
+        conn.close()
+    if c.jobs is not None:
+        c.jobs.cfg = c.cfg
+        if c.cfg.timezone != old_tz:
+            c.jobs.reschedule()
 
 
 @router.delete("/backups/{backup_id}", status_code=204)

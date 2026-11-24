@@ -69,9 +69,10 @@ Testing with the Desktop Head Unit (sideloaded APK):
 | `playback` | `PlaybackService` (MediaSessionService + ExoPlayer; local file else `/stream/{id}`), `FeedbackTracker` |
 | `feedback` | play/skip classification (80 % rule), event recorder, batch uploader |
 | `sync` | `SyncWorker` (manifest diff, resumable downloads, storage limit, LAN-only unless allowed), scheduler |
+| `voice` | Mic button in search: offline speech-to-text with Vosk (model downloaded on first use, ~40 MB, kept in app storage), text sent to `POST /me/voice/command`, `local` answers played/controlled on this phone |
 | `ui` | Today, Favourites, Library (artists → albums → tracks + search), Now Playing, Discover, Settings, Pairing |
 
 ## Licences
 
-All dependencies are open source (Apache-2.0, plus protobuf-javalite BSD-3 via Tink and JUnit EPL-1.0
-for tests); see the header of `gradle/libs.versions.toml`. No Play Services, Firebase or ML Kit.
+All dependencies are open source (Apache-2.0, plus protobuf-javalite BSD-3 via Tink, JNA Apache-2.0/LGPL-2.1
+via Vosk, and JUnit EPL-1.0 for tests); see the header of `gradle/libs.versions.toml`. No Play Services, Firebase or ML Kit.

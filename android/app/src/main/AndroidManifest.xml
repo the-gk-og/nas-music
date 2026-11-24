@@ -16,6 +16,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- QR scanning (zxing-android-embedded) -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Voice commands: speech is recognised on the phone (Vosk); only the text goes to your server. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- v2 opt-in context (docs/v2.md §10): requested at runtime only when the matching switch is turned on. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

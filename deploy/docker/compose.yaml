@@ -50,6 +50,7 @@ services:
       # Optional, remove the leading '#' (README "Uploads" / "Audiobooks"):
       # - ${UPLOADS_DIR}:/uploads            # SEPARATE writable folder for songs people upload
       # - ${AUDIOBOOKS_DIR}:/audiobooks:ro
+      # - ${BACKUP_DIR}:/backup              # off-site backups on another disk/dataset (README "Backups")
 
   # Optional remote access through a Cloudflare Tunnel (README "Remote access"). Enabled by
   # COMPOSE_PROFILES=tunnel in .env. In Cloudflare, point the public hostname at http://server:8080
