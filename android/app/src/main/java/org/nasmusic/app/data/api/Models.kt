@@ -148,7 +148,7 @@ data class VoiceDevice(
 @Serializable
 data class VoiceDevices(val devices: List<VoiceDevice> = emptyList())
 
-/** 0.8.2: the app's mic button (POST /me/voice/command); speech is recognised on the phone. */
+/** 0.9.1: the app's mic button (POST /me/voice/command); speech is recognised on the phone. */
 @Serializable
 data class AppVoiceCommand(val text: String, val trackId: String? = null, val dryRun: Boolean? = null)
 

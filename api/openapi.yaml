@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.9.0
+  version: 0.9.1
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -100,7 +100,7 @@ info:
     are visible only to the uploader (hidden from everyone else everywhere, /stream 404). Job `upload_scan`.
     Schema v8: admin want-list view (/admin/wants*): every user's To get items with the admin's check-off
     ("added", optional note) and "found in the library" suggestions; ToGetItem.adminAdded shows the user that mark.
-    0.8.2: the app's own mic button. POST /me/voice/command (device token) takes the same commands as
+    0.9.1: the app's own mic button. POST /me/voice/command (device token) takes the same commands as
     /voice/command, recognised on the phone, with the calling device as "here"; `local` answers mean the app
     does it itself. New intent add_to_playlist ("add this to Gym") on both, for the playing (or `trackId`) song.
     Over the Cloudflare tunnel the app also sends `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
@@ -854,7 +854,7 @@ paths:
                   items: { type: string, maxLength: 200 }
                   description: media_player entity ids (or names) in that area
                 language: { type: string, maxLength: 20 }
-                trackId: { type: string, maxLength: 100, description: '0.8.2. add_to_playlist: the song to add (default: what is playing)' }
+                trackId: { type: string, maxLength: 100, description: '0.9.1. add_to_playlist: the song to add (default: what is playing)' }
                 dryRun: { type: boolean, default: false, description: resolve only; play nothing }
       responses:
         '200':
@@ -866,7 +866,7 @@ paths:
     post:
       tags: [voice]
       summary: |
-        0.8.2. The app's mic button: a voice command recognised on the phone (offline speech-to-text), run as the
+        0.9.1. The app's mic button: a voice command recognised on the phone (offline speech-to-text), run as the
         caller with the calling device as "here". Same sentences as /voice/command, plus "add this to {playlist}".
         Play goes to the named room, else the device this app is controlling (the Connect active device), else
         this device. Answers `local: true` when the app should do it itself: play `queueId` (already created and
@@ -3971,7 +3971,7 @@ components:
             id: { type: [string, 'null'] }
             title: { type: string }
         queueId: { type: string }
-        local: { type: boolean, description: '0.8.2, /me/voice/command only: the app does it itself (see there)' }
+        local: { type: boolean, description: '0.9.1, /me/voice/command only: the app does it itself (see there)' }
         volume: { type: number, minimum: 0, maximum: 1, description: 'local volume: set this level' }
         volumeStep: { type: number, description: 'local volume: change by this much (+0.1 / -0.1)' }
     VoiceToken:

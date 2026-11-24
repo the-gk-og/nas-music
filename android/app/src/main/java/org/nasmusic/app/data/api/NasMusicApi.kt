@@ -164,7 +164,7 @@ interface NasMusicApi {
     @PUT("me/voice/devices/{id}")
     suspend fun putVoiceDevice(@Path("id") id: String, @Body body: VoiceDevicePrefs): VoiceDevicePrefs
 
-    // 0.8.2: the app's own mic button (text recognised on the phone; a device token, not a voice token).
+    // 0.9.1: the app's own mic button (text recognised on the phone; a device token, not a voice token).
     @POST("me/voice/command")
     suspend fun voiceCommand(@Body body: AppVoiceCommand): VoiceResult
 
