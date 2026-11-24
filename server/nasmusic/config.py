@@ -83,6 +83,7 @@ class Config:
     model_version: str = "effnet-discogs-1"   # audio-analysis model (see nasmusic/ai/README.md)
     scan_interval_minutes: int = 5
     lrclib_enabled: bool = True                 # lyrics fallback from lrclib.net when a file has none
+    album_completeness_enabled: bool = True     # album pages: "9 of 12" + missing tracks, from MusicBrainz
     artist_info_enabled: bool = True            # artist pages: photo/bio/links from MusicBrainz + Wikipedia/Wikidata
     explicit_deezer: bool = True                # explicit-content job asks Deezer (free API) about untagged tracks
     # ---- library cleanup (nasmusic/library/cleanup.py, admin console "Cleanup") ----

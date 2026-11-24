@@ -424,6 +424,19 @@ export class MockBackend {
       else out.sort((a, b) => a.title.localeCompare(b.title));
       return out;
     }
+    if ((r = m(/^\/library\/albums\/([^/]+)\/completeness(\/toget)?$/))) {
+      // Demo: every album is missing its "track 3" bonus, which can go on To-get.
+      const a = L.albums.find((x) => x.id === r![1]);
+      if (!a) throw new HttpError(404, 'not found');
+      const have = L.tracks.filter((t) => t.albumId === a.id).length;
+      const title = `${a.title} (Demo Mix)`;
+      if (r[2]) this.route('POST', '/toget', qs, { type: 'track', title, artist: a.artist, note: `Missing from ${a.title}` }, token);
+      const tg = this.toget.find((x) => x.type === 'track' && x.title === title && x.artist === a.artist);
+      return {
+        albumId: a.id, status: 'incomplete', have, total: have + 1, releaseTitle: a.title, discCount: 1,
+        missing: [{ disc: 1, position: have + 1, title, durationS: 214, recordingMbid: `rec-${a.id}`, toget: tg ? { id: tg.id, status: tg.status } : null }],
+      };
+    }
     if ((r = m(/^\/library\/albums\/([^/]+)$/))) {
       const a = L.albums.find((x) => x.id === r![1]);
       if (!a) throw new HttpError(404, 'not found');

@@ -162,11 +162,14 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
     val scope = rememberCoroutineScope()
     var album by remember { mutableStateOf<AlbumDetail?>(null) }
     var more by remember { mutableStateOf<List<ShelfItem>>(emptyList()) }
+    var completeness by remember { mutableStateOf<org.nasmusic.app.data.api.AlbumCompleteness?>(null) }
     var style by rememberPageStyle(c)
     val list = rememberLazyListState()
     LaunchedEffect(albumId, ui.tagsRev) {
+        completeness = null
         album = runCatching { c.api.album(albumId) }.getOrNull()
         album?.let { a ->
+            launch { completeness = runCatching { c.api.albumCompleteness(a.id) }.getOrNull()?.takeIf { it.total != null } }
             more = runCatching { c.api.artist(a.artistId).albums }.getOrDefault(emptyList())
                 .filter { it.id != a.id }.map { ShelfItem("album", it.id, it.title, it.year?.toString(), artUrl = org.nasmusic.app.data.FeedRepository.art(it.id), album = it) }
         }
@@ -193,9 +196,78 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
             if (style == "big") BigHeader(MediaItems.artUrl(a.id, 512), a.title, a.artist, meta, MediaItems.artUrl(a.id, 128), list, play, shuffle, radio, { ui.go("artist/${a.artistId}") }, menu)
             else SimpleHeader(c, a.id, a.title, a.artist, meta, play, shuffle, radio, menu)
         }
+        completeness?.let { comp -> item { AlbumCompletenessRow(c, comp) { completeness = it } } }
         songItems(c, a.tracks, name, PlaySource.LIBRARY)
         if (style == "big" && more.isNotEmpty()) item { ShelfHeader("More by ${a.artist}"); ShelfRow(c, more) }
         item { Spacer(Modifier.height(24.dp)) }
+    }
+}
+
+/** "9 of 12 tracks" (MusicBrainz) under the album header; tap to see the gaps and put them on To-get. */
+@Composable
+private fun AlbumCompletenessRow(
+    c: AppContainer,
+    comp: org.nasmusic.app.data.api.AlbumCompleteness,
+    onChange: (org.nasmusic.app.data.api.AlbumCompleteness) -> Unit,
+) {
+    val ui = LocalUi.current
+    val scope = rememberCoroutineScope()
+    var open by remember(comp.albumId) { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    val total = comp.total ?: return
+    val unlisted = comp.missing.filter { it.toget == null || it.toget.status == "dismissed" }
+    fun add(rec: String?) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            runCatching { c.api.addMissingToGet(comp.albumId, org.nasmusic.app.data.api.MissingToGetBody(rec?.let { listOf(it) })) }
+                .onSuccess { onChange(it); ui.toast = if (rec == null) "Missing tracks added to To-get" else "Added to To-get" }
+                .onFailure { ui.toast = "Couldn't add to To-get" }
+            busy = false
+        }
+    }
+    val pill = Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceVariant)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (comp.status == "complete") {
+                Text("Complete album · $total of $total", style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = pill.padding(horizontal = 12.dp, vertical = 6.dp))
+            } else {
+                Text("${comp.have} of $total tracks ${if (open) "▴" else "▾"}", style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = pill.clickable { open = !open }.padding(horizontal = 12.dp, vertical = 6.dp))
+                if (unlisted.isNotEmpty()) {
+                    Text(if (unlisted.size == 1) "+ Add the missing track to To-get" else "+ Add ${unlisted.size} missing to To-get",
+                        style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary,
+                        modifier = pill.clickable(enabled = !busy) { add(null) }.padding(horizontal = 12.dp, vertical = 6.dp))
+                }
+            }
+        }
+        if (open && comp.missing.isNotEmpty()) {
+            Column(Modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant).padding(vertical = 4.dp)) {
+                val multi = (comp.discCount ?: 1) > 1
+                comp.missing.forEach { m ->
+                    Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (multi) "${m.disc}.${m.position}" else "${m.position}", Modifier.width(40.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(m.title, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val mark = m.toget?.takeIf { it.status != "dismissed" }
+                        if (mark != null) {
+                            Text(if (mark.status == "got") "Got it" else "On To-get", style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { ui.go("toget") })
+                        } else if (m.recordingMbid != null) {
+                            Text("+ To-get", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.clickable(enabled = !busy) { add(m.recordingMbid) }.padding(4.dp))
+                        }
+                    }
+                }
+                comp.releaseTitle?.let {
+                    Text("Compared with $it on MusicBrainz", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+                }
+            }
+        }
     }
 }
 

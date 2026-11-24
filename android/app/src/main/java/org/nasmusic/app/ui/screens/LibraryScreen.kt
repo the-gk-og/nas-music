@@ -74,6 +74,7 @@ private val SORTS = mapOf(
 )
 
 /** Library (docs/v3-ux.md §3.3): filter chips, sort menu, grid/list toggle remembered per chip. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(c: AppContainer) {
     val ui = LocalUi.current
@@ -103,15 +104,21 @@ fun LibraryScreen(c: AppContainer) {
                 scope.launch { c.settings.setLibraryView(chip, if (view == "grid") "list" else "grid") }
             }) { Icon(if (view == "grid") Icons.AutoMirrored.Filled.List else Icons.Default.GridView, if (view == "grid") "List view" else "Grid view") }
         }
-        Box(Modifier.weight(1f)) {
-            when (chip) {
-                "downloaded" -> DownloadedSection(c)
-                "playlists" -> PlaylistsSection(c, view, sort)
-                "albums" -> AlbumsSection(c, view, sort)
-                "artists" -> ArtistsSection(c, view, sort)
-                "genres" -> GenresSection(c, view, sort)
-                "folders" -> FoldersScreen(c, "")
-                "songs" -> SongsSection(c, sort)
+        // Pull down to reload the section: a new key throws away its loaded state, so it fetches again.
+        var refreshKey by remember { mutableStateOf(0) }
+        var refreshing by remember { mutableStateOf(false) }
+        LaunchedEffect(refreshKey) { if (refreshing) { kotlinx.coroutines.delay(700); refreshing = false } }
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(refreshing, { refreshing = true; refreshKey++ }, Modifier.weight(1f)) {
+            androidx.compose.runtime.key(refreshKey) {
+                when (chip) {
+                    "downloaded" -> DownloadedSection(c)
+                    "playlists" -> PlaylistsSection(c, view, sort)
+                    "albums" -> AlbumsSection(c, view, sort)
+                    "artists" -> ArtistsSection(c, view, sort)
+                    "genres" -> GenresSection(c, view, sort)
+                    "folders" -> FoldersScreen(c, "")
+                    "songs" -> SongsSection(c, sort)
+                }
             }
         }
     }
