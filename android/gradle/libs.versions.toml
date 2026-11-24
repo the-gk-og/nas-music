@@ -7,6 +7,8 @@
 #   Tink (pulls protobuf-javalite, BSD-3-Clause) - Apache-2.0
 #   JUnit 4 - EPL-1.0, Robolectric - MIT, androidx.test - Apache-2.0 (test only)
 #   androidx.glance (appwidget, material3) - Apache-2.0 (home-screen widgets)
+#   Vosk (vosk-android) - Apache-2.0, with JNA (Apache-2.0 / LGPL-2.1 dual) - offline speech-to-text for
+#   voice commands. Its English model (Apache-2.0) is downloaded on first use, never bundled.
 #   androidx.mediarouter, androidx.appcompat - Apache-2.0 (`full` flavour only)
 # The ONE owner-approved exception (CLAUDE.md): Google Cast SDK, play-services-cast-framework, which is
 # proprietary. It is a `fullImplementation` dependency only; the default `foss` APK contains no Google
@@ -40,8 +42,10 @@ mediarouter = "1.8.1"
 appcompat = "1.7.1"
 fragment = "1.8.5"
 glance = "1.1.1"
+vosk = "0.3.47"
 
 [libraries]
+vosk-android = { module = "com.alphacephei:vosk-android", version.ref = "vosk" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }

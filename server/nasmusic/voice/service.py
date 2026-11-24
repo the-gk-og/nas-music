@@ -2,7 +2,12 @@
 
 Runs in two halves. `plan()` is blocking (database, maybe the AI for radio) and runs in a worker thread; it
 parses, picks the device, finds the music and, for a play, writes the queue. `run()` executes the plan on the
-Connect Hub's loop as a socket-less remote (nasmusic.connect.RemoteConn). Everything that picks tracks goes
+Connect Hub's loop as a socket-less remote (nasmusic.connect.RemoteConn).
+
+Two callers: Home Assistant (POST /voice/command, a voice token) and the app's own mic button (POST
+/me/voice/command, a device token). For the app, the calling device is "here": a plan that targets it (or a
+transport command with no room named) comes back with `local` set and the app does it itself, so it works
+whether or not the phone has a Connect socket open. Everything that picks tracks goes
 through family-mode-aware code (library queries, collections.create_queue, discover.start_radio), so voice
 can never play what the user's family mode hides.
 """
@@ -41,6 +46,8 @@ class Plan:
     item: dict | None = None            # {kind, id, title}
     volume: float | None = None
     transfer_play: bool = False         # resume/play on a device that isn't the active one
+    local: bool = False                 # the calling app does it itself (POST /me/voice/command only)
+    volume_step: float | None = None    # local volume: relative change for the app to apply
     errors: list[str] = field(default_factory=list)
 
     def response(self) -> dict:
@@ -51,6 +58,12 @@ class Plan:
             out["item"] = self.item
         if self.queue_id:
             out["queueId"] = self.queue_id
+        if self.local:
+            out["local"] = True
+            if self.volume is not None:
+                out["volume"] = self.volume
+            if self.volume_step is not None:
+                out["volumeStep"] = self.volume_step
         return out
 
 
@@ -363,14 +376,50 @@ def now_playing(conn, uid, state: dict, devices: list[dict]) -> Plan:
     return Plan("now_playing", speech=speech, device=dev, item={"kind": "song", "id": t["id"], "title": t["title"]})
 
 
-def plan(conn: sqlite3.Connection, cfg: Config, uid: str, body: dict, live: list[dict], state: dict) -> Plan:
+def add_to_playlist(conn: sqlite3.Connection, uid: str, it: Intent, track_id: str | None, dry: bool) -> Plan:
+    """"add this to Gym": the playing song onto one of the user's playlists (owned or shared with edit rights)."""
+    t = queries.track(conn, uid, track_id) if track_id else None
+    if t is None:
+        return fail("add_to_playlist", "Nothing is playing to add.")
+    m = match.best(it.query, _playlists(conn, uid)) if it.query else None
+    if m is None:
+        return fail("add_to_playlist", f"I couldn't find a playlist called {it.query or 'that'}.")
+    _, pid, name = m.item
+    item = {"kind": "playlist", "id": pid, "title": name}
+    if t["id"] in playlists._playlist_ids(conn, pid):
+        return Plan("add_to_playlist", item=item, speech=f"{t['title']} is already in {name}.")
+    if not dry:
+        try:
+            playlists.add_tracks(conn, uid, pid, [t["id"]])
+        except coll.Forbidden:
+            return fail("add_to_playlist", f"You can only listen to {name}, not add to it.", item=item)
+        except (coll.NotFound, coll.BadRequest):
+            return fail("add_to_playlist", f"I couldn't add that to {name}.", item=item)
+    return Plan("add_to_playlist", item=item, speech=f"Added {t['title']} to {name}.")
+
+
+def plan(conn: sqlite3.Connection, cfg: Config, uid: str, body: dict, live: list[dict], state: dict,
+         caller: dict | None = None) -> Plan:
+    """`caller`: the app device asking (POST /me/voice/command), which is "here" and is online by definition."""
     it = intent_for(body)
     devices = all_devices(conn, uid, live)
+    me = None
+    if caller is not None:
+        me = next((d for d in devices if d["id"] == caller["id"]), None)
+        if me is None:
+            me = {**caller, "canPlay": True, "isActive": False}
+            devices.append(me)
+        me["online"] = True
     dry = bool(body.get("dryRun"))
     if it.name == "unknown":
         return fail("unknown", "Sorry, I didn't understand that.")
+    if it.name == "add_to_playlist":
+        return add_to_playlist(conn, uid, it, body.get("trackId") or state.get("trackId"), dry)
     if it.name == "now_playing":
-        return now_playing(conn, uid, state, devices)
+        p = now_playing(conn, uid, state, devices)
+        if me is not None and (p.device is None or p.device["id"] == me["id"]):
+            p.local = True   # the app knows best what it is playing
+        return p
     pick_split(it, devices)
     if it.name == "play" and it.splits and not it.device:
         # "... in the bedroom" but no device is called that: say so, unless the whole phrase is a name in the
@@ -384,6 +433,8 @@ def plan(conn: sqlite3.Connection, cfg: Config, uid: str, body: dict, live: list
         named = find_device(it.device, devices)
         if named is None:
             return fail(it.name, f"I couldn't find a speaker called {it.device}.")
+    if me is not None:
+        return _plan_for_app(conn, cfg, uid, it, state, me, named, active, dry)
     here = area_device(devices, body.get("area"), body.get("areaDevices"))
     fallback = here or default_device(devices)
 
@@ -424,12 +475,52 @@ def plan(conn: sqlite3.Connection, cfg: Config, uid: str, body: dict, live: list
     return Plan(it.name, device=active, speech=speech)
 
 
+def _plan_for_app(conn, cfg, uid, it: Intent, state: dict, me: dict, named: dict | None, active: dict | None,
+                  dry: bool) -> Plan:
+    """The app's mic button. Plays on the named room, else on whatever this app is already controlling (the
+    active device), else on the phone itself. Anything aimed at the phone itself, and transport commands with
+    no room named (the app's player already routes those to whatever it controls), come back `local`."""
+    if it.name == "play":
+        target = named or active or me
+        if not target.get("online"):
+            return fail("play", f"{target['name']} is offline.", device=target)
+        p = play_content(conn, cfg, uid, it, (active and state.get("queueId")) or None, target, dry)
+        p.device = target
+        p.local = target["id"] == me["id"]
+        if p.ok:
+            p.speech = f"Playing {p.speech}" + ("." if p.local else f" on {target['name']}.")
+        return p
+    if named is not None and named["id"] != me["id"]:
+        # "pause in the kitchen": as for Home Assistant, through Connect.
+        if it.name == "resume" and named["id"] != state.get("activeDeviceId"):
+            if not state.get("queueId"):
+                return fail("resume", "There's nothing to resume.", device=named)
+            if not named.get("online"):
+                return fail("resume", f"{named['name']} is offline.", device=named)
+            return Plan("resume", device=named, transfer_play=True, speech=f"Resuming on {named['name']}.")
+        if active is None or named["id"] != active["id"]:
+            return fail(it.name, f"Nothing is playing on {named['name']}.")
+        if it.name == "volume":
+            cur = float(state.get("volume") if state.get("volume") is not None else 1.0)
+            v = round(max(0.0, min(1.0, it.volume if it.volume is not None else cur + (it.volume_step or 0))), 2)
+            return Plan("volume", device=active, volume=v, speech=f"Volume {round(v * 100)} percent.")
+        return Plan(it.name, device=active, speech=_CONTROL_SPEECH[it.name])
+    p = Plan(it.name, device=me, local=True, speech=_CONTROL_SPEECH.get(it.name, ""))
+    if it.name == "volume":
+        p.volume, p.volume_step = it.volume, it.volume_step
+        p.speech = f"Volume {round(it.volume * 100)} percent." if it.volume is not None else \
+            ("Louder." if (it.volume_step or 0) > 0 else "Quieter.")
+    return p
+
+
+_CONTROL_SPEECH = {"pause": "Paused.", "resume": "Resuming.", "next": "Skipping.", "previous": "Going back."}
+
 ACTION = {"pause": "pause", "resume": "play", "next": "next", "previous": "prev", "volume": "setVolume"}
 
 
 async def run(hub, p: Plan, uid: str, requester) -> Plan:
     """Execute a plan on the Hub (the Hub's loop). Hub errors turn the plan into a failure."""
-    if not p.ok or p.intent in ("now_playing", "unknown"):
+    if not p.ok or p.local or p.intent in ("now_playing", "unknown", "add_to_playlist"):
         return p
     d = p.device or {}
     errs: list[dict] = []

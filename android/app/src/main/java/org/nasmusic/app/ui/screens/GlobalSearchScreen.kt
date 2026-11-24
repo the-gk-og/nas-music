@@ -100,6 +100,7 @@ fun GlobalSearchScreen(c: AppContainer) {
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
             query, { query = it }, leadingIcon = { Icon(Icons.Default.Search, null) },
+            trailingIcon = { org.nasmusic.app.ui.VoiceCommandButton(c, onSearch = { query = it }) },
             placeholder = { Text("Songs, albums, artists — even ones you don't own") }, singleLine = true,
             shape = RoundedCornerShape(28.dp),
             modifier = Modifier.fillMaxWidth().padding(12.dp),
