@@ -20,3 +20,4 @@ android/.idea/
 models/
 deploy/.env
 deploy/relay/private/
+deploy/docker/.env
