@@ -11,7 +11,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-INTENTS = ("play", "pause", "resume", "next", "previous", "volume", "now_playing", "unknown")
+INTENTS = ("play", "pause", "resume", "next", "previous", "volume", "now_playing", "add_to_playlist", "unknown")
 KINDS = ("any", "playlist", "album", "artist", "song", "radio", "mix", "vibe", "moment")
 
 _NUM_WORDS = {
@@ -26,7 +26,7 @@ _NUM_WORDS = {
 @dataclass
 class Intent:
     name: str                                 # one of INTENTS
-    query: str = ""                           # play: what to play (without the device phrase)
+    query: str = ""                           # play: what to play (without the device phrase); add_to_playlist: the playlist
     kind: str = "any"                         # play: one of KINDS
     artist: str | None = None                 # play: "X by <artist>"
     device: str | None = None                 # an explicitly named device/room (set by the resolver or slots)
@@ -126,12 +126,22 @@ _PLAY = re.compile(r"^(?:play|put on|start|listen to|shuffle|queue up|i want to 
                    r"let me hear|throw on|spin)\b ?")
 
 
+_THIS = r"(?:this|that|it|this one|that one|this song|that song|this track|that track|the song|the track|" \
+        r"the current song|the current track|the song that's playing|what's playing|what is playing)"
+_PL_NAME = r"(?:my |the |our )?(?:playlist(?: called| named)? )?(.+?)(?: playlist)?$"
+_ADD = re.compile(rf"^(?:add|save|put|stick|throw) {_THIS} (?:to|in|into|on|onto) {_PL_NAME}"
+                  rf"|^(?:add|save) to {_PL_NAME}")
+
+
 def parse(text: str) -> Intent:
     t = _strip_polite(clean(text))
     if not t:
         return Intent("unknown", text=text)
     if _NOW_PLAYING.search(t):
         return Intent("now_playing", text=text)
+    m = _ADD.match(t)
+    if m:
+        return Intent("add_to_playlist", query=(m.group(1) or m.group(2)).strip(), kind="playlist", text=text)
     # A trailing device phrase for control intents: "pause the music in the kitchen", "skip on bedroom".
     for cand in device_splits(t) + [(t, None)]:
         body, dev = cand
@@ -222,7 +232,7 @@ SLOT_KINDS = {"playlist": "playlist", "album": "album", "artist": "artist", "son
 
 def from_slots(intent: str, slots: dict) -> Intent:
     """An Intent from Home Assistant's recognised intent + slots (no text parsing beyond the play query).
-    intent: NasPlay | NasPause | NasResume | NasNext | NasPrevious | NasVolume | NasNowPlaying, or the HA
+    intent: NasPlay | NasPause | NasResume | NasNext | NasPrevious | NasVolume | NasNowPlaying | NasAddToPlaylist, or the HA
     built-ins HassMediaPause / HassMediaUnpause / HassMediaNext / HassMediaPrevious / HassSetVolume."""
     key = re.sub(r"^(?:nas|nasmusic|hass(?:media)?)", "", (intent or "").lower().replace("_", ""))
     slots = {str(k).lower(): v for k, v in (slots or {}).items() if v not in (None, "")}
@@ -252,6 +262,9 @@ def from_slots(intent: str, slots: dict) -> Intent:
               "whatsplaying": "now_playing"}
     if key in simple:
         return Intent(simple[key], device=device)
+    if key in ("addtoplaylist", "addtracktoplaylist", "savetoplaylist"):
+        name = clean(str(slots.get("playlist") or slots.get("name") or slots.get("query") or ""))
+        return Intent("add_to_playlist", query=name, kind="playlist") if name else Intent("unknown")
     if key in ("volume", "setvolume", "volumeup", "volumedown"):
         it = Intent("volume", device=device)
         if key == "volumeup":

@@ -72,3 +72,14 @@ intent_script:
       - stop: done
         response_variable: r
     speech: *say
+  NasAddToPlaylist:
+    action:
+      - action: rest_command.nasmusic_voice
+        data:
+          intent: NasAddToPlaylist
+          slots: { playlist: "{{ playlist }}" }
+        response_variable: r
+        continue_on_error: true
+      - stop: done
+        response_variable: r
+    speech: *say
