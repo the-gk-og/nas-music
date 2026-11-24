@@ -31,3 +31,10 @@ export function formatLine(i: { codec?: string | null; bitsPerSample?: number | 
   if (i.channels && i.channels !== 2) parts.push(i.channels === 1 ? 'mono' : `${i.channels} ch`);
   return parts.join(' · ') || '[unknown]';
 }
+
+/** Browser tab title: "▶ Song · Artist" while playing, "Song · Artist" when paused, else the app name. */
+export function tabTitle(track: { title: string; artist?: string | null } | null | undefined, playing: boolean, app = 'nas-music'): string {
+  if (!track) return app;
+  const t = track.artist ? `${track.title} · ${track.artist}` : track.title;
+  return `${playing ? '▶ ' : ''}${t} — ${app}`;
+}

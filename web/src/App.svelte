@@ -38,9 +38,11 @@
   import PodcastDetail from './screens/spoken/PodcastDetail.svelte';
   import BookDetail from './screens/spoken/BookDetail.svelte';
   import RightPanel from './components/RightPanel.svelte';
+  import SelectionBar from './components/SelectionBar.svelte';
   import { appearance } from './lib/appearance.svelte';
   import { library } from './lib/library.svelte';
   import { tabletSidePane } from './lib/v3';
+  import { tabTitle } from './lib/format';
   import { family } from './lib/family.svelte';
   import { notifications } from './lib/notifications.svelte';
   import NewMusic from './screens/NewMusic.svelte';
@@ -86,6 +88,12 @@
   /** Tablet landscape: Now Playing (or the Queue, when Now Playing is the page) as a side pane. */
   const sidePane = $derived(form === 'tablet' && tabletSidePane(appearance.width, appearance.height));
   const fullNow = $derived(name === 'now');
+
+  // The playing song in the browser tab / taskbar title.
+  const docTitle = $derived(signedIn ? tabTitle(player.shown.track, player.shown.playing) : 'nas-music');
+  $effect(() => {
+    if (document.title !== docTitle) document.title = docTitle;
+  });
 
   // Session expired elsewhere (401) → back to the Connect screen.
   $effect(() => {
@@ -201,10 +209,16 @@
     {#if form === 'desktop'}<div class="playerbar"><PlayerBar /></div>{/if}
   </div>
   <Dialogs />
+  <SelectionBar />
 {/if}
 
 <div class="toasts" aria-live="polite">
-  {#each ui.toasts as t (t.id)}<div class="toast">{t.text}</div>{/each}
+  {#each ui.toasts as t (t.id)}
+    <div class="toast" class:act={!!t.action}>
+      <span>{t.text}</span>
+      {#if t.action}<button class="toast-btn" onclick={() => ui.runToast(t)}>{t.action.label}</button>{/if}
+    </div>
+  {/each}
 </div>
 
 <style>
@@ -350,6 +364,26 @@
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
     text-align: center;
     animation: up 0.15s ease-out;
+  }
+  .toast.act {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 6px 8px 6px 22px;
+  }
+  .toast-btn {
+    background: none;
+    border: 0;
+    color: var(--accent-dim);
+    font: inherit;
+    font-weight: 700;
+    padding: 8px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .toast-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
   }
   @keyframes up {
     from {
