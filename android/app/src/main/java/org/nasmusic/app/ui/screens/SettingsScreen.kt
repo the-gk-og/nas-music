@@ -207,6 +207,13 @@ fun SettingsScreen(c: AppContainer) {
         PlaybackSettings(c)
 
         HorizontalDivider()
+        Section("Wake-up alarm")
+        val wake by c.alarm.alarm.collectAsStateWithLifecycle()
+        OutlinedButton(onClick = { ui.go(org.nasmusic.app.alarm.AlarmScheduler.ROUTE) }) {
+            Text(if (wake.enabled) "%02d:%02d · %s".format(wake.hour, wake.minute, wake.source.label) else "Set a wake-up alarm")
+        }
+
+        HorizontalDivider()
         Section("Appearance")
         AppearanceSettings(c, settings)
 
