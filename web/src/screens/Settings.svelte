@@ -14,11 +14,25 @@
   import { session } from '../lib/session.svelte';
   import { ui } from '../lib/ui.svelte';
   import VoiceSettings from '../components/VoiceSettings.svelte';
+  import { getAutostart, setAutostart } from '../lib/desktop';
   import { djVoice } from '../lib/djvoice.svelte';
 
   import type { DataSummary } from '../lib/types';
 
   let deviceName = $state(session.saved.deviceName);
+  /** Desktop app: start with the computer, minimised to the tray (null in a browser). */
+  let autostart = $state<boolean | null>(null);
+  $effect(() => {
+    void getAutostart().then((v) => (autostart = v));
+  });
+  async function toggleAutostart(el: HTMLInputElement) {
+    try {
+      autostart = await setAutostart(el.checked);
+    } catch (e) {
+      ui.toast((e as Error).message);
+    }
+    el.checked = !!autostart;
+  }
   let summary = $state<DataSummary | null>(null);
   const day = (s?: string | null) => (s ? new Date(s).toLocaleDateString() : '—');
   $effect(() => {
@@ -143,6 +157,16 @@
       <input type="checkbox" class="switch" checked={appearance.localOnly} onchange={(e) => appearance.setLocalOnly(e.currentTarget.checked)} />
     </label>
   </div>
+
+  {#if autostart !== null}
+    <div class="section-title">Desktop app</div>
+    <div class="pad form">
+      <label class="sig inline">
+        <div><div>Start with the computer</div><div class="muted small">Opens minimised to the tray when you log in, ready for media keys.</div></div>
+        <input type="checkbox" class="switch" checked={autostart} onchange={(e) => toggleAutostart(e.currentTarget)} />
+      </label>
+    </div>
+  {/if}
 
   <div class="section-title">Streaming quality</div>
   <div class="pad form">
