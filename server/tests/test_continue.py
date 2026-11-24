@@ -1,5 +1,6 @@
 """v8: resume where you left off, podcasts in Connect, and Continue listening."""
 import asyncio
+import time
 
 import httpx
 import pytest
@@ -104,7 +105,12 @@ def test_play_spoken_and_media_state(sapp, sconn, alice, up):  # noqa: F811
         while got["positionMs"] != 125_000:
             got = until(watch, "state")["state"]
         assert got["media"] == {"kind": "episode", "id": eid}
+        # The hub broadcasts the state first and saves it afterwards in a worker thread: wait for the save.
+        deadline = time.monotonic() + 5
         pr = alice.get(f"{API}/podcasts/episodes/{eid}").json()["progress"]
+        while pr["positionS"] != 125.0 and time.monotonic() < deadline:
+            time.sleep(0.05)
+            pr = alice.get(f"{API}/podcasts/episodes/{eid}").json()["progress"]
         assert pr["positionS"] == 125.0
         # An old client that reports a track (no `media` field) is playing music again.
         phone.send_json({"type": "state", "state": {"queueId": None, "trackId": "t", "positionMs": 0}})
