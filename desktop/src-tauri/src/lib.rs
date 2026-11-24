@@ -1,6 +1,7 @@
 //! nas-music desktop: a Tauri v2 shell around the web player (`../web/dist`).
 //! Extras over the browser: tray icon (play/pause, next, previous, show, quit), global media keys,
-//! a native notification on track change, single instance, and the window size/position remembered.
+//! a native notification on track change, single instance, the window size/position remembered, and
+//! optional "start with the computer", which launches straight into the tray (`--minimized`).
 //! The web app listens for `nm-control` events and calls `track_changed`.
 
 use tauri::{
@@ -8,10 +9,13 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, WindowEvent,
 };
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
 const TRAY_ID: &str = "main-tray";
+/// Passed by the login item, so a start with the computer stays in the tray.
+const MINIMIZED_ARG: &str = "--minimized";
 
 fn control(app: &AppHandle, action: &str) {
     let _ = app.emit("nm-control", action);
@@ -46,11 +50,33 @@ fn track_changed(app: AppHandle, title: String, artist: String, album: String) {
     }
 }
 
+/// Settings → "Start with the computer": whether the login item is registered.
+#[tauri::command]
+fn autostart_get(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn autostart_set(app: AppHandle, on: bool) -> Result<bool, String> {
+    let a = app.autolaunch();
+    let r = if on { a.enable() } else { a.disable() };
+    r.map_err(|e| e.to_string())?;
+    a.is_enabled().map_err(|e| e.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         // Must be first: a second launch focuses the running window instead.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Not VISIBLE: the window starts hidden (tauri.conf.json) and setup() decides whether to show it.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all() - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![MINIMIZED_ARG])))
         .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -69,8 +95,13 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![track_changed])
+        .invoke_handler(tauri::generate_handler![track_changed, autostart_get, autostart_set])
         .setup(|app| {
+            // Started with the computer: stay in the tray until the user opens the window.
+            if !std::env::args().any(|a| a == MINIMIZED_ARG) {
+                show_main(app.handle());
+            }
+
             // Global media keys. Registration can fail (e.g. another player owns them, or Wayland);
             // the web player's Media Session still handles keys while it has focus.
             for code in [Code::MediaPlayPause, Code::MediaTrackNext, Code::MediaTrackPrevious, Code::MediaStop] {

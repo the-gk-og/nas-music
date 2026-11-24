@@ -24,3 +24,15 @@ export async function desktopInit() {
     void invoke('track_changed', { title: t.title, artist: t.artist, album: t.album }).catch(() => {});
   };
 }
+
+/** Desktop app only: is "start with the computer (minimised to the tray)" on? null = not the desktop app. */
+export async function getAutostart(): Promise<boolean | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<boolean>('autostart_get').catch(() => null);
+}
+
+export async function setAutostart(on: boolean): Promise<boolean> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<boolean>('autostart_set', { on });
+}
