@@ -49,6 +49,23 @@ def test_search(client):
     assert client.get("/api/v1/library/search", params={"q": "100%"}).json()["tracks"] == []
 
 
+def test_search_tolerates_typos_and_accents(client, conn):
+    conn.execute("UPDATE tracks SET title = 'Clôsing' WHERE title = 'Closing'")
+    conn.commit()
+    # Misspelt words fall back to close spellings from the library ("Openign" -> "Opening").
+    r = client.get("/api/v1/library/search", params={"q": "openign"}).json()
+    assert [t["title"] for t in r["tracks"]] == ["Opening"]
+    r = client.get("/api/v1/library/search", params={"q": "teh bnad"}).json()
+    assert [a["name"] for a in r["artists"]] == ["The Band"]
+    # Accents: an accent-less query finds the accented title.
+    r = client.get("/api/v1/library/search", params={"q": "closing"}).json()
+    assert [t["title"] for t in r["tracks"]] == ["Clôsing"]
+    # Nonsense still finds nothing, and the global search gets the same tolerance.
+    assert client.get("/api/v1/library/search", params={"q": "zzzzqqq"}).json()["tracks"] == []
+    g = client.get("/api/v1/search", params={"q": "openign", "scope": "library"}).json()
+    assert [t["title"] for t in g["tracks"]] == ["Opening"]
+
+
 # ---------- events ----------
 
 

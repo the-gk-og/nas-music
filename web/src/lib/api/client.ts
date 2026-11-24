@@ -1,4 +1,5 @@
 import type {
+  AlbumCompleteness,
   AutoEqEntry,
   AutomixTransition,
   TrackMixDetail,
@@ -434,6 +435,10 @@ export class ApiClient {
   albums = (sort: 'name' | 'year' | 'added' = 'name', offset = 0, limit = 1000, artistId?: string) =>
     this.get<Album[]>('/library/albums', { sort, offset, limit, artistId });
   album = (id: string) => this.get<Album & { tracks: Track[] }>(`/library/albums/${encodeURIComponent(id)}`);
+  albumCompleteness = (id: string) => this.get<AlbumCompleteness>(`/library/albums/${encodeURIComponent(id)}/completeness`);
+  /** Put the album's missing tracks (all, or those recordings) on my To-get list. */
+  addMissingToGet = (id: string, recordingMbids?: string[]) =>
+    this.post<AlbumCompleteness>(`/library/albums/${encodeURIComponent(id)}/completeness/toget`, { recordingMbids: recordingMbids ?? null });
   track = (id: string) => this.get<Track>(`/library/tracks/${encodeURIComponent(id)}`);
   trackInfo = (id: string) => this.get<TrackInfo>(`/library/tracks/${encodeURIComponent(id)}/info`);
   allTracks = (sort: 'title' | 'added' | 'year' = 'title', offset = 0, limit = 1000) =>

@@ -116,7 +116,7 @@
   });
 
   async function folderMenu(f: PlaylistFolder) {
-    const act = await ui.choose(f.name, [
+    const act = await ui.pick(f.name, [
       { value: 'open', label: 'Open' },
       { value: 'sub', label: 'New folder inside' },
       { value: 'rename', label: 'Rename' },

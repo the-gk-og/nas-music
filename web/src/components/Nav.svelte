@@ -45,7 +45,7 @@
   function folderMenu(e: MouseEvent, f: PlaylistFolder) {
     e.preventDefault();
     void (async () => {
-      const act = await ui.choose(f.name, [
+      const act = await ui.pick(f.name, [
         { value: 'playlist', label: 'New playlist here' },
         { value: 'sub', label: 'New folder inside' },
         { value: 'rename', label: 'Rename' },

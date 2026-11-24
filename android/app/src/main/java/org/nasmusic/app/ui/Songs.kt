@@ -1,6 +1,7 @@
 package org.nasmusic.app.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -50,21 +52,37 @@ fun SongRow(
     modifier: Modifier = Modifier,
     /** What the "…" menu opens for (e.g. with a queue position, which adds "Remove from queue"). */
     menuTarget: SongMenuTarget? = null,
+    /** Long-press starts multi-select (off for queue rows, which have their own drag and swipe). */
+    selectable: Boolean = menuTarget?.queueIndex == null,
 ) {
     val ui = LocalUi.current
     var quick by remember { mutableStateOf(false) }
+    val selecting = selectable && ui.selection.isNotEmpty()
+    val selected = selecting && ui.selection.any { it.id == track.id }
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
     val base = if (highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
     // Family mode: tracks the server flags in a queue/playlist are dimmed (the player skips them).
     val color = if (track.familyHidden) base.copy(alpha = 0.4f) else base
-    Box(modifier) {
+    Box(modifier.then(if (selected) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)) else Modifier)) {
         Row(
-            Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { quick = true })
+            Modifier.fillMaxWidth().combinedClickable(
+                onClick = { if (selecting) ui.toggleSelected(track) else onClick() },
+                onLongClick = {
+                    if (selectable) { haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); ui.toggleSelected(track) }
+                    else quick = true
+                },
+            )
                 .padding(start = if (leading == null) 12.dp else 0.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             leading?.invoke()
-            AlbumArt(track.albumId, 52.dp)
+            Box(contentAlignment = Alignment.Center) {
+                AlbumArt(track.albumId, 52.dp)
+                if (selected) Box(Modifier.size(52.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.75f), androidx.compose.foundation.shape.RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Check, "Selected", tint = MaterialTheme.colorScheme.onPrimary)
+                }
+            }
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ExplicitBadge(track.explicit)

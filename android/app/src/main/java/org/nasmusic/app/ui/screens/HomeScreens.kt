@@ -117,6 +117,7 @@ private fun greeting(): String = when (LocalTime.now().hour) {
 
 // ---------- Home (docs/v3-ux.md §3.1) ----------
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(c: AppContainer) {
     val ui = LocalUi.current
@@ -132,14 +133,18 @@ fun HomeScreen(c: AppContainer) {
     val route by c.router.route.collectAsStateWithLifecycle()
     val offline = route == org.nasmusic.app.net.Route.OFFLINE
     // Reload when the connection comes back; while offline, don't even try (no error state, just downloads).
+    var refreshing by remember { mutableStateOf(false) }
     LaunchedEffect(reload, offline) {
-        if (offline) return@LaunchedEffect
+        if (offline) { refreshing = false; return@LaunchedEffect }
         failed = false
         feed = runCatching { c.feeds.home() }.onFailure { failed = true }.getOrNull()
+        refreshing = false
     }
     // Start radio and devices are drawn locally (devices are live over Connect); the rest by kind.
     val byKind = feed?.shelves.orEmpty().filter { it.kind != "start_radio" && it.kind != "devices" }.associateBy { it.kind }
 
+    // Pull down to refresh the shelves.
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(refreshing, { refreshing = true; reload++ }, Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize()) {
         item { TopBar(c, "${greeting()}${cfg?.username?.let { ", $it" } ?: ""}") }
         if (offline || (failed && feed == null)) offlineHomeItems(c)
@@ -177,6 +182,7 @@ fun HomeScreen(c: AppContainer) {
             .forEachIndexed { i, s -> item(key = "x:$i:${s.id}") { HomeShelf(c, s) { reload++ } } }
         if (feed == null && !failed && !offline) item { Box(Modifier.height(200.dp)) { Loading() } }
         item { Spacer(Modifier.height(24.dp)) }
+    }
     }
 }
 

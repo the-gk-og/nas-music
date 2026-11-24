@@ -438,6 +438,19 @@ export class MockBackend {
       else out.sort((a, b) => a.title.localeCompare(b.title));
       return out;
     }
+    if ((r = m(/^\/library\/albums\/([^/]+)\/completeness(\/toget)?$/))) {
+      // Demo: every album is missing its "track 3" bonus, which can go on To-get.
+      const a = L.albums.find((x) => x.id === r![1]);
+      if (!a) throw new HttpError(404, 'not found');
+      const have = L.tracks.filter((t) => t.albumId === a.id).length;
+      const title = `${a.title} (Demo Mix)`;
+      if (r[2]) this.route('POST', '/toget', qs, { type: 'track', title, artist: a.artist, note: `Missing from ${a.title}` }, token);
+      const tg = this.toget.find((x) => x.type === 'track' && x.title === title && x.artist === a.artist);
+      return {
+        albumId: a.id, status: 'incomplete', have, total: have + 1, releaseTitle: a.title, discCount: 1,
+        missing: [{ disc: 1, position: have + 1, title, durationS: 214, recordingMbid: `rec-${a.id}`, toget: tg ? { id: tg.id, status: tg.status } : null }],
+      };
+    }
     if ((r = m(/^\/library\/albums\/([^/]+)$/))) {
       const a = L.albums.find((x) => x.id === r![1]);
       if (!a) throw new HttpError(404, 'not found');
@@ -988,6 +1001,18 @@ export class MockBackend {
         return b;
       }
       return A.backups;
+    }
+    if (path === '/admin/backups/offsite') return A.offsite;
+    if ((r = m(/^\/admin\/backups\/([^/]+)\/offsite$/)) && method === 'POST') {
+      const name = r[1] + '.db.gz';
+      A.offsite.items.unshift({ name, kind: 'manual', bytes: 16e6, createdAt: iso() });
+      A.offsite.last = { at: iso(), ok: true, error: null, name };
+      return { name, destination: A.offsite.destination, configCopied: true, pruned: 0 };
+    }
+    if ((r = m(/^\/admin\/backups\/([^/]+)\/restore$/)) && method === 'POST') {
+      const safety = { id: 'b' + Date.now(), createdAt: iso(), bytes: 49e6, kind: 'prerestore' };
+      A.backups.unshift(safety);
+      return { restored: r[1], source: body.source ?? 'local', schemaFrom: 8, schemaTo: 8, safetyBackup: safety.id };
     }
     if ((r = m(/^\/admin\/backups\/([^/]+)$/)) && method === 'DELETE') {
       A.backups = A.backups.filter((b) => b.id !== r![1]);

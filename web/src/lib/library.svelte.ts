@@ -101,7 +101,7 @@ class LibraryStore {
 
   /** Move a folder into another one (or to the top level), picked from a list. */
   async moveFolderTo(f: PlaylistFolder) {
-    const choice = await ui.choose(`Move "${f.name}" to`, folderChoices(this.folders, f.id).map((c) => ({ ...c, current: c.value === (f.parentId ?? '') })));
+    const choice = await ui.pick(`Move "${f.name}" to`, folderChoices(this.folders, f.id).map((c) => ({ ...c, current: c.value === (f.parentId ?? '') })));
     if (choice === null || choice === (f.parentId ?? '')) return;
     await this.moveFolder(f.id, choice || null);
   }
@@ -124,7 +124,7 @@ class LibraryStore {
         if (!f) return;
         folderId = f.id;
       } else {
-        const choice = await ui.choose(`Move "${p.name}" to`, folderChoices(this.folders).map((c) => ({ ...c, current: c.value === (p.folderId ?? '') })));
+        const choice = await ui.pick(`Move "${p.name}" to`, folderChoices(this.folders).map((c) => ({ ...c, current: c.value === (p.folderId ?? '') })));
         if (choice === null) return;
         folderId = choice || null;
       }

@@ -88,7 +88,8 @@ export type Dialog =
   | { kind: 'catalog'; item: import('./types').CatalogItem }
   | { kind: 'prompt'; title: string; label: string; value: string; ok: string; resolve: (v: string | null) => void }
   | { kind: 'confirm'; title: string; message: string; ok: string; resolve: (v: boolean) => void }
-  | { kind: 'choose'; title: string; options: ChooseOption[]; resolve: (v: string | null) => void };
+  | { kind: 'pick'; title: string; options: ChooseOption[]; resolve: (v: string | null) => void }
+  | { kind: 'choose'; title: string; message: string; options: string[]; resolve: (v: number | null) => void };
 
 export interface ChooseOption {
   value: string;
@@ -98,10 +99,21 @@ export interface ChooseOption {
   current?: boolean;
 }
 
+export interface ToastAction {
+  label: string;
+  run: () => unknown;
+}
+
+export interface Toast {
+  id: number;
+  text: string;
+  action?: ToastAction;
+}
+
 class UiStore {
   route = $state<Route>(parseHash(typeof location !== 'undefined' ? location.hash : ''));
   dialog = $state<Dialog | null>(null);
-  toasts = $state<{ id: number; text: string }[]>([]);
+  toasts = $state<Toast[]>([]);
   /** Now Playing shows lyrics instead of the cover. */
   lyricsOpen = $state(false);
   lyricsSize = $state(1);
@@ -160,12 +172,12 @@ class UiStore {
     this.dialog = null;
     if (d?.kind === 'prompt') d.resolve(null);
     if (d?.kind === 'confirm') d.resolve(false);
-    if (d?.kind === 'choose') d.resolve(null);
+    if (d?.kind === 'choose' || d?.kind === 'pick') d.resolve(null);
   }
 
-  /** Pick one of `options`; null = cancelled. */
-  choose(title: string, options: ChooseOption[]): Promise<string | null> {
-    return new Promise((resolve) => (this.dialog = { kind: 'choose', title, options, resolve }));
+  /** Pick one of `options` from a list; null = cancelled. */
+  pick(title: string, options: ChooseOption[]): Promise<string | null> {
+    return new Promise((resolve) => (this.dialog = { kind: 'pick', title, options, resolve }));
   }
 
   prompt(title: string, label: string, value = '', ok = 'OK'): Promise<string | null> {
@@ -176,10 +188,32 @@ class UiStore {
     return new Promise((resolve) => (this.dialog = { kind: 'confirm', title, message, ok, resolve }));
   }
 
-  toast(text: string) {
+  /** A short message; with `action` it gets a button (e.g. Undo) and stays a little longer. */
+  /** Pick one of several buttons; null = cancelled. */
+  choose(title: string, message: string, options: string[]): Promise<number | null> {
+    return new Promise((resolve) => (this.dialog = { kind: 'choose', title, message, options, resolve }));
+  }
+
+  toast(text: string, action?: ToastAction) {
     const id = ++this.toastId;
-    this.toasts = [...this.toasts.slice(-2), { id, text }];
-    setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), 3200);
+    this.toasts = [...this.toasts.slice(-2), { id, text, action }];
+    setTimeout(() => this.dismissToast(id), action ? 6000 : 3200);
+  }
+
+  /** "Removed …" with an Undo button. */
+  undoable(text: string, undo: () => unknown) {
+    this.toast(text, { label: 'Undo', run: undo });
+  }
+
+  dismissToast(id: number) {
+    this.toasts = this.toasts.filter((t) => t.id !== id);
+  }
+
+  runToast(t: Toast) {
+    this.dismissToast(t.id);
+    void Promise.resolve()
+      .then(() => t.action?.run())
+      .catch((e) => this.toast((e as Error).message));
   }
 }
 

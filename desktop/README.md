@@ -10,6 +10,18 @@ Desktop extras (all in `src-tauri/src/lib.rs`):
 - global media keys (Play/Pause, Next, Previous, Stop) via `tauri-plugin-global-shortcut`
 - a native notification on track change while the window isn't focused
 - single instance (a second launch focuses the running window), window size/position remembered
+- optional Discord "Listening to" status (`src-tauri/src/discord.rs`, off by default; see below)
+- the web player's Now Playing visualiser works here too (bars button in full-screen Now Playing)
+
+## Discord status
+Settings → Desktop app → "Show what I'm playing in Discord". It talks only to the Discord app on the same
+computer, over Discord's local IPC socket (crate `discord-rich-presence`, MIT); nothing is sent while
+paused, while another device is playing, or when the setting is off. Discord needs an application ID:
+create an application at https://discord.com/developers/applications (its name is what profiles show),
+paste the Application ID into the setting, and optionally upload an image named `logo` under Rich
+Presence → Art Assets. Application IDs aren't secret, so a shared one could be built in later. If Discord
+isn't running, the app retries every 15 s. Works with the Discord desktop client on Linux (incl. Flatpak
+paths the crate knows), Windows and macOS.
 
 ## Build
 

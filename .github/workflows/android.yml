@@ -3,7 +3,7 @@ name: android
 # Two flavours (CLAUDE.md): `foss` (no Google code; casting via the server) and `full` (adds the Google
 # Cast SDK). Every run checks that the foss APK contains no Google Play Services classes, and that the check
 # does find them in the full APK (so it can't silently stop working).
-# Pull requests: build both debug APKs + unit tests.
+# Pull requests: build both debug APKs and the watch app + unit tests.
 # Pushes to main that touch the app: both APKs signed with the permanent release key (GitHub secrets),
 # version 0.1.<run number>, published as one GitHub Release:
 #   nasmusic-foss-v0.1.N.apk, nasmusic-full-v0.1.N.apk
@@ -44,13 +44,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Unit tests
-        run: ./gradlew testFossDebugUnitTest testFullDebugUnitTest
+        run: ./gradlew testFossDebugUnitTest testFullDebugUnitTest :wear:testDebugUnitTest
 
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: android-test-reports
-          path: android/app/build/reports/tests/
+          path: |
+            android/app/build/reports/tests/
+            android/wear/build/reports/tests/
 
       - name: Decode signing key
         if: github.event_name != 'pull_request'
@@ -74,7 +76,7 @@ jobs:
       - name: Build debug APKs (pull requests)
         if: github.event_name == 'pull_request'
         run: |
-          ./gradlew assembleFossDebug assembleFullDebug
+          ./gradlew assembleFossDebug assembleFullDebug :wear:assembleDebug
           mv app/build/outputs/apk/foss/debug/app-foss-debug.apk "nasmusic-foss-v0.1.${VERSION_CODE}.apk"
           mv app/build/outputs/apk/full/debug/app-full-debug.apk "nasmusic-full-v0.1.${VERSION_CODE}.apk"
 

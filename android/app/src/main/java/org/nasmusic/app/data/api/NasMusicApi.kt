@@ -66,6 +66,14 @@ interface NasMusicApi {
     @GET("library/albums/{id}")
     suspend fun album(@Path("id") id: String): AlbumDetail
 
+    /** "9 of 12" from MusicBrainz; 409 when turned off on the server, 503 when MusicBrainz can't be reached. */
+    @GET("library/albums/{id}/completeness")
+    suspend fun albumCompleteness(@Path("id") id: String): AlbumCompleteness
+
+    /** Put the album's missing tracks (all, or just those recordings) on my To-get list. */
+    @POST("library/albums/{id}/completeness/toget")
+    suspend fun addMissingToGet(@Path("id") id: String, @Body body: MissingToGetBody): AlbumCompleteness
+
     @GET("library/tracks/{id}")
     suspend fun track(@Path("id") id: String): Track
 
@@ -163,6 +171,10 @@ interface NasMusicApi {
 
     @PUT("me/voice/devices/{id}")
     suspend fun putVoiceDevice(@Path("id") id: String, @Body body: VoiceDevicePrefs): VoiceDevicePrefs
+
+    // 0.9.1: the app's own mic button (text recognised on the phone; a device token, not a voice token).
+    @POST("me/voice/command")
+    suspend fun voiceCommand(@Body body: AppVoiceCommand): VoiceResult
 
     @PUT("me/settings")
     suspend fun putMySettings(@Body body: UserSettings): Response<Unit>

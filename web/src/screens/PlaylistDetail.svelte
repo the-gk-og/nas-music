@@ -9,6 +9,7 @@
   import type { Playlist } from '../lib/types';
   import { library } from '../lib/library.svelte';
   import { ui } from '../lib/ui.svelte';
+  import { selection } from '../lib/selection.svelte';
 
   let { id }: { id: string } = $props();
   let pl = $state<Playlist | null>(null);
@@ -66,19 +67,28 @@
   }
   // Entry-based edits (v5) keep their meaning if others changed the list meanwhile; index-based fallback
   // for servers without entries. A 409 means our view was stale: just reload.
-  async function run(p: Promise<Playlist | void>) {
+  async function run(p: Promise<Playlist | void>): Promise<boolean> {
     try {
       const r = await p;
       if (r && 'id' in r) pl = r;
       else load();
+      return true;
     } catch (e) {
       ui.toast((e as Error).message);
       load();
+      return false;
     }
   }
   function removeAt(i: number) {
     const e = entries[i];
-    void run(e ? session.api.removePlaylistEntry(id, e.id) : session.api.removeFromPlaylist(id, i));
+    const t = tracks[i];
+    const after = i > 0 ? entries[i - 1]?.id : '';
+    void run(e ? session.api.removePlaylistEntry(id, e.id) : session.api.removeFromPlaylist(id, i)).then((ok) => {
+      if (!ok || !t) return;
+      ui.undoable(`Removed "${t.title}"`, () =>
+        run(e && after != null ? session.api.addToPlaylistAfter(id, [t.id], after) : session.api.addToPlaylist(id, [t.id], i)),
+      );
+    });
   }
   function move(i: number, d: number) {
     const to = i + d;
@@ -125,6 +135,9 @@
             current={t.id === currentId}
             onplay={() => player.playList(tracks, i, `Playlist: ${pl!.name}`, { source: 'library', addedFrom: 'playlist' })}
             onmenu={() => ui.open({ kind: 'songMenu', ctx: { track: t, list: tracks } })}
+            selected={selection.active && selection.has(t.id)}
+            selecting={selection.active}
+            onselect={(range) => selection.pick(tracks, i, range)}
           />
         </div>
         {#if pl.collaborative && entries[i]?.addedBy}<span class="by muted small" title="Added {new Date(entries[i].addedAt).toLocaleString()}">{entries[i].addedBy}</span>{/if}

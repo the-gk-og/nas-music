@@ -53,6 +53,7 @@
   import { isPlayable, openItem, playItem, radioFor } from '../lib/items';
   import { isPinType, library } from '../lib/library.svelte';
   import { samples } from '../lib/samples.svelte';
+  import { splitDuplicates } from '../lib/tracksel';
 
   const d = $derived(ui.dialog);
 
@@ -117,9 +118,20 @@
 
   async function addTo(p: Playlist) {
     if (d?.kind !== 'addToPlaylist') return;
+    let add = d.tracks;
+    // Warn before adding songs the playlist already has.
+    const have = await session.api.playlist(p.id).then((x) => new Set((x.tracks ?? []).map((t) => t.id))).catch(() => null);
+    const split = have ? splitDuplicates(add, have) : null;
+    if (split?.dup.length) {
+      const some = split.fresh.length > 0;
+      const msg = add.length === 1 ? `"${add[0].title}" is already in "${p.name}".` : `${split.dup.length} of ${add.length} songs are already in "${p.name}".`;
+      const c = await ui.choose('Already in this playlist', msg, some ? ['Add all anyway', 'Skip them'] : ['Add anyway']);
+      if (c == null) return;
+      if (some && c === 1) add = split.fresh;
+    }
     try {
-      await session.api.addToPlaylist(p.id, d.tracks.map((t) => t.id));
-      ui.toast(`Added to "${p.name}"`);
+      await session.api.addToPlaylist(p.id, add.map((t) => t.id));
+      ui.toast(add.length === 1 ? `Added to "${p.name}"` : `Added ${add.length} songs to "${p.name}"`);
       ui.close();
     } catch (e) {
       ui.toast((e as Error).message);
@@ -409,7 +421,7 @@
   </Sheet>
 {:else if d?.kind === 'vibe'}
   <VibeSheet />
-{:else if d?.kind === 'choose'}
+{:else if d?.kind === 'pick'}
   <Sheet label={d.title}>
     <div class="pad">
       <h2>{d.title}</h2>
@@ -430,6 +442,19 @@
     <div class="foot">
       <button class="btn text" onclick={() => ui.close()}>Cancel</button>
       <button class="btn text" onclick={() => { const r = d.resolve; ui.dialog = null; r(true); }}>{d.ok}</button>
+    </div>
+  </Sheet>
+{:else if d?.kind === 'choose'}
+  <Sheet label={d.title}>
+    <div class="pad">
+      <h2>{d.title}</h2>
+      <p>{d.message}</p>
+    </div>
+    <div class="foot">
+      <button class="btn text" onclick={() => ui.close()}>Cancel</button>
+      <span class="choices">
+        {#each d.options as o, i (o)}<button class="btn text" onclick={() => { const r = d.resolve; ui.dialog = null; r(i); }}>{o}</button>{/each}
+      </span>
     </div>
   </Sheet>
 {/if}

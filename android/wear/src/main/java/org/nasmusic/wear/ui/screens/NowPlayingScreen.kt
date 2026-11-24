@@ -1,5 +1,6 @@
 package org.nasmusic.wear.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +47,9 @@ import androidx.wear.compose.material.TimeText
 import kotlinx.coroutines.delay
 import org.nasmusic.wear.WearContainer
 import org.nasmusic.wear.nowplaying.rememberLyricLine
+import org.nasmusic.wear.sleep.SleepStatus
+import org.nasmusic.wear.sleep.label
+import org.nasmusic.wear.sleep.rememberSleepControls
 import org.nasmusic.wear.ui.Art
 
 /**
@@ -57,6 +61,8 @@ import org.nasmusic.wear.ui.Art
 fun NowPlayingScreen(c: WearContainer, openQueue: () -> Unit, openDevices: () -> Unit) {
     val ui by c.player.ui.collectAsState()
     val connected by c.connect.connected.collectAsState()
+    val sleep by c.sleep.status.collectAsState()
+    val sleepControls = rememberSleepControls(c)
     val lyricLine = rememberLyricLine(c.api, ui.track?.id, ui.positionMs)
     LaunchedEffect(Unit) {
         c.player.connectLocal()
@@ -146,6 +152,17 @@ fun NowPlayingScreen(c: WearContainer, openQueue: () -> Unit, openDevices: () ->
                     color = MaterialTheme.colors.onSurfaceVariant,
                     modifier = Modifier.alpha(0.8f),
                 )
+                // Sleep detection is watching (or just paused): tap to stop it.
+                val sleepLabel = sleep.label()
+                if (sleepLabel != null && sleep !is SleepStatus.Paused) {
+                    Text(
+                        "☾ $sleepLabel",
+                        style = MaterialTheme.typography.caption3,
+                        color = MaterialTheme.colors.secondary,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                        modifier = Modifier.clickable { sleepControls.stop() },
+                    )
+                }
             }
         }
     }

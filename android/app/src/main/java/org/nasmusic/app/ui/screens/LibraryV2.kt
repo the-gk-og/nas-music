@@ -352,7 +352,12 @@ fun PlaylistScreen(c: AppContainer, id: String) {
                 Column {
                     SongRow(c, t, onClick = { c.player.play(pl.tracks, i, PlaySource.LIBRARY, "Playlist: ${pl.name}") }, leading = if (canEdit) ({
                         IconButton(onClick = {
+                            val after = if (i > 0) pl.entries.getOrNull(i - 1)?.id else ""
                             edit { if (entry != null) c.api.removePlaylistEntry(id, entry.id) else { c.api.removeFromPlaylist(id, i); null } }
+                            ui.undo = org.nasmusic.app.ui.UndoRequest("Removed \"${t.title}\"") {
+                                if (entry != null && after != null) { p = c.api.addToPlaylistAfter(id, org.nasmusic.app.data.api.AddEntriesBody(listOf(t.id), after)) }
+                                else { c.api.addToPlaylist(id, org.nasmusic.app.data.api.TrackIdsBody(listOf(t.id), kotlinx.serialization.json.JsonPrimitive(i))); reload() }
+                            }
                         }) {
                             Icon(Icons.Default.Close, "Remove from playlist", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }

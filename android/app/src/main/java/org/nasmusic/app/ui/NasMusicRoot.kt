@@ -1,5 +1,6 @@
 package org.nasmusic.app.ui
 
+import kotlinx.coroutines.launch
 import android.content.res.Configuration
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -155,6 +156,7 @@ fun NasMusicRoot(c: AppContainer) {
 private fun MainScaffold(c: AppContainer) {
     val nav = rememberNavController()
     val ui = remember(nav) { UiController(nav) }
+    val ctx = LocalContext.current
     val entry by nav.currentBackStackEntryAsState()
     val current = entry?.destination?.route
     val snack = remember { SnackbarHostState() }
@@ -162,6 +164,12 @@ private fun MainScaffold(c: AppContainer) {
     LaunchedEffect(Unit) { c.ui.messages.collect { ui.toast = it } }
     // Widgets and quick-settings tiles open Now Playing or a pinned/recent item.
     val launchScope = androidx.compose.runtime.rememberCoroutineScope()
+    LaunchedEffect(ui.undo) {
+        val u = ui.undo ?: return@LaunchedEffect
+        val r = snack.showSnackbar(u.text, actionLabel = "Undo", withDismissAction = true, duration = androidx.compose.material3.SnackbarDuration.Long)
+        if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) launchScope.launch { runCatching { u.undo() }.onFailure { ui.toast = "Couldn't undo" } }
+        if (ui.undo === u) ui.undo = null
+    }
     LaunchedEffect(Unit) {
         LaunchRequests.pending.collect { r ->
             if (r == null) return@collect
@@ -169,6 +177,7 @@ private fun MainScaffold(c: AppContainer) {
             when (r) {
                 is LaunchRequests.Request.Route -> ui.go(r.route)
                 is LaunchRequests.Request.Item -> openShelfItem(c, ui, launchScope, r.item)
+                is LaunchRequests.Request.Action -> launchScope.launch { runShortcut(c, ui, ctx, r.action) }
             }
         }
     }
@@ -345,5 +354,26 @@ fun MiniPlayer(c: AppContainer) {
             IconButton(onClick = c.player::next) { Icon(Icons.Default.SkipNext, "Next") }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+
+/** App-icon shortcuts that play: shuffle favourites, or a mix for this moment. */
+private suspend fun runShortcut(c: AppContainer, ui: UiController, ctx: android.content.Context, action: String) {
+    AppShortcuts.reportUsed(ctx, action)
+    when (action) {
+        LaunchRequests.ACTION_SHUFFLE_FAVOURITES -> {
+            val tracks = runCatching { c.api.smartList("favourites") }.getOrNull()
+                ?: runCatching { c.library.favourites().first }.getOrNull().orEmpty()
+            if (tracks.isEmpty()) { ui.toast = "No favourites yet"; return }
+            val shuffled = tracks.shuffled()
+            c.player.setShuffle(false)
+            c.player.play(shuffled, 0, org.nasmusic.app.playback.PlaySource.FAVOURITES, "Favourites (shuffled)")
+            ui.go("now")
+        }
+        LaunchRequests.ACTION_MIX_NOW -> {
+            if (c.player.startRadio(org.nasmusic.app.data.api.RadioSeed("moment"))) ui.go("now")
+            else ui.toast = "Couldn't start a mix right now"
+        }
     }
 }

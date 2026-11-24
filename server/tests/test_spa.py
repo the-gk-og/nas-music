@@ -15,6 +15,8 @@ def web_dist(tmp_path):
     (d / "index.html").write_text("<!doctype html><title>player</title><div id=app></div>")
     (d / "assets" / "app-1234.js").write_text("console.log('hi')")
     (d / "favicon.svg").write_text("<svg/>")
+    (d / "manifest.webmanifest").write_text('{"name": "nas-music"}')
+    (d / "sw.js").write_text("self.addEventListener('fetch', () => {})")
     (tmp_path / "secret.txt").write_text("nope")
     return d
 
@@ -35,6 +37,13 @@ def test_spa_routes_and_fallback(player):
     assert a.status_code == 200 and "immutable" in a.headers["cache-control"]
     assert "javascript" in a.headers["content-type"]
     assert player.get("/favicon.svg").status_code == 200
+    # Installable web app: the manifest with its type, the service worker never cached for long (so an update
+    # to the player reaches installed copies), both at the root.
+    m = player.get("/manifest.webmanifest")
+    assert m.status_code == 200 and m.headers["content-type"].startswith("application/manifest+json")
+    sw = player.get("/sw.js")
+    assert sw.status_code == 200 and "javascript" in sw.headers["content-type"]
+    assert sw.headers["cache-control"] == "no-cache"
     assert player.get("/assets/missing-999.js").status_code == 404  # not index.html
     assert player.get("/..%2fsecret.txt").status_code == 404
     assert player.get("/api/v1/nope").status_code == 404

@@ -16,9 +16,11 @@ from nasmusic.app.context import AppContext, ctx, db, device
 from nasmusic.auth import Device
 from nasmusic.core import ai_config, now_iso
 from nasmusic.db import family
-from nasmusic.library import art, lrclib, lyrics, overrides, queries
+from nasmusic import catalog
+from nasmusic.app import toget
+from nasmusic.library import art, completeness, lrclib, lyrics, overrides, queries
 from nasmusic.stream import DEFAULT_BITRATE, media_type, opus_label, original_label, snap_bitrate
-from nasmusic.stream.transcode import TranscodeError
+from nasmusic.stream.transcode import KaraokeOpusCache, TranscodeError
 from nasmusic.sync import manifest as build_manifest
 from nasmusic.sync import smart_candidates
 
@@ -64,6 +66,52 @@ def list_albums(artistId: str | None = None, sort: Literal["name", "year", "adde
 @router.get("/library/albums/{album_id}")
 def get_album(album_id: str, me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
     return queries.album(conn, me.user_id, album_id, c.data_dir) or _404()
+
+
+def _completeness(conn: Conn, c: AppContext, uid: str, album_id: str) -> tuple[dict, dict]:
+    album = queries.album(conn, uid, album_id, c.data_dir) or _404()
+    if not c.cfg.album_completeness_enabled:
+        raise HTTPException(409, "album completeness is turned off on this server")
+    try:
+        info = completeness.album_completeness(conn, album, transport=c.http_transport)
+    except completeness.Unavailable as e:
+        raise HTTPException(503, f"MusicBrainz unavailable: {e}") from e
+    return album, info
+
+
+def _with_toget(conn: Conn, uid: str, album: dict, info: dict) -> dict:
+    marks = toget.status_for(conn, uid)
+    for m in info["missing"]:
+        m["toget"] = marks.get(("track", catalog.match_key(album["artist"], m["title"])))
+    return info
+
+
+@router.get("/library/albums/{album_id}/completeness")
+def album_completeness(album_id: str, me: Device = Depends(device), conn: Conn = Depends(db),
+                       c: AppContext = Depends(ctx)):
+    album, info = _completeness(conn, c, me.user_id, album_id)
+    return _with_toget(conn, me.user_id, album, info)
+
+
+class MissingToGetBody(BaseModel):
+    recordingMbids: list[str] | None = Field(default=None, max_length=500)
+
+
+@router.post("/library/albums/{album_id}/completeness/toget")
+def album_missing_to_toget(album_id: str, body: MissingToGetBody, me: Device = Depends(device),
+                           conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
+    """Put the album's missing tracks (all, or those in `recordingMbids`) on the caller's To-get list."""
+    album, info = _completeness(conn, c, me.user_id, album_id)
+    want = {r.lower() for r in body.recordingMbids} if body.recordingMbids else None
+    index = catalog.LibraryIndex(conn)
+    multi = (info["discCount"] or 1) > 1
+    for m in info["missing"]:
+        if want is not None and (m["recordingMbid"] or "").lower() not in want:
+            continue
+        where = f"disc {m['disc']}, track {m['position']}" if multi else f"track {m['position']}"
+        toget.add(conn, me.user_id, type="track", title=m["title"], artist=album["artist"], year=album.get("year"),
+                  mbid=m["recordingMbid"], note=f"Missing from {album['title']} ({where})", index=index)
+    return _with_toget(conn, me.user_id, album, info)
 
 
 @router.get("/library/tracks")
@@ -125,7 +173,7 @@ def family_guard(conn: Conn, uid: str, track_ids: list[str]) -> None:
 
 @router.get("/stream/{track_id}")
 def stream(track_id: str, format: Literal["opus", "flac", "original"] = "opus",
-           bitrate: int = Query(DEFAULT_BITRATE, ge=1, le=1000),
+           bitrate: int = Query(DEFAULT_BITRATE, ge=1, le=1000), karaoke: bool = False,
            me: Device = Depends(device), conn: Conn = Depends(db), c: AppContext = Depends(ctx)):
     """`flac`/`original`: the file as stored (lossless for FLAC sources). `opus`: transcoded at `bitrate`, snapped to
     one of OPUS_BITRATES and cached per (track, bitrate). `X-Stream-Format` says what was sent, e.g. "FLAC 16/44.1"."""
@@ -136,6 +184,15 @@ def stream(track_id: str, format: Literal["opus", "flac", "original"] = "opus",
     src = c.cfg.library_root / row["path"]
     if not src.is_file():
         _404("file missing")
+    if karaoke and (row["channels"] or 2) >= 2:
+        kbps = snap_bitrate(bitrate)
+        try:
+            out = karaoke_cache(c).get(src, track_id, kbps, row["mtime"])
+        except TranscodeError as e:
+            log.error("karaoke transcode failed for %s: %s", track_id, e)
+            raise HTTPException(500, "transcode failed") from e
+        return FileResponse(out, media_type="audio/ogg", headers={
+            "Cache-Control": "private, max-age=86400", "X-Stream-Format": opus_label(kbps) + " karaoke"})
     if format in ("flac", "original"):
         # "flac" means the original file; non-FLAC sources are served as-is with their own type.
         label = original_label(row["codec"], row["bits_per_sample"], row["sample_rate"], row["bitrate"])
@@ -149,6 +206,18 @@ def stream(track_id: str, format: Literal["opus", "flac", "original"] = "opus",
         raise HTTPException(500, "transcode failed") from e
     return FileResponse(out, media_type="audio/ogg",
                         headers={"Cache-Control": "private, max-age=86400", "X-Stream-Format": opus_label(kbps)})
+
+
+_karaoke_caches: dict[str, KaraokeOpusCache] = {}
+
+
+def karaoke_cache(c: AppContext) -> KaraokeOpusCache:
+    """A tenth of the Opus cache budget (at least 512 MB): karaoke versions are played far less often."""
+    k = str(c.cfg.data_dir)
+    if k not in _karaoke_caches:
+        _karaoke_caches[k] = KaraokeOpusCache(c.cfg.data_dir / "karaoke",
+                                              max(512 * 1024**2, int(c.cfg.opus_cache_gb * 1024**3 / 10)))
+    return _karaoke_caches[k]
 
 
 @router.get("/art/{album_id}")

@@ -190,9 +190,10 @@ class Jobs:
         return out
 
     def _backup(self, conn):
+        """Nightly database copy, plus the off-site copy when backup_copy_to is set (nasmusic.app.backups)."""
         from nasmusic.app import backups
 
-        return backups.create(self.cfg, conn, "manual")
+        return backups.scheduled(self.cfg, conn)
 
     def _autotag(self, conn):
         """Automatic tag fixing: fingerprints -> AcoustID -> MusicBrainz suggestions (time-boxed, resumable)."""
@@ -348,6 +349,8 @@ class Jobs:
         # New music comes out on Fridays: refresh Release Radar early Friday morning (after the 02:00 nightly).
         sched.add_job(self.run, "cron", args=["release_radar", "schedule"], id="release_radar", day_of_week="fri",
                       hour=4, minute=0)
+        # After the night's heavy writers (nightly 02:00, artist info 03:30, release radar Fri 04:00).
+        sched.add_job(self.run, "cron", args=["backup", "schedule"], id="backup", hour=4, minute=15)
         sched.add_job(self.run, "cron", args=["cleanup", "schedule"], id="cleanup", hour=4, minute=30)
         # Tag-fixing suggestions: fingerprint/look up what is new, after the night's heavier jobs.
         sched.add_job(self.run, "cron", args=["autotag", "schedule"], id="autotag", hour=5, minute=0)
@@ -368,6 +371,7 @@ class Jobs:
         for job_id, kw in (("nightly", {"hour": 2, "minute": 0}),
                            ("discovery", {"day_of_week": "sun", "hour": 3, "minute": 0}),
                            ("release_radar", {"day_of_week": "fri", "hour": 4, "minute": 0}),
+                           ("backup", {"hour": 4, "minute": 15}),
                            ("cleanup", {"hour": 4, "minute": 30}),
                            ("autotag", {"hour": 5, "minute": 0})):
             self.scheduler.reschedule_job(job_id, trigger="cron", timezone=tz, **kw)
