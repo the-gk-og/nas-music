@@ -54,6 +54,10 @@ def _validate(key: str, value: Any) -> None:
             isinstance(value, str) and len(value) == 7 and value[0] == "#"
             and all(ch in "0123456789abcdefABCDEF" for ch in value[1:]))):
         raise ValueError(f"appearance.accent must be one of {', '.join(ACCENTS)} or #rrggbb")
+    if base == "dj.voice" and not isinstance(value, bool):
+        raise ValueError("dj.voice must be true or false")
+    if base == "dj.every" and (isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 10):
+        raise ValueError("dj.every must be a whole number from 1 to 10")
     if base in _SHELF_LISTS and not (isinstance(value, list) and all(isinstance(x, str) for x in value)):
         raise ValueError(f"{base} must be a list of shelf ids")
 
