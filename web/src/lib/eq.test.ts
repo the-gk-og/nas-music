@@ -7,6 +7,10 @@ import {
   defaultEq,
   loadProfiles,
   autoHeadroomDb,
+  bandsFromAutoEq,
+  bandsFromGraphic,
+  clampBandParams,
+  curveDb,
   biquadResponseDb,
   curveFilters,
   matrixCoefficients,
@@ -109,7 +113,16 @@ describe('buildEqGraph', () => {
 
   it('applies bands, preamp, bass boost, balance and volume when enabled', () => {
     const g = buildEqGraph(fakeCtx());
-    const s = { ...defaultEq(), enabled: true, bands: [...PRESETS.Rock], preampMode: 'headroom' as const, preampDb: 1, bassBoost: 50, balance: -0.5, volume: 0.4 };
+    const s = {
+      ...defaultEq(),
+      enabled: true,
+      bands: [...PRESETS.Rock],
+      preampMode: 'headroom' as const,
+      preampDb: 1,
+      bassBoost: 50,
+      balance: -0.5,
+      volume: 0.4,
+    };
     g.apply(s);
     expect(g.bands.map((b) => b.gain.value)).toEqual(PRESETS.Rock);
     // auto headroom + Quieter (−3) + 1 dB trim
@@ -122,7 +135,14 @@ describe('buildEqGraph', () => {
 
   it('is neutral when disabled but keeps volume', () => {
     const g = buildEqGraph(fakeCtx());
-    g.apply({ ...defaultEq(), enabled: false, bands: [...PRESETS.Bass], bassBoost: 100, preampMode: 'boost', volume: 0.7 });
+    g.apply({
+      ...defaultEq(),
+      enabled: false,
+      bands: [...PRESETS.Bass],
+      bassBoost: 100,
+      preampMode: 'boost',
+      volume: 0.7,
+    });
     expect(g.bands.every((b) => b.gain.value === 0)).toBe(true);
     expect(g.bass.gain.value).toBe(0);
     expect(g.preamp.gain.value).toBe(1);
@@ -144,7 +164,11 @@ describe('buildEqGraph', () => {
 
   it('clamps bands to ±12 dB', () => {
     const g = buildEqGraph(fakeCtx());
-    g.apply({ ...defaultEq(), enabled: true, bands: [20, -20, 0, 0, 0, 0, 0, 0, 0, 0] });
+    g.apply({
+      ...defaultEq(),
+      enabled: true,
+      bands: [20, -20, 0, 0, 0, 0, 0, 0, 0, 0],
+    });
     expect(g.bands[0].gain.value).toBe(12);
     expect(g.bands[1].gain.value).toBe(-12);
   });
@@ -159,15 +183,28 @@ describe('buildEqGraph', () => {
 
 describe('auto headroom', () => {
   it('takes off the biggest boost of the whole curve, and nothing for cuts', () => {
-    const one = { ...defaultEq(), enabled: true, bands: [0, 0, 0, 0, 0, 12, 0, 0, 0, 0] };
+    const one = {
+      ...defaultEq(),
+      enabled: true,
+      bands: [0, 0, 0, 0, 0, 12, 0, 0, 0, 0],
+    };
     expect(autoHeadroomDb(one)).toBeCloseTo(-12, 1);
     expect(autoHeadroomDb({ ...one, bands: Array(10).fill(-6) })).toBe(0);
     expect(autoHeadroomDb({ ...one, enabled: false })).toBe(0);
     // Bass boost stacks with the low bands.
-    const stacked = autoHeadroomDb({ ...one, bands: [6, 6, 0, 0, 0, 0, 0, 0, 0, 0], bassBoost: 100 });
+    const stacked = autoHeadroomDb({
+      ...one,
+      bands: [6, 6, 0, 0, 0, 0, 0, 0, 0, 0],
+      bassBoost: 100,
+    });
     expect(stacked).toBeLessThan(-16);
     // With it applied, nothing in the audible range is above 0 dB.
-    const s = { ...defaultEq(), enabled: true, bands: [...PRESETS.Rock], bassBoost: 40 };
+    const s = {
+      ...defaultEq(),
+      enabled: true,
+      bands: [...PRESETS.Rock],
+      bassBoost: 40,
+    };
     for (let f = 20; f < 20000; f *= 1.05) {
       const db = curveFilters(s).reduce((a, c) => a + biquadResponseDb(c, 48000, f), 0) + autoHeadroomDb(s);
       expect(db).toBeLessThan(0.05);
@@ -182,9 +219,14 @@ describe('auto headroom', () => {
 
   it('puts a limiter in the chain only while the EQ is on', () => {
     const ctx = Object.assign(fakeCtx(), {
-      createDynamicsCompressor: () => Object.assign(new FakeNode('limiter'), {
-        threshold: new FakeParam(), knee: new FakeParam(), ratio: new FakeParam(), attack: new FakeParam(), release: new FakeParam(),
-      }),
+      createDynamicsCompressor: () =>
+        Object.assign(new FakeNode('limiter'), {
+          threshold: new FakeParam(),
+          knee: new FakeParam(),
+          ratio: new FakeParam(),
+          attack: new FakeParam(),
+          release: new FakeParam(),
+        }),
     });
     const g = buildEqGraph(ctx as unknown as AudioCtxLike);
     g.apply({ ...defaultEq(), enabled: true });
@@ -207,8 +249,14 @@ it('formats balance like the reference', () => {
 
 it('stores per-output profiles', () => {
   const mem = new Map<string, string>();
-  const storage = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) };
-  saveProfiles(storage, { default: { ...defaultEq(), enabled: true }, 'moto buds': { ...defaultEq(), bassBoost: 31 } });
+  const storage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => void mem.set(k, v),
+  };
+  saveProfiles(storage, {
+    default: { ...defaultEq(), enabled: true },
+    'moto buds': { ...defaultEq(), bassBoost: 31 },
+  });
   const p = loadProfiles(storage);
   expect(p.default.enabled).toBe(true);
   expect(p['moto buds'].bassBoost).toBe(31);
@@ -232,16 +280,109 @@ describe('AutoEq parametric filters', () => {
   });
 
   it('inserts IIR filters between the preamp and the bands, and removes them', () => {
-    const ctx = Object.assign(fakeCtx(), { createIIRFilter: () => new FakeNode('iir'), sampleRate: 48000 });
+    const ctx = Object.assign(fakeCtx(), {
+      createIIRFilter: () => new FakeNode('iir'),
+      sampleRate: 48000,
+    });
     const g = buildEqGraph(ctx as unknown as AudioCtxLike);
-    const hp = { id: 'x', name: 'HD 650', source: 'oratory1990', preampDb: -6, filters: [
-      { type: 'LSC' as const, fc: 105, gainDb: 6.4, q: 0.7 }, { type: 'PK' as const, fc: 8800, gainDb: 5.1, q: 1.42 }] };
+    const hp = {
+      id: 'x',
+      name: 'HD 650',
+      source: 'oratory1990',
+      preampDb: -6,
+      filters: [
+        { type: 'LSC' as const, fc: 105, gainDb: 6.4, q: 0.7 },
+        { type: 'PK' as const, fc: 8800, gainDb: 5.1, q: 1.42 },
+      ],
+    };
     g.apply({ ...defaultEq(), enabled: true, headphone: hp });
     expect(chain(g.preamp as unknown as FakeNode).slice(0, 4)).toEqual(['gain', 'iir', 'iir', 'biquad']);
     // Auto headroom covers the profile's boosts (≈ its own −6 dB preamp).
-    expect((g.preamp as unknown as FakeGain).gain.value).toBeCloseTo(dbToGain(autoHeadroomDb({ ...defaultEq(), enabled: true, headphone: hp })));
+    expect((g.preamp as unknown as FakeGain).gain.value).toBeCloseTo(
+      dbToGain(autoHeadroomDb({ ...defaultEq(), enabled: true, headphone: hp })),
+    );
     expect(autoHeadroomDb({ ...defaultEq(), enabled: true, headphone: hp })).toBeLessThan(-6);
     g.apply({ ...defaultEq(), enabled: false, headphone: hp });
     expect(chain(g.preamp as unknown as FakeNode).slice(0, 2)).toEqual(['gain', 'biquad']);
+  });
+});
+
+describe('parametric EQ', () => {
+  const para = (...b: Partial<import('./eq').ParamBand>[]) => ({
+    ...defaultEq(),
+    enabled: true,
+    mode: 'parametric' as const,
+    parametric: b.map(clampBandParams),
+  });
+
+  it('replaces the graphic sliders and puts native filters before the bass shelf', () => {
+    const ctx = Object.assign(fakeCtx(), { sampleRate: 48000 });
+    const g = buildEqGraph(ctx);
+    g.apply({
+      ...para({ type: 'PK', fc: 2000, gainDb: -6, q: 2 }, { type: 'HP', fc: 40, slope: 24 }),
+      bands: Array(10).fill(6),
+    });
+    expect(g.bands.every((b) => b.gain.value === 0)).toBe(true);
+    expect(chain(g.bands[9] as unknown as FakeNode).slice(0, 5)).toEqual(['biquad', 'biquad', 'biquad', 'biquad', 'biquad']);
+    const [pk, hp1, hp2] = g.parametric as unknown as FakeBiquad[];
+    expect([pk.type, pk.frequency.value, pk.gain.value, pk.Q.value]).toEqual(['peaking', 2000, -6, 2]);
+    expect(hp1.type).toBe('highpass');
+    expect(hp2.Q.value).toBeCloseTo(20 * Math.log10(1.3066)); // Web Audio wants dB
+    expect(chain(hp2 as unknown as FakeNode)[1]).toBe('biquad'); // → bass shelf
+    expect(hp2.out[0].node).toBe(g.bass);
+    // Back to graphic: the parametric nodes leave the chain.
+    g.apply({ ...para(), mode: 'graphic', bands: Array(10).fill(6) });
+    expect(g.parametric).toHaveLength(0);
+    expect((g.bands[9] as unknown as FakeNode).out[0].node).toBe(g.bass);
+    expect(g.bands[0].gain.value).toBe(6);
+  });
+
+  it('keeps nodes when only values change', () => {
+    const g = buildEqGraph(fakeCtx());
+    g.apply(para({ type: 'PK', fc: 1000, gainDb: 3 }));
+    const before = g.parametric[0];
+    g.apply(para({ type: 'PK', fc: 1200, gainDb: 5 }));
+    expect(g.parametric[0]).toBe(before);
+    expect((before as unknown as FakeBiquad).frequency.value).toBe(1200);
+  });
+
+  it('draws the right curve: slopes, resonance and headroom', () => {
+    const lp = curveDb(para({ type: 'LP', fc: 200, slope: 24 }), [200, 1600, 3200]);
+    expect(lp[0]).toBeCloseTo(-3, 0);
+    expect(lp[2] - lp[1]).toBeCloseTo(-24, 0);
+    const hp12 = curveDb(para({ type: 'HP', fc: 200, q: Math.SQRT1_2 }), [25, 50]);
+    expect(hp12[0] - hp12[1]).toBeCloseTo(-12, 0);
+    expect(autoHeadroomDb(para({ type: 'LP', fc: 5000, q: 4 }))).toBeCloseTo(-20 * Math.log10(4), 0);
+    expect(autoHeadroomDb(para({ type: 'HP', fc: 80, slope: 48 }))).toBeCloseTo(0, 1);
+    expect(autoHeadroomDb(para({ type: 'PK', fc: 1000, gainDb: 6, on: false }))).toBe(0);
+  });
+
+  it('imports from AutoEq and the sliders, and clamps', () => {
+    expect(
+      bandsFromAutoEq({
+        id: 'x',
+        name: 'n',
+        source: 's',
+        preampDb: -6,
+        filters: [{ type: 'LSC', fc: 105, gainDb: 6.4, q: 0.7 }],
+      })[0],
+    ).toEqual({
+      type: 'LSC',
+      fc: 105,
+      gainDb: 6.4,
+      q: 0.7,
+      on: true,
+      slope: 12,
+    });
+    expect(bandsFromGraphic([0, 3, 0, 0, 0, -2, 0, 0, 0, 0]).map((b) => b.fc)).toEqual([63, 1000]);
+    expect(
+      clampBandParams({
+        type: 'XX' as never,
+        fc: 5,
+        gainDb: 99,
+        q: 0,
+        slope: 30 as never,
+      }),
+    ).toEqual({ type: 'PK', fc: 10, gainDb: 15, q: 0.1, on: true, slope: 24 });
   });
 });

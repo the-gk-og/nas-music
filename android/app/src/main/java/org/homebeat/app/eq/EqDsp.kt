@@ -72,6 +72,29 @@ class Biquad(b0: Double, b1: Double, b2: Double, a1: Double, a2: Double, channel
             else -> null
         }
 
+        /** RBJ low / high pass (12 dB/oct; q = 0.707 is Butterworth). */
+        fun pass(fs: Double, f0: Double, q: Double, high: Boolean, channels: Int): Biquad {
+            val w0 = 2 * PI * f0.coerceIn(5.0, fs * 0.49) / fs
+            val cw = cos(w0)
+            val alpha = sin(w0) / (2 * q.coerceAtLeast(0.05))
+            val a0 = 1 + alpha
+            val k = if (high) (1 + cw) / 2 else (1 - cw) / 2
+            val b1 = if (high) -(1 + cw) else 1 - cw
+            return Biquad(k / a0, b1 / a0, k / a0, -2 * cw / a0, (1 - alpha) / a0, channels)
+        }
+
+        /** Butterworth section Qs for 24 and 48 dB/oct. */
+        private val BUTTERWORTH = mapOf(24 to doubleArrayOf(0.5412, 1.3066), 48 to doubleArrayOf(0.5098, 0.6013, 0.9000, 2.5629))
+
+        /** The biquads for one parametric band, with the peak/shelf gain overridden by [gainDb] (for gliding). */
+        fun band(b: EqBand, fs: Double, channels: Int, gainDb: Double = b.gainDb): List<Biquad> = when (b.type) {
+            "LP", "HP" -> {
+                val qs = BUTTERWORTH[b.slope] ?: doubleArrayOf(b.q)
+                qs.map { pass(fs, b.fc, it, b.type == "HP", channels) }
+            }
+            else -> listOfNotNull(parametric(ParametricFilter(b.type, b.fc, gainDb, b.q), fs, channels))
+        }
+
         fun lowShelf(fs: Double, f0: Double, gainDb: Double, channels: Int, s: Double = 1.0): Biquad {
             val a = 10.0.pow(gainDb / 40)
             val w0 = 2 * PI * f0 / fs
@@ -93,7 +116,8 @@ class Biquad(b0: Double, b1: Double, b2: Double, a1: Double, a2: Double, channel
 
 /**
  * The whole effect chain for one stream, on interleaved float samples in −1..1:
- * auto headroom + preamp → AutoEq headphone filters → 10 peaking bands → bass shelf → stereo width / mono → balance → limiter.
+ * auto headroom + preamp → AutoEq headphone filters → 10 peaking bands (graphic mode) or the user's parametric bands
+ * (parametric mode) → bass shelf → stereo width / mono → balance → limiter.
  *
  * What keeps it clean:
  * - **Auto headroom.** The peak boost of the whole curve (bands + bass shelf + headphone correction) is taken off the preamp,
@@ -114,6 +138,11 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
     private val bass = Biquad.lowShelf(fs, BASS_HZ, 0.0, channels)
     private var hpProfile: HeadphoneProfile? = null
     private var hpFilters: List<Biquad> = emptyList()
+
+    /** One parametric band in the chain. Peaks/shelves glide [cur] dB; pass filters switch. Dying slots fade out, then go. */
+    private class Slot(var band: EqBand, val filters: List<Biquad>, var cur: Double, var dying: Boolean = false)
+    private var slots: List<Slot> = emptyList()
+    private var paramDirty = false
 
     // Current (gliding) gains in dB; hpMix scales the headphone filters 0..1.
     private val bandDb = DoubleArray(bandIdx.size)
@@ -155,9 +184,34 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
             }
         }
         settings = s
+        updateSlots()
     }
 
-    private fun tBand(j: Int) = if (settings.enabled) settings.bandsDb.getOrElse(bandIdx[j]) { 0f }.toDouble().coerceIn(-12.0, 12.0) else 0.0
+    /** Keep a slot (and its filter state) where the band at that index still has the same shape; else replace it. */
+    private fun updateSlots() {
+        val want = if (settings.isParametric) settings.parametric.map { it.clamped() }.take(EqSettings.MAX_PARAM_BANDS) else emptyList()
+        val live = slots.filter { !it.dying }
+        val next = ArrayList<Slot>()
+        want.forEachIndexed { i, b ->
+            val old = live.getOrNull(i)
+            if (old != null && old.band.type == b.type && old.band.slope == b.slope && (!b.isPass || old.band.on == b.on)) {
+                old.band = b; next += old
+            } else {
+                old?.let { if (!it.band.isPass) { it.dying = true; next += it } }
+                next += Slot(b, Biquad.band(b, fs, channels, 0.0), 0.0)
+            }
+        }
+        // Peaks/shelves that went away fade out; pass filters just stop.
+        live.drop(want.size).filter { !it.band.isPass }.forEach { it.dying = true; next += it }
+        slots.filter { it.dying && it !in next }.forEach { next += it }
+        slots = next
+        paramDirty = true
+    }
+
+    private fun tSlot(sl: Slot) = if (settings.enabled && !sl.dying && sl.band.on && !sl.band.isPass) sl.band.gainDb else 0.0
+    private fun slotRuns(sl: Slot) = if (sl.band.isPass) settings.enabled && !sl.dying && sl.band.on else sl.cur != 0.0 || tSlot(sl) != 0.0
+
+    private fun tBand(j: Int) = if (settings.enabled && !settings.isParametric) settings.bandsDb.getOrElse(bandIdx[j]) { 0f }.toDouble().coerceIn(-12.0, 12.0) else 0.0
     private fun tBass() = if (settings.enabled) settings.bassBoost.coerceIn(0, 100) / 100.0 * BASS_MAX_DB else 0.0
     private fun tHp() = if (settings.enabled && settings.headphone != null) 1.0 else 0.0
     private fun tUserPreampDb() = if (settings.enabled) settings.preampDb.toDouble() else 0.0
@@ -173,6 +227,7 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
     private fun snap() {
         for (j in bandDb.indices) bandDb[j] = tBand(j)
         bassDb = tBass(); hpMix = tHp()
+        slots = slots.filter { !it.dying }.onEach { it.cur = tSlot(it) }
         if (hpMix == 0.0 && settings.headphone == null) { hpProfile = null; hpFilters = emptyList() }
         retune()
         curPreamp = targetPreamp(); curSide = tSide(); curL = tL(); curR = tR()
@@ -183,6 +238,8 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
         bass.retune(Biquad.lowShelf(fs, BASS_HZ, bassDb, channels))
         hpProfile?.filters?.mapNotNull { Biquad.parametric(it.copy(gainDb = it.gainDb * hpMix), fs, channels) }
             ?.forEachIndexed { i, b -> hpFilters.getOrNull(i)?.retune(b) }
+        for (sl in slots) Biquad.band(sl.band, fs, channels, sl.cur).forEachIndexed { i, b -> sl.filters.getOrNull(i)?.retune(b) }
+        paramDirty = false
         autoHeadroomDb = -peakResponseDb().coerceAtLeast(0.0)
     }
 
@@ -200,21 +257,27 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
     }
 
     /** Every filter in the chain; all run while the EQ is active, so none has stale state when its gain moves off 0. */
-    private fun chain(): List<Biquad> = hpFilters + bands + bass
+    private fun chain(): List<Biquad> = buildList {
+        addAll(hpFilters); addAll(bands)
+        for (sl in slots) if (slotRuns(sl)) addAll(sl.filters)
+        add(bass)
+    }
 
     /** Filters that shape the curve right now (for the headroom maths). */
     private fun active(): List<Biquad> = buildList {
         if (hpMix > 0) addAll(hpFilters)
         for (j in bands.indices) if (bandDb[j] != 0.0) add(bands[j])
         if (bassDb != 0.0) add(bass)
+        for (sl in slots) if (slotRuns(sl) && (sl.band.isPass || sl.cur != 0.0)) addAll(sl.filters)
     }
 
     private fun targetPreamp() = 10.0.pow((autoHeadroomDb + tUserPreampDb()) / 20.0)
 
-    private fun neutralNow() = bandDb.all { it == 0.0 } && bassDb == 0.0 && hpMix == 0.0 &&
+    private fun neutralNow() = bandDb.all { it == 0.0 } && bassDb == 0.0 && hpMix == 0.0 && slots.none { slotRuns(it) } &&
         curPreamp == 1.0 && curSide == 1.0 && curL == 1.0 && curR == 1.0
 
-    private fun atTargets() = bandDb.indices.all { bandDb[it] == tBand(it) } && bassDb == tBass() && hpMix == tHp()
+    private fun atTargets() = bandDb.indices.all { bandDb[it] == tBand(it) } && bassDb == tBass() && hpMix == tHp() &&
+        slots.all { it.cur == tSlot(it) && !it.dying }
 
     /** True when processing would change nothing (lets the processor pass audio straight through). */
     val isIdentity: Boolean
@@ -232,6 +295,9 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
         for (j in bandDb.indices) bandDb[j] = g(bandDb[j], tBand(j))
         bassDb = g(bassDb, tBass())
         hpMix = g(hpMix * 12.0, tHp() * 12.0) / 12.0 // glide the correction like a 12 dB move
+        for (sl in slots) sl.cur = g(sl.cur, tSlot(sl))
+        if (slots.any { it.dying && it.cur == 0.0 }) slots = slots.filter { !(it.dying && it.cur == 0.0) }
+        if (paramDirty) moved = true
         if (hpMix == 0.0 && settings.headphone == null && hpProfile != null) { hpProfile = null; hpFilters = emptyList() }
         if (moved) retune()
         return moved
@@ -239,7 +305,10 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
 
     fun process(buf: FloatArray, frames: Int) {
         if (isIdentity) {
-            if (!stateClear) { bands.forEach { it.clear() }; bass.clear(); hpFilters.forEach { it.clear() }; limGain = 1.0; stateClear = true }
+            if (!stateClear) {
+                bands.forEach { it.clear() }; bass.clear(); hpFilters.forEach { it.clear() }; slots.forEach { s -> s.filters.forEach { it.clear() } }
+                limGain = 1.0; stateClear = true
+            }
             return
         }
         stateClear = false
@@ -312,5 +381,12 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
 
         /** Auto headroom (dB, ≤ 0) these settings get; for the UI. */
         fun headroomDb(s: EqSettings, sampleRate: Int = 48_000): Double = EqEngine(s, sampleRate, 2).autoHeadroomDb
+
+        /** The settings' EQ curve in dB at each of [freqs] (filters only, before headroom); for the UI graph. */
+        fun curveDb(s: EqSettings, freqs: DoubleArray, sampleRate: Int = 48_000): DoubleArray {
+            val e = EqEngine(s, sampleRate, 2)
+            val all = e.active()
+            return DoubleArray(freqs.size) { i -> all.sumOf { it.responseDb(e.fs, freqs[i].coerceAtMost(e.fs * 0.49)) } }
+        }
     }
 }

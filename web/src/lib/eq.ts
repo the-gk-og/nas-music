@@ -1,5 +1,5 @@
 // Equalizer model + Web Audio graph (§6). The graph is:
-//   source → preamp → [AutoEq headphone filters] → 10 × peaking biquad → bass-boost low-shelf → [pitch worklet] → stereo matrix
+//   source → preamp → [AutoEq headphone filters] → 10 × peaking biquad → [parametric bands] → bass-boost low-shelf → [pitch worklet] → stereo matrix
 //   (width / mono) → balance (StereoPanner) → [limiter, while the EQ is on] → volume → destination
 // The preamp includes automatic headroom: the biggest boost of the whole curve is taken off, so boosts never clip
 // (same maths as the Android EqEngine). The user's preamp is a trim on top; the limiter catches what's left.
@@ -34,11 +34,68 @@ export interface HeadphoneProfile {
   name: string;
   source: string;
   preampDb: number;
-  filters: { type: 'PK' | 'LSC' | 'HSC'; fc: number; gainDb: number; q: number }[];
+  filters: {
+    type: 'PK' | 'LSC' | 'HSC';
+    fc: number;
+    gainDb: number;
+    q: number;
+  }[];
 }
+
+export type ParamType = 'PK' | 'LSC' | 'HSC' | 'LP' | 'HP';
+
+/** One parametric band (same model as android EqBand). Pass filters ignore gain; slope 12 uses q, 24/48 are
+ *  Butterworth cascades. */
+export interface ParamBand {
+  type: ParamType;
+  fc: number;
+  gainDb: number;
+  q: number;
+  on: boolean;
+  slope: 12 | 24 | 48;
+}
+
+export const PARAM_TYPES: ParamType[] = ['PK', 'LSC', 'HSC', 'LP', 'HP'];
+export const PARAM_LABELS: Record<ParamType, string> = {
+  PK: 'Peak',
+  LSC: 'Low shelf',
+  HSC: 'High shelf',
+  LP: 'Low pass',
+  HP: 'High pass',
+};
+export const PARAM_MAX_GAIN = 15;
+export const MAX_PARAM_BANDS = 16;
+export const isPass = (b: Pick<ParamBand, 'type'>) => b.type === 'LP' || b.type === 'HP';
+
+export function clampBandParams(b: Partial<ParamBand>): ParamBand {
+  const type = PARAM_TYPES.includes(b.type as ParamType) ? (b.type as ParamType) : 'PK';
+  const slope = ([12, 24, 48] as const).reduce(
+    (a, c) => (Math.abs(c - (b.slope ?? 12)) < Math.abs(a - (b.slope ?? 12)) ? c : a),
+    12 as 12 | 24 | 48,
+  );
+  return {
+    type,
+    fc: Math.max(10, Math.min(22000, b.fc ?? 1000)),
+    gainDb: Math.max(-PARAM_MAX_GAIN, Math.min(PARAM_MAX_GAIN, b.gainDb ?? 0)),
+    q: Math.max(0.1, Math.min(20, b.q ?? 1)),
+    on: b.on ?? true,
+    slope,
+  };
+}
+
+/** Bands from an AutoEq profile. */
+export const bandsFromAutoEq = (p: HeadphoneProfile): ParamBand[] =>
+  p.filters.map((f) => clampBandParams({ type: f.type, fc: f.fc, gainDb: f.gainDb, q: f.q })).slice(0, MAX_PARAM_BANDS);
+
+/** Starting point when switching to parametric: the non-flat graphic sliders, as peaks (sounds the same). */
+export const bandsFromGraphic = (bands: number[]): ParamBand[] =>
+  EQ_FREQS.flatMap((fc, i) => (bands[i] ? [clampBandParams({ type: 'PK', fc, gainDb: bands[i], q: BAND_Q })] : []));
 
 export interface EqSettings {
   enabled: boolean;
+  /** 'graphic' = the 10 sliders and presets; 'parametric' = `parametric` bands instead of the sliders. */
+  mode: 'graphic' | 'parametric';
+  parametric: ParamBand[];
   preset: string;
   bands: number[];
   preampMode: PreampMode;
@@ -55,6 +112,8 @@ export interface EqSettings {
 export function defaultEq(): EqSettings {
   return {
     enabled: false,
+    mode: 'graphic',
+    parametric: [],
     preset: 'Flat',
     bands: [...PRESETS.Flat],
     preampMode: 'off',
@@ -74,7 +133,11 @@ export function presetFor(bands: number[]): string {
 }
 
 /** Trim from the preamp buttons: Quieter / Auto / Louder ('headroom' / 'off' / 'boost' kept as stored names). */
-export const PREAMP_MODE_DB: Record<PreampMode, number> = { headroom: -3, off: 0, boost: 3 };
+export const PREAMP_MODE_DB: Record<PreampMode, number> = {
+  headroom: -3,
+  off: 0,
+  boost: 3,
+};
 
 export function preampGainDb(s: EqSettings, fs = 48000): number {
   if (!s.enabled) return 0;
@@ -86,13 +149,43 @@ export function curveFilters(s: EqSettings, fs = 48000): BiquadCoefficients[] {
   if (!s.enabled) return [];
   const out: BiquadCoefficients[] = [];
   for (const f of s.headphone?.filters ?? []) out.push(rbjCoefficients(f.type, fs, f.fc, f.gainDb, f.q));
-  EQ_FREQS.forEach((f, i) => {
-    const g = clampBand(s.bands[i] ?? 0);
-    if (g !== 0 && f < fs / 2) out.push(rbjCoefficients('PK', fs, f, g, BAND_Q));
-  });
+  if (s.mode === 'parametric') {
+    for (const b of activeParams(s)) out.push(...bandCoefficients(b, fs));
+  } else {
+    EQ_FREQS.forEach((f, i) => {
+      const g = clampBand(s.bands[i] ?? 0);
+      if (g !== 0 && f < fs / 2) out.push(rbjCoefficients('PK', fs, f, g, BAND_Q));
+    });
+  }
   const bass = bassBoostDb(s);
   if (bass > 0) out.push(rbjCoefficients('LSC', fs, BASS_HZ, bass, Math.SQRT1_2));
   return out;
+}
+
+/** Butterworth section Qs for 24 / 48 dB/oct pass filters. */
+const BUTTERWORTH: Record<number, number[]> = {
+  24: [0.5412, 1.3066],
+  48: [0.5098, 0.6013, 0.9, 2.5629],
+};
+
+/** The Qs of the biquad sections a band becomes (one for peaks/shelves). */
+export const sectionQs = (b: ParamBand): number[] => (isPass(b) ? (BUTTERWORTH[b.slope] ?? [b.q]) : [b.q]);
+
+export function bandCoefficients(b: ParamBand, fs: number): BiquadCoefficients[] {
+  return sectionQs(b).map((q) => rbjCoefficients(b.type, fs, b.fc, b.gainDb, q));
+}
+
+/** Bands that shape the sound: switched on, capped at MAX_PARAM_BANDS. */
+const activeParams = (s: EqSettings): ParamBand[] =>
+  (s.parametric ?? [])
+    .slice(0, MAX_PARAM_BANDS)
+    .map(clampBandParams)
+    .filter((b) => b.on && (isPass(b) || b.gainDb !== 0));
+
+/** Curve in dB at each frequency (filters only, before headroom), for the response graph. */
+export function curveDb(s: EqSettings, freqs: number[], fs = 48000): number[] {
+  const filters = curveFilters({ ...s, enabled: true }, fs);
+  return freqs.map((f) => filters.reduce((a, c) => a + biquadResponseDb(c, fs, Math.min(f, fs * 0.49)), 0));
 }
 
 const clampBand = (v: number) => Math.max(-EQ_MAX_DB, Math.min(EQ_MAX_DB, v));
@@ -125,7 +218,10 @@ export function stereoWidth(s: EqSettings): number {
   return s.enabled ? 1 + Math.max(0, Math.min(100, s.surround)) / 100 : 1;
 }
 
-export function matrixCoefficients(width: number): { same: number; cross: number } {
+export function matrixCoefficients(width: number): {
+  same: number;
+  cross: number;
+} {
   return { same: (1 + width) / 2, cross: (1 - width) / 2 };
 }
 
@@ -148,15 +244,27 @@ export interface BiquadCoefficients {
 
 /** RBJ Audio-EQ-Cookbook coefficients. Shelves use Q directly (as AutoEq does), unlike Web Audio's
  *  built-in shelf filters, which ignore Q — hence IIRFilterNode. */
-export function rbjCoefficients(type: 'PK' | 'LSC' | 'HSC', fs: number, fc: number, gainDb: number, q: number): BiquadCoefficients {
+export function rbjCoefficients(type: ParamType, fs: number, fc: number, gainDb: number, q: number): BiquadCoefficients {
   const A = Math.pow(10, gainDb / 40);
   const w0 = (2 * Math.PI * Math.min(fc, fs * 0.49)) / fs;
   const cw = Math.cos(w0);
   const alpha = Math.sin(w0) / (2 * Math.max(0.05, q));
   let b0: number, b1: number, b2: number, a0: number, a1: number, a2: number;
-  if (type === 'PK') {
-    b0 = 1 + alpha * A; b1 = -2 * cw; b2 = 1 - alpha * A;
-    a0 = 1 + alpha / A; a1 = -2 * cw; a2 = 1 - alpha / A;
+  if (type === 'LP' || type === 'HP') {
+    const k = type === 'LP' ? (1 - cw) / 2 : (1 + cw) / 2;
+    b0 = k;
+    b1 = type === 'LP' ? 1 - cw : -(1 + cw);
+    b2 = k;
+    a0 = 1 + alpha;
+    a1 = -2 * cw;
+    a2 = 1 - alpha;
+  } else if (type === 'PK') {
+    b0 = 1 + alpha * A;
+    b1 = -2 * cw;
+    b2 = 1 - alpha * A;
+    a0 = 1 + alpha / A;
+    a1 = -2 * cw;
+    a2 = 1 - alpha / A;
   } else {
     const sq = 2 * Math.sqrt(A) * alpha;
     const sign = type === 'LSC' ? 1 : -1;
@@ -209,6 +317,8 @@ export interface EqGraph {
   volume: GainNode;
   /** AutoEq filters currently in the chain (rebuilt when the profile changes). */
   headphone: AudioNode[];
+  /** Parametric band nodes currently in the chain, in order. */
+  parametric: AudioNode[];
   apply(s: EqSettings): void;
   /** Insert an extra node (e.g. the pitch shifter) between the bass shelf and the stereo matrix. Later inserts go
    * after earlier ones; `output` defaults to `node` (pass it for a sub-graph with separate ends). */
@@ -304,9 +414,74 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
     prev.connect(bands[0]);
   };
 
+  // Parametric bands sit between the graphic bands and the bass shelf. Peaks, Butterworth-ish shelves and pass
+  // filters are native BiquadFilterNodes, so dragging them glides smoothly; a shelf with another Q needs an
+  // IIRFilterNode (fixed coefficients), rebuilt when it changes.
+  const lastBand = bands[bands.length - 1];
+  type Slot = { key: string; nodes: AudioNode[]; native: BiquadFilterNode[] };
+  let slots: Slot[] = [];
+  const nativeShelf = (b: ParamBand) => !ctx.createIIRFilter || Math.abs(b.q - Math.SQRT1_2) < 0.02;
+  const slotKey = (b: ParamBand) => {
+    if (isPass(b)) return `${b.type}/${b.slope}/${b.on}`;
+    if (b.type === 'PK' || nativeShelf(b)) return `${b.type}/native`;
+    return `${b.type}/iir/${b.fc}/${b.q}/${b.on ? b.gainDb : 0}`;
+  };
+  const nativeType: Record<ParamType, BiquadFilterType> = {
+    PK: 'peaking',
+    LSC: 'lowshelf',
+    HSC: 'highshelf',
+    LP: 'lowpass',
+    HP: 'highpass',
+  };
+  const makeSlot = (b: ParamBand, key: string): Slot => {
+    if (key.includes('/iir/')) {
+      const fs = ctx.sampleRate ?? 48000;
+      const c = rbjCoefficients(b.type, fs, b.fc, b.on ? b.gainDb : 0, b.q);
+      return { key, nodes: [ctx.createIIRFilter!(c.b, c.a)], native: [] };
+    }
+    const n = isPass(b) && !b.on ? 0 : sectionQs(b).length;
+    const native = Array.from({ length: n }, () => {
+      const f = ctx.createBiquadFilter();
+      f.type = nativeType[b.type];
+      f.frequency.value = b.fc;
+      f.gain.value = 0; // peaks/shelves glide in from flat
+      return f;
+    });
+    return { key, nodes: native, native };
+  };
+  const setParametric = (s: EqSettings) => {
+    const want = s.enabled && s.mode === 'parametric' ? (s.parametric ?? []).slice(0, MAX_PARAM_BANDS).map(clampBandParams) : [];
+    const keys = want.map(slotKey);
+    if (keys.length !== slots.length || keys.some((k, i) => k !== slots[i].key)) {
+      lastBand.disconnect();
+      for (const sl of slots) for (const n of sl.nodes) n.disconnect();
+      // Keep nodes (and their filter state) where the band at that index kept its shape.
+      slots = want.map((b, i) => (slots[i]?.key === keys[i] ? slots[i] : makeSlot(b, keys[i])));
+      let prev: AudioNode = lastBand;
+      for (const sl of slots)
+        for (const n of sl.nodes) {
+          prev.connect(n);
+          prev = n;
+        }
+      prev.connect(bass);
+    }
+    const t = ctx.currentTime;
+    want.forEach((b, i) => {
+      const qs = sectionQs(b);
+      slots[i].native.forEach((f, j) => {
+        setParam(f.frequency, b.fc, t);
+        // Web Audio reads lowpass/highpass Q in dB.
+        setParam(f.Q, isPass(b) ? 20 * Math.log10(qs[j]) : b.q, t);
+        if (!isPass(b)) setParam(f.gain, b.on ? b.gainDb : 0, t);
+      });
+    });
+    graph.parametric = slots.flatMap((sl) => sl.nodes);
+  };
+
   const graph: EqGraph = {
     input: preamp,
     headphone: [],
+    parametric: [],
     output: volume,
     preamp,
     bands,
@@ -318,9 +493,11 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
     apply(s: EqSettings) {
       const t = ctx.currentTime;
       setHeadphone(s);
+      setParametric(s);
       setLimiter(s.enabled);
       setParam(preamp.gain, dbToGain(preampGainDb(s, ctx.sampleRate ?? 48000)), t);
-      bands.forEach((b, i) => setParam(b.gain, s.enabled ? clampBand(s.bands[i] ?? 0) : 0, t));
+      const graphic = s.enabled && s.mode !== 'parametric';
+      bands.forEach((b, i) => setParam(b.gain, graphic ? clampBand(s.bands[i] ?? 0) : 0, t));
       setParam(bass.gain, bassBoostDb(s), t);
       const { same, cross } = matrixCoefficients(stereoWidth(s));
       setParam(ll.gain, same, t);

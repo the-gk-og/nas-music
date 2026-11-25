@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ArrowLeft, AudioLines, Headphones, Waves } from '@lucide/svelte';
-  import { EQ_LABELS, EQ_MAX_DB, PRESET_NAMES, PRESETS, autoHeadroomDb, balanceLabel, presetFor, type PreampMode } from '../lib/eq';
+  import ParametricEq from '../components/ParametricEq.svelte';
+  import { EQ_LABELS, EQ_MAX_DB, PRESET_NAMES, PRESETS, autoHeadroomDb, balanceLabel, bandsFromGraphic, presetFor, type PreampMode } from '../lib/eq';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
   import type { AutoEqEntry } from '../lib/types';
@@ -57,7 +58,12 @@
   }
   function preset(name: string) {
     if (name === 'Custom') return;
-    player.setEq({ bands: [...PRESETS[name]], preset: name, enabled: true });
+    player.setEq({ bands: [...PRESETS[name]], preset: name, enabled: true, mode: 'graphic' });
+  }
+  function toParametric() {
+    // First time: start from the sliders so switching doesn't change the sound.
+    const parametric = eq.parametric?.length ? eq.parametric : bandsFromGraphic(eq.bands);
+    player.setEq({ mode: 'parametric', parametric, enabled: true });
   }
 
   // Rotary knob: drag vertically or use the wheel / arrow keys.
@@ -137,10 +143,13 @@
 
   {#if page === 'bands'}
     <div class="chips">
-      <span class="chip"><Waves size={20} /> 10</span>
-      <select class="chip sel" aria-label="Preset" value={presetFor(eq.bands)} onchange={(e) => preset(e.currentTarget.value)}>
-        {#each PRESET_NAMES as p}<option value={p} disabled={p === 'Custom'}>{p}</option>{/each}
-      </select>
+      <button class="chip" class:on={eq.mode !== 'parametric'} onclick={() => player.setEq({ mode: 'graphic' })}><Waves size={18} /> Graphic</button>
+      <button class="chip" class:on={eq.mode === 'parametric'} onclick={toParametric}><AudioLines size={18} /> Parametric</button>
+      {#if eq.mode !== 'parametric'}
+        <select class="chip sel" aria-label="Preset" value={presetFor(eq.bands)} onchange={(e) => preset(e.currentTarget.value)}>
+          {#each PRESET_NAMES as p}<option value={p} disabled={p === 'Custom'}>{p}</option>{/each}
+        </select>
+      {/if}
     </div>
     <div class="hp">
       <Headphones size={20} />
@@ -164,6 +173,9 @@
         <p class="muted small">Profiles come from the AutoEq project (MIT) and are fetched by your server when you pick one. They apply on this output only, with the EQ switched on.</p>
       </div>
     {/if}
+    {#if eq.mode === 'parametric'}
+      <ParametricEq />
+    {:else}
     <div class="bands" class:off={!eq.enabled}>
       {#each EQ_LABELS as label, i}
         <div class="band">
@@ -182,6 +194,7 @@
         </div>
       {/each}
     </div>
+    {/if}
   {:else}
     <div class="knobs">
       <div class="k">
