@@ -218,7 +218,7 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool, uploads_only: bool 
         row = existing.get(f.rel)
         if row is not None and not full and row["mtime"] == f.mtime and row["flac_bytes"] == f.size:
             res.unchanged += 1
-            if row["missing"] == 1:  # 2 = hidden duplicate: stays hidden
+            if row["missing"] == 1:  # 2 = hidden duplicate, 3 = removed by an admin: stay hidden
                 restore_ids.append(row["id"])
             continue
         try:
@@ -257,7 +257,7 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool, uploads_only: bool 
                 "title = excluded.title, track_no = excluded.track_no, disc_no = excluded.disc_no, "
                 "year = excluded.year, genre = excluded.genre, duration_s = excluded.duration_s, "
                 "flac_bytes = excluded.flac_bytes, mtime = excluded.mtime, mbid = excluded.mbid, "
-                "missing = CASE WHEN tracks.missing = 2 THEN 2 ELSE 0 END, "
+                "missing = CASE WHEN tracks.missing IN (2, 3) THEN tracks.missing ELSE 0 END, "
                 "composer = excluded.composer, lyricist = excluded.lyricist, comment = excluded.comment, "
                 "album_artist = excluded.album_artist, codec = excluded.codec, bitrate = excluded.bitrate, "
                 "sample_rate = excluded.sample_rate, bits_per_sample = excluded.bits_per_sample, "

@@ -569,3 +569,36 @@ def migrate_v9_to_v10(conn: sqlite3.Connection, schema_sql: str, make_backup: bo
         raise
     log.warning("schema v9 -> v10 done")
     return True
+
+
+# ---------- v10 -> v11 (additive; other v11 features add their tables to V11_TABLES) ----------
+
+V11_TABLES = ("library_removed", "lossless_checks")
+
+
+def migrate_v10_to_v11(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """New tables for the v11 features (library cleanup; additive). Returns True if it migrated."""
+    if current_version(conn) != 10:
+        return False
+    if make_backup:
+        dest = backup(conn, "v10-backup")
+        if dest:
+            log.warning("schema v10 -> v11: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 10:
+            conn.execute("ROLLBACK")
+            return False
+        for t in V11_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (11)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v10 -> v11 done")
+    return True

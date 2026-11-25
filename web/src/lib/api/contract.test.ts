@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { adminApi, autotagApi, familyApi, tagsApi } from './admin';
+import { adminApi, autotagApi, cleanupApi, familyApi, tagsApi } from './admin';
 import { ApiClient } from './client';
 import { uploadsApi } from './uploads';
 
@@ -101,6 +101,7 @@ describe('web client matches api/openapi.yaml', () => {
       ...(await exercise(familyApi(client), 'family.', calls)),
       ...(await exercise(autotagApi(client), 'autotag.', calls)),
       ...(await exercise(uploadsApi(client), 'uploads.', calls)),
+      ...(await exercise(cleanupApi(client), 'cleanup.', calls)),
     ];
     // Sanity: the harness really drove the client (it has well over a hundred endpoint methods).
     expect(all.length).toBeGreaterThan(150);

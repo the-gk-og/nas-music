@@ -62,7 +62,7 @@ def db(request: Request) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-QUERY_TOKEN_PATHS = ("/api/v1/stream/", "/api/v1/art/", "/api/v1/admin/logs/stream")
+QUERY_TOKEN_PATHS = ("/api/v1/stream/", "/api/v1/art/", "/api/v1/admin/logs/stream", "/api/v1/admin/preview/")
 
 
 def request_token(request: Request) -> str | None:

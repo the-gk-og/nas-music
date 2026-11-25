@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.10.0
+  version: 0.11.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,6 +10,14 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    0.11.0 (schema v11): admin library cleanup (/admin/cleanup/*). Pruning reports (never played, unplayed
+    albums, disliked/skipped, low bitrate, fake lossless, very short), search, and removal of songs, albums or
+    artists into a trash (`trash_days`, default 30) with restore. Purging deletes uploaded files, and library
+    files only when the server's `library_delete_files` is on; otherwise songs stay hidden and are listed in a
+    delete list (also as a shell script). A nightly `lossless` job flags lossless files made from MP3/AAC or
+    upsampled; duplicate copies gain `losslessVerdict`/`losslessNote`, /admin/duplicates/resolve takes
+    `remove: true` to trash the other copies, and /admin/preview/{trackId} streams any copy (hidden or removed
+    too) so an admin can compare them by ear. Removed songs drop out of every listing, like missing files.
     0.9.0 (schema v9): (1) search by lyrics. The server keeps a full-text index of the lyrics everyone sees by
     default (admin edit, else the file's own, else cached LRCLIB; per-user edits are private and not indexed),
     filled by the scan job. GET /search gains `scope=lyrics` (only lyric matches, in `lyrics`) and every library
@@ -2876,10 +2884,20 @@ paths:
               properties:
                 keepTrackId: { type: string }
                 hideTrackIds: { type: array, items: { type: string }, minItems: 1, maxItems: 100 }
+                remove: { type: boolean, default: false, description: 'v11: also move the other copies to the trash (see /admin/cleanup/remove)' }
       responses:
         '200':
           description: done
-          content: { application/json: { schema: { type: object, properties: { hidden: { type: integer }, keptId: { type: string } } } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hidden: { type: integer }
+                  keptId: { type: string }
+                  removed: { type: integer, description: 'remove: true only' }
+                  batchId: { type: string, description: 'remove: true only: the trash batch' }
+                  purgeAfter: { type: string, format: date-time, description: 'remove: true only' }
         '404': { description: unknown track }
         '422': { description: nothing to hide }
   /admin/duplicates/unhide:
@@ -2892,6 +2910,243 @@ paths:
         '200':
           description: done
           content: { application/json: { schema: { type: object, properties: { unhidden: { type: integer } } } } }
+  /admin/cleanup/summary:
+    get:
+      summary: |
+        Admin only (v11). Every pruning report's count and size, how many songs are in the trash and on the
+        delete list, fake-lossless progress, and the server's trash settings.
+      responses:
+        '200':
+          description: summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reports: { type: array, items: { $ref: '#/components/schemas/CleanupReport' } }
+                  inTrash: { type: integer }
+                  deleteList: { type: integer, description: purged songs whose file is still on disk }
+                  lossless:
+                    type: object
+                    properties:
+                      lossless: { type: integer, description: present tracks with a lossless codec }
+                      checked: { type: integer }
+                      flagged: { type: integer }
+                      byVerdict: { type: object, additionalProperties: { type: integer } }
+                  trashDays: { type: integer }
+                  deleteFiles: { type: boolean, description: 'config library_delete_files: purging deletes library files' }
+  /admin/cleanup/reports/{reportId}:
+    get:
+      summary: Admin only (v11). The items of one pruning report (present tracks only).
+      parameters:
+        - { name: reportId, in: path, required: true, schema: { type: string, enum: [never_played, unplayed_albums, disliked, low_quality, fake_lossless, short] } }
+        - { name: threshold, in: query, schema: { type: integer, minimum: 0 }, description: 'days / skips / kbps / seconds (see CleanupReport.unit); default per report' }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 5000 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  bytes: { type: integer }
+                  items: { type: array, items: { $ref: '#/components/schemas/CleanupItem' } }
+        '404': { description: unknown report }
+  /admin/cleanup/search:
+    get:
+      summary: Admin only (v11). Find artists, albums and songs to remove.
+      parameters: [ { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } } ]
+      responses:
+        '200':
+          description: matches
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  artists:
+                    type: array
+                    items: { type: object, properties: { id: { type: string }, name: { type: string }, trackCount: { type: integer }, bytes: { type: integer } } }
+                  albums:
+                    type: array
+                    items: { type: object, properties: { id: { type: string }, title: { type: string }, artist: { type: string }, year: { type: [integer, 'null'] }, trackCount: { type: integer }, bytes: { type: integer }, path: { type: [string, 'null'] } } }
+                  tracks: { type: array, items: { $ref: '#/components/schemas/CleanupItem' } }
+  /admin/cleanup/remove:
+    post:
+      summary: |
+        Admin only (v11). Move songs, whole albums or artists (their albums too) to the trash. They vanish from
+        every listing at once (tracks.missing = 3); playlists, favourites and history stay until the trash is
+        purged, so a restore puts everything back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                trackIds: { type: array, items: { type: string }, maxItems: 50000 }
+                albumIds: { type: array, items: { type: string }, maxItems: 5000 }
+                artistIds: { type: array, items: { type: string }, maxItems: 1000 }
+                reason: { type: [string, 'null'], maxLength: 200 }
+      responses:
+        '200':
+          description: removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed: { type: integer }
+                  batchId: { type: string }
+                  purgeAfter: { type: string, format: date-time }
+                  bytes: { type: integer }
+        '404': { description: nothing to remove (unknown ids, or already removed) }
+  /admin/cleanup/trash:
+    get:
+      summary: Admin only (v11). Removal batches, newest first (purged ones whose file was kept included).
+      responses:
+        '200':
+          description: trash
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trashDays: { type: integer }
+                  deleteFiles: { type: boolean }
+                  batches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        batchId: { type: string }
+                        removedAt: { type: string, format: date-time }
+                        removedBy: { type: [string, 'null'] }
+                        reason: { type: [string, 'null'] }
+                        purgeAfter: { type: string, format: date-time }
+                        count: { type: integer }
+                        bytes: { type: integer }
+                        purgedCount: { type: integer, description: purged but the file was kept (on the delete list) }
+                        purgeError: { type: [string, 'null'] }
+                        sample:
+                          type: array
+                          items: { type: object, properties: { id: { type: string }, title: { type: string }, artist: { type: string }, album: { type: string }, path: { type: string } } }
+  /admin/cleanup/trash/{batchId}:
+    get:
+      summary: Admin only (v11). Every song of one removal batch.
+      parameters: [ { name: batchId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: songs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    title: { type: string }
+                    artist: { type: string }
+                    album: { type: string }
+                    path: { type: string }
+                    bytes: { type: [integer, 'null'] }
+                    purgedAt: { type: [string, 'null'] }
+                    purgeError: { type: [string, 'null'] }
+        '404': { description: no such batch }
+  /admin/cleanup/trash/restore:
+    post:
+      summary: Admin only (v11). Take batches or songs out of the trash (a hidden duplicate goes back to hidden).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                batchIds: { type: array, items: { type: string } }
+                trackIds: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: restored
+          content: { application/json: { schema: { type: object, properties: { restored: { type: integer } } } } }
+  /admin/cleanup/trash/purge:
+    post:
+      summary: |
+        Admin only (v11). Empty these batches now instead of waiting `trashDays` (the nightly cleanup job purges
+        expired ones). Uploaded files are deleted; library files only when `deleteFiles` is on, otherwise (or if
+        deleting fails, e.g. a read-only mount) the songs stay hidden and join the delete list. Not undoable for
+        deleted files.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [batchIds]
+              properties:
+                batchIds: { type: array, items: { type: string }, minItems: 1 }
+      responses:
+        '200':
+          description: purged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  purged: { type: integer }
+                  filesDeleted: { type: integer }
+                  freedBytes: { type: integer }
+                  kept: { type: integer, description: hidden for good, file kept (delete list) }
+                  errors: { type: integer }
+  /admin/cleanup/delete-list:
+    get:
+      summary: |
+        Admin only (v11). Purged songs whose file is still on disk. `format=sh` returns a POSIX shell script
+        (`sh delete-list.sh /path/to/music`); once the files are gone the server forgets the songs.
+      parameters: [ { name: format, in: query, schema: { type: string, enum: [json, sh], default: json } } ]
+      responses:
+        '200':
+          description: list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, properties: { id: { type: string }, path: { type: string }, bytes: { type: [integer, 'null'] }, error: { type: [string, 'null'] } } }
+            text/x-shellscript: { schema: { type: string } }
+  /admin/cleanup/lossless/dismiss:
+    post:
+      summary: 'Admin only (v11). Mark fake-lossless verdicts as fine (dismissed = false flags them again).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackIds]
+              properties:
+                trackIds: { type: array, items: { type: string }, minItems: 1 }
+                dismissed: { type: boolean, default: true }
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { type: object, properties: { updated: { type: integer } } } } }
+  /admin/preview/{trackId}:
+    get:
+      summary: |
+        Admin only (v11). Stream any track, including hidden duplicates and removed songs, to compare copies by
+        ear. `original` (default) is the file as stored; `opus` transcodes at `bitrate`. Accepts `?token=` like
+        /stream. `X-Stream-Format` describes what was sent.
+      parameters:
+        - { name: trackId, in: path, required: true, schema: { type: string } }
+        - { name: format, in: query, schema: { type: string, enum: [original, opus], default: original } }
+        - { name: bitrate, in: query, schema: { type: integer, default: 192 } }
+      responses:
+        '200': { description: audio, content: { 'audio/*': { schema: { type: string, format: binary } } } }
+        '404': { description: unknown track or file missing }
   /admin/users/{userId}/devices:
     get:
       summary: Admin only. A user's devices (online from Connect).
@@ -2935,7 +3190,7 @@ paths:
     post:
       summary: Admin only. Start a job now (background). `backup` makes a manual database backup.
       parameters:
-        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, lyrics, discovery, release_radar, blends, cleanup, backup, explicit, autotag, upload_scan, smart, artist_info, podcasts, audiobooks, automix] } }
+        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, lyrics, discovery, release_radar, blends, cleanup, backup, explicit, autotag, upload_scan, smart, artist_info, podcasts, audiobooks, automix, lossless] } }
       responses:
         '200':
           description: the job's status (state running, or idle if it already finished)
@@ -5300,6 +5555,43 @@ components:
       required: [trackIds]
       properties:
         trackIds: { type: array, items: { type: string }, minItems: 1 }
+    CleanupReport:
+      type: object
+      properties:
+        id: { type: string, enum: [never_played, unplayed_albums, disliked, low_quality, fake_lossless, short] }
+        title: { type: string }
+        description: { type: string }
+        kind: { type: string, enum: [track, album] }
+        threshold: { type: [integer, 'null'] }
+        unit: { type: [string, 'null'], enum: [days, skips, kbps, seconds, null] }
+        count: { type: integer }
+        bytes: { type: integer }
+    CleanupItem:
+      type: object
+      description: a song (kind track) or a whole album (kind album; path = its folder) a report suggests pruning
+      properties:
+        kind: { type: string, enum: [track, album] }
+        id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        albumId: { type: string }
+        path: { type: [string, 'null'] }
+        bytes: { type: [integer, 'null'] }
+        durationS: { type: [number, 'null'] }
+        codec: { type: [string, 'null'] }
+        bitrate: { type: [integer, 'null'] }
+        sampleRate: { type: [integer, 'null'] }
+        bitsPerSample: { type: [integer, 'null'] }
+        plays: { type: integer, description: all users }
+        skips: { type: integer }
+        blockedBy: { type: integer, description: users who gave it a thumbs-down }
+        lastPlayed: { type: [string, 'null'] }
+        addedAt: { type: [string, 'null'] }
+        note: { type: [string, 'null'] }
+        verdict: { type: string, description: fake_lossless only }
+        trackCount: { type: integer }
+        trackIds: { type: array, items: { type: string } }
     DuplicateGroup:
       type: object
       required: [groupId, tracks]
@@ -5327,6 +5619,11 @@ components:
               hidden: { type: boolean }
               keptId: { type: [string, 'null'], description: 'hidden: the copy kept instead' }
               recommended: { type: boolean }
+              losslessVerdict:
+                type: [string, 'null']
+                enum: [ok, lossy_source, suspect, upsampled, unknown, error, null]
+                description: v11 fake-lossless checker (lossless codecs only; null = not checked yet)
+              losslessNote: { type: [string, 'null'], description: 'e.g. "cut off at 16.0 kHz: made from an MP3 ~128 kbps"' }
     Queue:
       type: object
       required: [id, name, slot, currentIndex, positionMs, trackCount, durationS, createdAt, updatedAt]

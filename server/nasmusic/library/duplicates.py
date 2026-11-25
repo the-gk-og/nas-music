@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 
 from nasmusic.core import now_iso
 from nasmusic.library import chromaprint
+from nasmusic.library.cleanup import lossless_note
 
 MIN_SIMILARITY = 0.80        # re-encodes of one recording score > 0.9; unrelated audio ~0.5-0.6
 MAX_DURATION_DIFF_S = 10
@@ -78,7 +79,8 @@ def _quality(t: dict) -> tuple:
     """Higher = better copy to keep: visible, lossless, more bits/sample rate/bitrate, not a "(2)" copy,
     shorter path."""
     stem = PurePosixPath(t["path"]).stem
-    return (not t["hidden"], (t["codec"] or "").upper() in _LOSSLESS, t["bitsPerSample"] or 0, t["sampleRate"] or 0,
+    real_lossless = (t["codec"] or "").upper() in _LOSSLESS and t.get("losslessVerdict") != "lossy_source"
+    return (not t["hidden"], real_lossless, t["bitsPerSample"] or 0, t["sampleRate"] or 0,
             t["bitrate"] or 0, not _COPY_SUFFIX.search(stem), -len(t["path"]))
 
 
@@ -102,8 +104,9 @@ def groups(conn: sqlite3.Connection) -> list[dict]:
         chunk = all_ids[i:i + 500]
         info.update({r["id"]: r for r in conn.execute(
             "SELECT t.id, t.path, t.title, t.duration_s, t.codec, t.bitrate, t.sample_rate, t.bits_per_sample, "
-            "t.flac_bytes, t.missing, ar.name AS artist, al.title AS album, h.kept_id FROM tracks t "
-            "JOIN artists ar ON ar.id = t.artist_id JOIN albums al ON al.id = t.album_id "
+            "t.flac_bytes, t.missing, ar.name AS artist, al.title AS album, h.kept_id, c.verdict, c.source_guess, "
+            "c.cutoff_hz FROM tracks t JOIN artists ar ON ar.id = t.artist_id JOIN albums al ON al.id = t.album_id "
+            "LEFT JOIN lossless_checks c ON c.track_id = t.id AND c.mtime = t.mtime "
             f"LEFT JOIN duplicate_hidden h ON h.track_id = t.id WHERE t.id IN ({','.join('?' * len(chunk))})",
             chunk)})
     out = []
@@ -112,7 +115,11 @@ def groups(conn: sqlite3.Connection) -> list[dict]:
                    "album": info[t]["album"], "durationS": info[t]["duration_s"], "codec": info[t]["codec"],
                    "bitrate": info[t]["bitrate"], "sampleRate": info[t]["sample_rate"],
                    "bitsPerSample": info[t]["bits_per_sample"], "bytes": info[t]["flac_bytes"],
-                   "hidden": info[t]["missing"] == 2, "keptId": info[t]["kept_id"]} for t in tids if t in info]
+                   "hidden": info[t]["missing"] == 2, "keptId": info[t]["kept_id"],
+                   # v11 fake-lossless checker: ok | lossy_source | suspect | upsampled | unknown | error | None
+                   "losslessVerdict": info[t]["verdict"],
+                   "losslessNote": lossless_note(info[t]["verdict"], info[t]["source_guess"], info[t]["cutoff_hz"])}
+                  for t in tids if t in info]
         if len(tracks) < 2:
             continue
         tracks.sort(key=_quality, reverse=True)

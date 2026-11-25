@@ -22,7 +22,7 @@ OLD_VERSIONS = list(range(1, db.SCHEMA_VERSION))
 # Versions whose fixture holds every table we care about filling generically (v1-v4 are covered with real
 # data by test_v1_rows_survive / test_v4_rows_survive below; their steps move columns between tables).
 FILLABLE = [v for v in OLD_VERSIONS if v >= 5]
-STEPS = {5: "migrate_v5_to_v6", 6: "migrate_v6_to_v7", 7: "migrate_v7_to_v8", 8: "migrate_v8_to_v9", 9: "migrate_v9_to_v10"}
+STEPS = {5: "migrate_v5_to_v6", 6: "migrate_v6_to_v7", 7: "migrate_v7_to_v8", 8: "migrate_v8_to_v9", 9: "migrate_v9_to_v10", 10: "migrate_v10_to_v11"}
 
 
 # ---------- helpers ----------
