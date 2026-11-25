@@ -112,6 +112,6 @@ jobs:
           ls -la dist
           gh release create "$tag" dist/* \
             --target "${{ github.sha }}" \
-            --title "nas-music desktop v${VERSION}" \
+            --title "Homebeat desktop v${VERSION}" \
             --notes "Desktop app v${VERSION} from ${GITHUB_SHA::7}: Linux AppImage/deb, Windows installer (NSIS/MSI), macOS dmg (universal). Unsigned builds." \
             --latest=false

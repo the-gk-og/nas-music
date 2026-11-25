@@ -23,10 +23,10 @@ re-seeking when it drifts more than 1.5 s).
 
 | Piece | Where |
 | --- | --- |
-| Tables `jams`, `jam_guests`, `jam_requests`, `jam_votes` (schema **v6**, additive) | `server/nasmusic/db/schema.sql`, `migrations.migrate_v5_to_v6` |
-| Database logic | `server/nasmusic/jam/__init__.py` |
-| Guest WebSocket hub | `server/nasmusic/jam/hub.py` |
-| HTTP + WebSocket | `server/nasmusic/app/jam_api.py`, `api/openapi.yaml` tag `jam` |
+| Tables `jams`, `jam_guests`, `jam_requests`, `jam_votes` (schema **v6**, additive) | `server/homebeat/db/schema.sql`, `migrations.migrate_v5_to_v6` |
+| Database logic | `server/homebeat/jam/__init__.py` |
+| Guest WebSocket hub | `server/homebeat/jam/hub.py` |
+| HTTP + WebSocket | `server/homebeat/app/jam_api.py`, `api/openapi.yaml` tag `jam` |
 | Guest page | `web/jam.html` + `web/src/jam/` (its own ~22 kB gzip bundle, served at `/jam/<code>`) |
 | Host UI | `web/src/components/JamSheet.svelte`, `android/.../ui/screens/JamSheet.kt` |
 

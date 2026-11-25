@@ -5,7 +5,7 @@
  *   L' = S + k·M + (1-k)·LP(M),  R' = -S + k·M + (1-k)·LP(M)
  * so the centre drops to k (-20 dB) above ~150 Hz while bass and kick (also centred) survive through a 4th-order
  * low-pass. Stereo-panned instruments and reverb stay. Same maths as the server's `/stream?karaoke=true` ffmpeg
- * filter (server/nasmusic/stream/transcode.py) and Android's KaraokeProcessor, so it sounds the same everywhere.
+ * filter (server/homebeat/stream/transcode.py) and Android's KaraokeProcessor, so it sounds the same everywhere.
  */
 import type { AudioCtxLike } from './eq';
 

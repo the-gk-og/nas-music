@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from nasmusic.app.weather import Weather, decode_geohash
+from homebeat.app.weather import Weather, decode_geohash
 from tests.conftest import track_ids
 
 API = "/api/v1"

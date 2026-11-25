@@ -6,10 +6,10 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
-from nasmusic import auth
-from nasmusic.app import create_app
-from nasmusic.app.scheduler import Jobs
-from nasmusic.core import get_setting
+from homebeat import auth
+from homebeat.app import create_app
+from homebeat.app.scheduler import Jobs
+from homebeat.core import get_setting
 
 
 def _admin_id(conn):
@@ -76,7 +76,7 @@ def test_pair_page_qr_payload(web, conn):
     from PIL import Image
 
     Image.open(io.BytesIO(png)).verify()
-    from nasmusic.auth import qr
+    from homebeat.auth import qr
 
     ctx = web.app.state.ctx
     p = qr.payload(ctx.cfg, ctx.server_id, ctx.cert_sha256, code)
@@ -127,7 +127,7 @@ def test_settings_and_jobs(web, conn):
 
 
 def test_job_failure_recorded(cfg, conn, monkeypatch):
-    from nasmusic.ai import api as ai
+    from homebeat.ai import api as ai
 
     def boom(*a, **k):
         raise RuntimeError("model missing")
@@ -156,7 +156,7 @@ def test_scheduler_jobs_registered(cfg):
 def test_progress_prefers_ai_status_key(conn):
     import json
 
-    from nasmusic.web import _analysis_progress
+    from homebeat.web import _analysis_progress
 
     conn.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES ('ai.status.model_version', ?)",

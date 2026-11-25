@@ -1,7 +1,7 @@
 """Admin want-list view (GET/PUT/DELETE /admin/wants*, schema v8 toget_admin): every user's To get items,
 check-off with a note, un-check, "found in library" suggestions, and what the user sees of it."""
-from nasmusic import db
-from nasmusic.db import migrations
+from homebeat import db
+from homebeat.db import migrations
 from tests.conftest import make_flac
 
 API = "/api/v1"

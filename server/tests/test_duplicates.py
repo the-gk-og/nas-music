@@ -5,10 +5,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from nasmusic import db
-from nasmusic.core import now_iso
-from nasmusic.db import migrations
-from nasmusic.library import chromaprint, duplicates, scanner
+from homebeat import db
+from homebeat.core import now_iso
+from homebeat.db import migrations
+from homebeat.library import chromaprint, duplicates, scanner
 from tests.conftest import track_ids
 
 
@@ -128,7 +128,7 @@ V5_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v5.sql").read_text()
 
 
 def test_v5_to_v6(tmp_path):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = db.connect(path)
     conn.executescript(V5_SCHEMA)
     conn.execute("INSERT INTO schema_version (version) VALUES (5)")
@@ -150,7 +150,7 @@ def test_v5_to_v6(tmp_path):
     for t in migrations.V6_TABLES:
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert len(list(tmp_path.glob("nasmusic.db.v5-backup-*"))) == 1
+    assert len(list(tmp_path.glob("homebeat.db.v5-backup-*"))) == 1
     db.init(conn)
     assert len(list(tmp_path.glob("*-backup-*"))) == 1
 

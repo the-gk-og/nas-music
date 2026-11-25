@@ -38,7 +38,7 @@ def test_track_info(client, conn):
 
 
 def test_scanner_reads_song_info_tags(cfg, conn, base_flac):
-    from nasmusic.library import scanner
+    from homebeat.library import scanner
     from tests.conftest import make_flac
 
     make_flac(base_flac, cfg.library_root / "Extra" / "x.flac", title="X", artist="A", composer="Bach",

@@ -4,7 +4,7 @@ the numpy fallback on a synthetic track, and the resumable job + API exposure.""
 import numpy as np
 import pytest
 
-from nasmusic.ai import djmix
+from homebeat.ai import djmix
 
 SR = 22050
 

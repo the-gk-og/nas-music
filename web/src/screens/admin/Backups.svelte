@@ -52,7 +52,7 @@
       const url = await A.downloadBackup(b.id);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `nas-music-backup-${b.createdAt.slice(0, 10)}.db`;
+      a.download = `homebeat-backup-${b.createdAt.slice(0, 10)}.db`;
       a.click();
       if (url.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (e) {

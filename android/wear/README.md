@@ -1,11 +1,11 @@
-# nas-music for Wear OS (`android/wear`)
+# Homebeat for Wear OS (`android/wear`)
 
 A standalone Wear OS app (Wear OS 3+, minSdk 30). It talks to the server only over the network. It does
 not use Play Services or the Wear Data Layer, so it works without the phone app.
 
 Build: `cd android && ./gradlew :wear:assembleDebug :wear:testDebugUnitTest`.
 APK: `android/wear/build/outputs/apk/debug/wear-debug.apk`.
-CI attaches `nasmusic-wear-v0.1.<n>.apk` (release, R8-shrunk) to each Android release.
+CI attaches `homebeat-wear-v0.1.<n>.apk` (release, R8-shrunk) to each Android release.
 
 ## What it does
 - **Sign in**: enter the server address. The watch probes `/server-info` and asks you to trust the cert
@@ -57,5 +57,5 @@ At build time, `syncPhoneSharedSources` copies these from `android/app` into `bu
 `net/`, `data/api/`, `data/FeedRepository.kt`, `connect/ConnectProtocol.kt`, `pairing/SecureStore.kt`,
 `auth/AuthRepository.kt` and `sync/Downloader.kt`. The phone module is not modified. If those files start
 depending on more phone code, this build breaks. In that case, extract a `:core` library module.
-`org/nasmusic/app/diag/BugReportTypes.kt` here stands in for the phone's `diag/BugReport.kt`, which needs
+`org/homebeat/app/diag/BugReportTypes.kt` here stands in for the phone's `diag/BugReport.kt`, which needs
 the phone's BuildConfig.

@@ -32,7 +32,7 @@ export class AdminError extends Error {
   }
 }
 
-const LOGGERS = ['nasmusic.app', 'nasmusic.library.scan', 'nasmusic.stream', 'nasmusic.ai.analyse', 'nasmusic.connect', 'uvicorn.access'];
+const LOGGERS = ['homebeat.app', 'homebeat.library.scan', 'homebeat.stream', 'homebeat.ai.analyse', 'homebeat.connect', 'uvicorn.access'];
 const MESSAGES: [string, string][] = [
   ['INFO', 'GET /api/v1/home 200 (14 ms)'],
   ['INFO', 'scan: 0 new, 0 changed, 0 missing (2.1 s)'],
@@ -114,14 +114,14 @@ export class MockAdmin {
   ];
   offsite: OffsiteStatus = {
     configured: true,
-    destination: '/mnt/backup/nasmusic',
+    destination: '/mnt/backup/homebeat',
     kind: 'folder',
     keep: 14,
     includeConfig: true,
-    last: { at: iso(Date.now() - 10 * 3600e3), ok: true, error: null, name: 'nasmusic-scheduled-20261124T041500Z.db.gz' },
+    last: { at: iso(Date.now() - 10 * 3600e3), ok: true, error: null, name: 'homebeat-scheduled-20261124T041500Z.db.gz' },
     items: [
-      { name: 'nasmusic-scheduled-20261124T041500Z.db.gz', kind: 'scheduled', bytes: 16e6, createdAt: iso(Date.now() - 10 * 3600e3) },
-      { name: 'nasmusic-scheduled-20261123T041500Z.db.gz', kind: 'scheduled', bytes: 16e6, createdAt: iso(Date.now() - 34 * 3600e3) },
+      { name: 'homebeat-scheduled-20261124T041500Z.db.gz', kind: 'scheduled', bytes: 16e6, createdAt: iso(Date.now() - 10 * 3600e3) },
+      { name: 'homebeat-scheduled-20261123T041500Z.db.gz', kind: 'scheduled', bytes: 16e6, createdAt: iso(Date.now() - 34 * 3600e3) },
     ],
     error: null,
   };
@@ -187,13 +187,13 @@ export class MockAdmin {
     j.finishedAt = null;
     j.ok = null;
     j.error = null;
-    this.addLog(Date.now(), 'INFO', `${name}: started (manual)`, 'nasmusic.jobs');
+    this.addLog(Date.now(), 'INFO', `${name}: started (manual)`, 'homebeat.jobs');
     setTimeout(() => {
       j.state = 'idle';
       j.finishedAt = iso();
       j.ok = true;
       j.durationS = 4;
-      this.addLog(Date.now(), 'INFO', `${name}: finished in 4.0 s`, 'nasmusic.jobs');
+      this.addLog(Date.now(), 'INFO', `${name}: finished in 4.0 s`, 'homebeat.jobs');
       this.history.unshift({ id: 'run' + Date.now(), name, startedAt: j.startedAt!, finishedAt: j.finishedAt, ok: true, durationS: 4, trigger: 'manual', summary: null });
       if (name === 'backup') this.backups.unshift({ id: 'b' + Date.now(), createdAt: iso(), bytes: 49e6, kind: 'manual' });
     }, 4000);
@@ -204,7 +204,7 @@ export class MockAdmin {
     const n = id ? this.failed.filter((f) => f.id === id).length : this.failed.length;
     if (id && !n) throw new AdminError(404, 'not found');
     this.failed = id ? this.failed.filter((f) => f.id !== id) : [];
-    this.addLog(Date.now(), 'INFO', `retry: ${n} file(s) queued`, 'nasmusic.library.scan');
+    this.addLog(Date.now(), 'INFO', `retry: ${n} file(s) queued`, 'homebeat.library.scan');
     return { queued: n };
   }
 
@@ -228,7 +228,7 @@ export class MockAdmin {
     c.count = Math.max(0, c.count - n);
     if (c.bytes) c.bytes = Math.max(0, c.bytes - (freed ?? 0));
     if (id === 'old_backups') this.backups = this.backups.slice(0, 5);
-    this.addLog(Date.now(), 'INFO', `health: ${c.fix.label.toLowerCase()} — ${n} item(s)`, 'nasmusic.admin');
+    this.addLog(Date.now(), 'INFO', `health: ${c.fix.label.toLowerCase()} — ${n} item(s)`, 'homebeat.admin');
     return { fixed: n, freedBytes: freed };
   }
 

@@ -5,8 +5,8 @@ from datetime import timedelta
 
 import numpy as np
 
-from nasmusic.ai.common import ensure_default_settings
-from nasmusic.ai.recommender import Recommender, TasteModel, event_weight
+from homebeat.ai.common import ensure_default_settings
+from homebeat.ai.recommender import Recommender, TasteModel, event_weight
 from tests.ai.conftest import NOW, USER
 
 
@@ -143,7 +143,7 @@ def test_latest_thumb_wins_and_clear_cancels(conn, cfg, synth):
 def test_likely_next_ranks_taste(conn, cfg, synth):
     from datetime import timedelta
 
-    from nasmusic.ai import api
+    from homebeat.ai import api
     from tests.ai.conftest import NOW, USER
     for t in synth.by_cluster(0)[:20]:
         for d in (3, 10):

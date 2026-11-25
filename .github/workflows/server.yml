@@ -19,7 +19,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/nasmusic
+  IMAGE: ghcr.io/${{ github.repository_owner }}/homebeat
+  # Pre-rename image name, still published (same image) so installs pulling .../nasmusic:latest keep updating.
+  LEGACY_IMAGE: ghcr.io/${{ github.repository_owner }}/nasmusic
 
 jobs:
   test:
@@ -65,7 +67,9 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE }}
+          images: |
+            ${{ env.IMAGE }}
+            ${{ env.LEGACY_IMAGE }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
@@ -85,4 +89,4 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker run --rm --entrypoint python ${{ fromJSON(steps.meta.outputs.json).tags[0] }} \
-            -c "import nasmusic, essentia, piper; print('nasmusic + essentia + piper import ok')"
+            -c "import homebeat, essentia, piper; print('homebeat + essentia + piper import ok')"

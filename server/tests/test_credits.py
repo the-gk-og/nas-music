@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from nasmusic.library import credits
+from homebeat.library import credits
 
 API = "/api/v1"
 REC = "11111111-1111-1111-1111-111111111111"
@@ -58,7 +58,7 @@ class Fake:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         u = request.url
         self.calls.append(u)
-        assert request.headers["user-agent"].startswith("nas-music/")
+        assert request.headers["user-agent"].startswith("Homebeat/")
         if self.over.get("down"):
             raise httpx.ConnectError("down")
         assert u.host == "musicbrainz.org"
@@ -203,12 +203,12 @@ def test_credits_and_person_api(app, client, scanned):
 
 
 def test_first_open_queues_a_lookup(app, client, scanned):
-    from nasmusic.app import credits_api
+    from homebeat.app import credits_api
 
     c = app.state.ctx
     c.cfg.credits_enabled = True
     fake = Fake()
-    c.credits_fetcher = credits.Fetcher(lambda: __import__("nasmusic.core", fromlist=["open_db"]).open_db(c.cfg),
+    c.credits_fetcher = credits.Fetcher(lambda: __import__("homebeat.core", fromlist=["open_db"]).open_db(c.cfg),
                                         httpx.MockTransport(fake))
     c.credits_fetcher.http.mb_interval_s = 0
     opening = tid(scanned, "Opening")

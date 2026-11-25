@@ -5,7 +5,7 @@ import time
 
 from tests.conftest import track_ids
 
-from nasmusic.stream.transcode import OpusCache
+from homebeat.stream.transcode import OpusCache
 
 
 def test_flac_full_and_range(client, conn, cfg):
@@ -111,7 +111,7 @@ def test_art_endpoint(client, conn):
 # ---------- quality selection ----------
 
 def test_snap_bitrate():
-    from nasmusic.stream import OPUS_BITRATES, snap_bitrate
+    from homebeat.stream import OPUS_BITRATES, snap_bitrate
     assert OPUS_BITRATES == (64, 96, 128, 160, 192, 256)
     for b in OPUS_BITRATES:
         assert snap_bitrate(b) == b
@@ -124,7 +124,7 @@ def test_snap_bitrate():
 
 
 def test_labels():
-    from nasmusic.stream import opus_label, original_label
+    from homebeat.stream import opus_label, original_label
     assert original_label("FLAC", 16, 44100, 900) == "FLAC 16/44.1"
     assert original_label("FLAC", 24, 96000, None) == "FLAC 24/96"
     assert original_label("FLAC", None, 48000, None) == "FLAC 48 kHz"

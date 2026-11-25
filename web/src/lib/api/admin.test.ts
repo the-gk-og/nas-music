@@ -58,11 +58,11 @@ it('formats ETA and uptime', () => {
 });
 
 it('filters logs by level and text', () => {
-  const e = (seq: number, level: string, message: string): LogEntry => ({ seq, at: '', level, logger: 'nasmusic.app', message });
+  const e = (seq: number, level: string, message: string): LogEntry => ({ seq, at: '', level, logger: 'homebeat.app', message });
   const logs = [e(1, 'DEBUG', 'cache hit'), e(2, 'INFO', 'scan done'), e(3, 'WARNING', 'slow scan'), e(4, 'ERROR', 'decode failed')];
   expect(filterLogs(logs, 'WARNING', '').map((x) => x.seq)).toEqual([3, 4]);
   expect(filterLogs(logs, 'DEBUG', 'scan').map((x) => x.seq)).toEqual([2, 3]);
-  expect(filterLogs(logs, 'INFO', 'NASMUSIC').length).toBe(3);
+  expect(filterLogs(logs, 'INFO', 'HOMEBEAT').length).toBe(3);
 });
 
 describe('tag fixing helpers', () => {

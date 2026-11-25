@@ -9,7 +9,7 @@ import wave
 import httpx
 import pytest
 
-from nasmusic.djvoice import script, tts
+from homebeat.djvoice import script, tts
 
 
 def fake_wav(text: str, seconds: float = 0.6) -> bytes:

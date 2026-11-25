@@ -6,7 +6,7 @@ import subprocess
 import numpy as np
 import pytest
 
-from nasmusic.library import lossless
+from homebeat.library import lossless
 from tests.conftest import track_ids
 
 

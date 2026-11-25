@@ -1,11 +1,11 @@
 <resources>
-    <style name="Theme.NasMusic" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.Homebeat" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
-    <!-- "Share to nas-music": a dialog over the sharing app. -->
-    <style name="Theme.NasMusic.Translucent" parent="android:Theme.Material.NoActionBar">
+    <!-- "Share to Homebeat": a dialog over the sharing app. -->
+    <style name="Theme.Homebeat.Translucent" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:backgroundDimEnabled">true</item>

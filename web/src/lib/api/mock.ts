@@ -406,7 +406,7 @@ export class MockBackend {
     }
     if (path === '/me/devices') return this.hub.devices().map((d) => ({ id: d.id, name: d.name, kind: d.kind, online: d.online, lastSeen: iso(), current: d.id === who.deviceId }));
     if ((r = m(/^\/me\/devices\/([^/]+)$/)) && method === 'DELETE') return undefined;
-    if (path === '/me/pair-code') return { pairCode: 'ABCD2345', qrPayload: 'nasmusic://pair?code=ABCD2345' };
+    if (path === '/me/pair-code') return { pairCode: 'ABCD2345', qrPayload: 'homebeat://pair?code=ABCD2345' };
     if (path === '/me/settings') {
       if (method === 'PUT') Object.assign(this.settings, (body.settings as Record<string, unknown>) ?? {});
       return { settings: this.settings };

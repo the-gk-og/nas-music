@@ -1,4 +1,4 @@
-# nas-music relay client — lives on the NAS at /data/relay/frpc.toml (inside the nasmusic data volume).
+# Homebeat relay client — lives on the NAS at /data/relay/frpc.toml (inside the homebeat data volume).
 # Replace FRIEND_ADDRESS (friend's DDNS name or public IP) and FRP_TOKEN (same as the friend's stack).
 
 serverAddr = "FRIEND_ADDRESS"   # e.g. server.example.com
@@ -10,9 +10,9 @@ transport.tls.enable = true
 transport.poolCount = 5
 
 # Public port 80/443 on the friend's server -> Caddy on the NAS. PROXY protocol v2 carries the real
-# visitor IP to Caddy (and from there to nasmusic as X-Forwarded-For).
+# visitor IP to Caddy (and from there to homebeat as X-Forwarded-For).
 [[proxies]]
-name = "nasmusic-http"
+name = "homebeat-http"
 type = "tcp"
 localIP = "caddy"
 localPort = 80
@@ -20,7 +20,7 @@ remotePort = 80
 transport.proxyProtocolVersion = "v2"
 
 [[proxies]]
-name = "nasmusic-https"
+name = "homebeat-https"
 type = "tcp"
 localIP = "caddy"
 localPort = 443

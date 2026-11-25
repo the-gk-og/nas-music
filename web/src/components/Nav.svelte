@@ -74,7 +74,7 @@
 </script>
 
 <nav class="nav {form}" aria-label="Main">
-  {#if form === 'desktop'}<div class="brand"><span class="ring"></span>nas-music</div>{/if}
+  {#if form === 'desktop'}<div class="brand"><span class="ring"></span>Homebeat</div>{/if}
   <div class="dests">
     {#each tabs as t (t.id)}
       {@const Icon = ICONS[t.id]}

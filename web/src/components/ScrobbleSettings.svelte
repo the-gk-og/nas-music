@@ -163,7 +163,7 @@
             <button class="btn" disabled={busy || lfmWaiting} onclick={connectLfm}>{lfmWaiting ? 'Waiting for approval on last.fm…' : 'Connect Last.fm'}</button>
             {#if lfmWaiting}<button class="btn" onclick={() => (lfmWaiting = false)}>Cancel</button>{/if}
           </div>
-          {#if lfmWaiting && lfmUrl}<div class="muted small">Approve nas-music on last.fm. Nothing opened? <a href={lfmUrl} target="_blank" rel="noopener noreferrer">Open the Last.fm page</a> (or copy it to a browser where you're signed in).</div>{/if}
+          {#if lfmWaiting && lfmUrl}<div class="muted small">Approve Homebeat on last.fm. Nothing opened? <a href={lfmUrl} target="_blank" rel="noopener noreferrer">Open the Last.fm page</a> (or copy it to a browser where you're signed in).</div>{/if}
         {:else}
           <div class="muted small">Your server admin needs to add a Last.fm API key and secret to config.toml first.</div>
         {/if}

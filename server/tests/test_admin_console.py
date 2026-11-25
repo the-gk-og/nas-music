@@ -8,7 +8,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from nasmusic import auth
+from homebeat import auth
 from tests.conftest import make_flac, track_ids
 
 API = "/api/v1"
@@ -178,7 +178,7 @@ def test_fix_missing_removes_from_db_with_backup(client, conn, cfg, app):
     checks = {c["id"]: c for c in client.get(f"{ADMIN}/health").json()}
     assert checks["missing"]["count"] == 1 and checks["missing"]["fix"]["destructive"] is True
     r = client.post(f"{ADMIN}/health/missing/fix", json={"ids": [gone]}).json()
-    assert r["fixed"] == 1 and r["backup"].startswith("nasmusic-prune-")
+    assert r["fixed"] == 1 and r["backup"].startswith("homebeat-prune-")
     assert conn.execute("SELECT COUNT(*) FROM tracks WHERE id = ?", (gone,)).fetchone()[0] == 0
     assert [t["id"] for t in client.get(f"{API}/playlists/{pl['id']}").json()["tracks"]] == [ids["Song 1"],
                                                                                            ids["Opening"]]
@@ -225,12 +225,12 @@ def test_server_health(client):
 
 
 def test_logs_poll_filter_and_sse(client, app):
-    log = logging.getLogger("nasmusic.test")
+    log = logging.getLogger("homebeat.test")
     log.setLevel(logging.INFO)
     log.warning("visible line /api/v1/stream/x?token=SECRET123 and Bearer abc.def")
     log.warning("other line")
     recs = client.get(f"{ADMIN}/logs", params={"level": "WARNING", "q": "VISIBLE"}).json()
-    assert [r["message"][:12] for r in recs if r["logger"] == "nasmusic.test"] == ["visible line"]
+    assert [r["message"][:12] for r in recs if r["logger"] == "homebeat.test"] == ["visible line"]
     assert "SECRET123" not in recs[-1]["message"] and "abc.def" not in recs[-1]["message"]
     after = recs[-1]["seq"]
     assert all(r["seq"] > after for r in client.get(f"{ADMIN}/logs", params={"after": after, "level": "DEBUG"}).json())
@@ -256,11 +256,11 @@ def test_backups(client, cfg):
     r = client.get(f"{ADMIN}/backups/{b['id']}/download")
     assert r.status_code == 200 and r.content[:16] == b"SQLite format 3\x00"
     assert "attachment" in r.headers["content-disposition"]
-    for bad in ("nasmusic.db", "..%2Fconfig.toml", "config.toml", "nasmusic-manual-1.db"):
+    for bad in ("homebeat.db", "..%2Fconfig.toml", "config.toml", "homebeat-manual-1.db"):
         assert client.get(f"{ADMIN}/backups/{bad}/download").status_code == 404
     assert client.delete(f"{ADMIN}/backups/{b['id']}").status_code == 204
     assert client.delete(f"{ADMIN}/backups/{b['id']}").status_code == 404
-    assert (cfg.data_dir / "nasmusic.db").exists()
+    assert (cfg.data_dir / "homebeat.db").exists()
 
 
 # ---------- now playing ----------
@@ -319,8 +319,8 @@ def test_server_settings(client, app):
 
 
 def test_settings_survive_restart(cfg, scanned, conn):
-    from nasmusic.app import create_app
-    from nasmusic.app.scheduler import Jobs
+    from homebeat.app import create_app
+    from homebeat.app.scheduler import Jobs
     from tests.conftest import offline, user_client
 
     app = offline(create_app(cfg, jobs=Jobs(cfg)))
@@ -403,7 +403,7 @@ def test_bug_reports_expire(client, conn, app):
 
 def test_bug_report_as_the_android_app_sends_it(client, bob):
     """The exact shape android/.../diag/BugReport.kt sends (≤ 1.5 MB after its own trimming), listed for admins."""
-    logs = "\n".join(f'11-24 10:00:00.000 1234 1234 I nas-music: "q" line {i} ' + "é" * 300 for i in range(2000))
+    logs = "\n".join(f'11-24 10:00:00.000 1234 1234 I Homebeat: "q" line {i} ' + "é" * 300 for i in range(2000))
     crash = "===== crash-1764000000000.txt =====\ncrash at 2026-11-24T10:00:00Z\napp 0.7.0 (70) · Google Pixel 8\n" \
             "thread main · screen now\njava.lang.IllegalStateException: boom\n\tat x.y(Z.kt:1)"
     body = {"appVersion": "0.7.0 (70)", "platform": "Android 15 · Google Pixel 8", "logs": logs, "crash": crash,

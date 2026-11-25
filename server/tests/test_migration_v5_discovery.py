@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from nasmusic import db
-from nasmusic.db import migrations
+from homebeat import db
+from homebeat.db import migrations
 
 V4_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v4.sql").read_text()
 
@@ -18,7 +18,7 @@ def make_v4(path: Path):
 
 
 def test_v4_to_v5(tmp_path):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v4(path).close()
     conn = db.connect(path)
     db.init(conn)
@@ -28,7 +28,7 @@ def test_v4_to_v5(tmp_path):
     assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'blend_members_user'").fetchone()
     assert conn.execute("SELECT username FROM users").fetchone()[0] == "owner"
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert len(list(tmp_path.glob("nasmusic.db.v4-backup-*"))) == 1
+    assert len(list(tmp_path.glob("homebeat.db.v4-backup-*"))) == 1
     for _ in range(2):
         db.init(conn)
     assert len(list(tmp_path.glob("*-backup-*"))) == 1
@@ -36,7 +36,7 @@ def test_v4_to_v5(tmp_path):
 
 
 def test_v4_to_v5_failure_rolls_back(tmp_path, monkeypatch):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v4(path).close()
     real = migrations._create_indexes
 

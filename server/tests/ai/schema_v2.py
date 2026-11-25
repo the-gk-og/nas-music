@@ -1,13 +1,13 @@
 """Schema v2 for AI tests, built from docs/v2.md §2 and §10 until server core's migration lands.
 
 Starts from the v1 schema.sql and applies the spec's deltas for the tables the AI engine touches.
-Additions the spec does not define (proposed to server core, see nasmusic/ai/README.md "Spec gaps"):
+Additions the spec does not define (proposed to server core, see homebeat/ai/README.md "Spec gaps"):
 * `user_settings` primary key (user_id, key) and JSON `value`;
 * `mixes.kind` also allows 'context' (context mixes: Workout, Drive, Late night, At <place>).
 """
 from __future__ import annotations
 
-from nasmusic import db
+from homebeat import db
 
 V2_DDL = """
 CREATE TABLE users (

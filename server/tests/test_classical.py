@@ -1,7 +1,7 @@
 """Classical music (schema v10): work/movement from tags or titles, composers and works API, backfill."""
 import pytest
 
-from nasmusic.library import classical, scanner
+from homebeat.library import classical, scanner
 from tests.conftest import make_flac
 
 
@@ -49,7 +49,7 @@ def _classical_album(cfg, base_flac):
 
 
 def _conn(cfg):
-    from nasmusic.core import open_db
+    from homebeat.core import open_db
     return open_db(cfg)
 
 

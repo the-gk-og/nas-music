@@ -11,9 +11,9 @@ import httpx
 import numpy as np
 import pytest
 
-from nasmusic.ai import api, discovery
-from nasmusic.ai.common import ensure_default_settings, norm_name
-from nasmusic.ai.discovery import USER_AGENT, Discovery, Http, buy_links
+from homebeat.ai import api, discovery
+from homebeat.ai.common import ensure_default_settings, norm_name
+from homebeat.ai.discovery import USER_AGENT, Discovery, Http, buy_links
 from tests.ai.conftest import NOW, USER
 
 # similar-artist graph served by the fake ListenBrainz

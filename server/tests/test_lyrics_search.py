@@ -4,10 +4,10 @@ from pathlib import Path
 
 from mutagen.flac import FLAC
 
-from nasmusic import db
-from nasmusic.core import iso
-from nasmusic.db import migrations
-from nasmusic.library import lyrics_index, overrides
+from homebeat import db
+from homebeat.core import iso
+from homebeat.db import migrations
+from homebeat.library import lyrics_index, overrides
 from tests.conftest import track_ids
 
 V8_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v8.sql").read_text()
@@ -29,7 +29,7 @@ def _bump_mtime(conn, tid):
 # ---------- migration ----------
 
 def test_v8_to_v9(tmp_path):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = db.connect(path)
     conn.executescript(V8_SCHEMA)
     conn.execute("INSERT INTO schema_version (version) VALUES (8)")
@@ -40,7 +40,7 @@ def test_v8_to_v9(tmp_path):
     assert {"track_id", "source", "mtime", "indexed_at"} <= migrations._columns(conn, "lyrics_index")
     conn.execute("INSERT INTO lyrics_fts (track_id, body) VALUES ('t', 'hello')")
     assert conn.execute("SELECT track_id FROM lyrics_fts WHERE lyrics_fts MATCH 'hello'").fetchone()[0] == "t"
-    assert len(list(tmp_path.glob("nasmusic.db.v8-backup-*"))) == 1
+    assert len(list(tmp_path.glob("homebeat.db.v8-backup-*"))) == 1
     assert not migrations.migrate_v8_to_v9(conn, db.schema_sql())
 
 
@@ -134,7 +134,7 @@ def _play(conn, uid, tid, at: datetime, n: int = 1):
 
 
 def test_on_this_day_shelf(client, conn):
-    from nasmusic.app import onthisday
+    from homebeat.app import onthisday
 
     ids = track_ids(conn)
     now = datetime.now(UTC)

@@ -4,7 +4,7 @@ import uuid
 import pytest
 from tests.conftest import track_ids
 
-from nasmusic.ai import api as ai
+from homebeat.ai import api as ai
 
 
 def ev(type_, track, at="2026-11-18T10:00:00Z", **kw):
@@ -235,11 +235,11 @@ def test_suggestions(client, conn):
 
 
 def test_sync_smart_candidates(client, conn, monkeypatch):
-    from nasmusic.app import ai_adapter as adapter
+    from homebeat.app import ai_adapter as adapter
     ids = track_ids(conn)
     _make_mix(conn, "m1", "daily", [ids["Opening"]])
     _make_mix(conn, "wk", "daily", [ids["Closing"]], active=0,
-              created=__import__("nasmusic.core", fromlist=["now_iso"]).now_iso())
+              created=__import__("homebeat.core", fromlist=["now_iso"]).now_iso())
     _make_mix(conn, "old", "daily", [ids["untagged"]], active=0, created="2020-01-01T00:00:00Z")
     client.put(f"/api/v1/favourites/{ids['Song 1']}")
     monkeypatch.setattr(adapter, "likely_next", lambda *a: {ids["Song 2"]: 0.9, ids["Opening"]: 0.5})

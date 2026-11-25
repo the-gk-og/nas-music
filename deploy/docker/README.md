@@ -1,9 +1,9 @@
-# Installing nas-music with Docker
+# Installing Homebeat with Docker
 
-This guide sets up the nas-music server (with the web player built in) on a NAS or any Linux machine that runs
+This guide sets up the Homebeat server (with the web player built in) on a NAS or any Linux machine that runs
 Docker: Synology, Unraid, QNAP, OpenMediaVault, TrueNAS SCALE or a plain server. It takes about 15 minutes.
 
-If you already run nas-music from `deploy/full` or `deploy/dockhand`, you don't need this: those keep working.
+If you already run Homebeat from `deploy/full` or `deploy/dockhand`, you don't need this: those keep working.
 The TrueNAS-specific notes (datasets, ACLs, Cloudflare, uploads, casting, scrobbling) are in
 [`deploy/README.md`](../README.md).
 
@@ -23,8 +23,8 @@ The TrueNAS-specific notes (datasets, ACLs, Cloudflare, uploads, casting, scrobb
 You need two files from this repository's `deploy/docker` folder: `compose.yaml` and `.env.example`
 (`compose.host-network.yaml` too if you want speakers found automatically, see step 7).
 
-Put them in a folder on the NAS, for example `/volume1/docker/nasmusic` (Synology) or
-`/mnt/user/appdata/nasmusic` (Unraid). Using git:
+Put them in a folder on the NAS, for example `/volume1/docker/homebeat` (Synology) or
+`/mnt/user/appdata/homebeat` (Unraid). Using git:
 
 ```bash
 git clone https://github.com/the-gk-og/nas-music.git
@@ -63,8 +63,8 @@ must be able to **read** your music and **write** the data folder.
      the default `PUID=568`, but the volume is tucked away inside Docker, so it's harder to back up.
    - **Recommended: a folder of your own.** Create it and give it to `PUID:PGID`, then set `DATA_DIR`:
      ```bash
-     mkdir -p /volume1/docker/nasmusic/data
-     sudo chown 1026:100 /volume1/docker/nasmusic/data   # your PUID:PGID
+     mkdir -p /volume1/docker/homebeat/data
+     sudo chown 1026:100 /volume1/docker/homebeat/data   # your PUID:PGID
      ```
      If you change `PUID` away from 568, you need this option.
 
@@ -73,7 +73,7 @@ If the data folder isn't writable, the server stops at startup with
 
 ## 4. Get the server image and start
 
-The image is built by GitHub Actions and published as `ghcr.io/the-gk-og/nasmusic:latest`. Choose one way:
+The image is built by GitHub Actions and published as `ghcr.io/the-gk-og/homebeat:latest`. Choose one way:
 
 **Pull the published image.** While the repository is private, log in once with a GitHub token that has only
 the `read:packages` scope (GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)):
@@ -108,7 +108,7 @@ admin account:
 ```
 
 Write the password down. It is shown only on that first start. If you lose it, reset it with
-`docker compose exec server nasmusic user passwd admin`.
+`docker compose exec server homebeat user passwd admin`.
 
 The server then scans your library. About 5,000 songs take a few minutes. Audio analysis (for mixes and radio)
 runs in the background afterwards and can take several hours the first time on an older CPU.
@@ -116,7 +116,7 @@ runs in the background afterwards and can take several hours the first time on a
 ### On a NAS user interface instead of a shell
 
 - **Synology Container Manager**: Project → Create → choose the folder with `compose.yaml` and `.env`, then
-  Build. Logs are under Container → `nasmusic-server-1` → Log.
+  Build. Logs are under Container → `homebeat-server-1` → Log.
 - **Unraid Compose Manager**: Add New Stack, paste `compose.yaml` into the compose file and `.env` into the
   env file, then Compose Up.
 - **TrueNAS SCALE**: Apps → Discover → ⋮ → Install via YAML doesn't read `.env`. Use
@@ -137,11 +137,11 @@ Change the generated password on the **Account** page. Add family and friends in
 
 ## 6. Connect the phone app
 
-1. Install the Android app from the repository's **Releases** page (the latest `nas-music-v0.1.N.apk`).
+1. Install the Android app from the repository's **Releases** page (the latest `homebeat-v0.1.N.apk`).
 2. In the web player, open **Account → Pair a phone with a code**. A QR code appears.
 3. In the app, scan it. It works at home straight away, and away from home once you've set up remote access.
 
-You can also print a pairing QR in the terminal with `docker compose exec server nasmusic pair-code`.
+You can also print a pairing QR in the terminal with `docker compose exec server homebeat pair-code`.
 
 ## 7. Optional extras
 
@@ -244,8 +244,8 @@ If the server won't start, or on a new machine: put `config.toml` back in the da
 backup folder), then
 
 ```bash
-docker compose run --rm server nasmusic restore                 # lists local and off-site backups
-docker compose run --rm server nasmusic restore --offsite nasmusic-scheduled-20261124T041500Z.db.gz
+docker compose run --rm server homebeat restore                 # lists local and off-site backups
+docker compose run --rm server homebeat restore --offsite homebeat-scheduled-20261124T041500Z.db.gz
 docker compose up -d
 ```
 
@@ -266,6 +266,8 @@ those songs. The Opus and art caches never need backing up; they are rebuilt.
 
 ## Names used here
 
-If the project is renamed, these are the places the name appears in a Docker install: `STACK_NAME` and `IMAGE`
-in `.env` (container and volume names come from `STACK_NAME`), the `NASMUSIC_*` variable names in
-`compose.yaml`, and the `nasmusic` command inside the container.
+The project was renamed from nas-music to Homebeat in November 2026; an install from before then keeps working
+(see [docs/upgrading-to-homebeat.md](../../docs/upgrading-to-homebeat.md): keep `STACK_NAME=nasmusic` in `.env`).
+The name appears in a Docker install in: `STACK_NAME` and `IMAGE` in `.env` (container and volume names come from
+`STACK_NAME`), the `HOMEBEAT_*` variable names in `compose.yaml` (old `NASMUSIC_*` names still work), and the
+`homebeat` command inside the container (`nasmusic` still works too).

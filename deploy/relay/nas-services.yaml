@@ -1,10 +1,10 @@
-# Add these two services under `services:` in the nasmusic Dockhand stack (same file as the nasmusic
+# Add these two services under `services:` in the homebeat Dockhand stack (same file as the homebeat
 # service), and the two volumes under `volumes:`. Only add them once the friend's relay is running and
 # /data/relay/{frpc.toml,Caddyfile} exist (see README.md in this folder).
 
   caddy:
     image: caddy:2.11.9
-    container_name: nasmusic-caddy
+    container_name: homebeat-caddy
     restart: unless-stopped
     command: ["caddy", "run", "--config", "/relay/Caddyfile", "--adapter", "caddyfile"]
     volumes:
@@ -17,11 +17,11 @@
       - caddy-data:/data        # certificates (keep!)
       - caddy-config:/config
     depends_on:
-      - nasmusic
+      - homebeat
 
   frpc:
     image: fatedier/frpc:v0.71.1
-    container_name: nasmusic-frpc
+    container_name: homebeat-frpc
     restart: unless-stopped
     command: ["-c", "/relay/frpc.toml"]
     volumes:
@@ -34,6 +34,6 @@
     depends_on:
       - caddy
 
-# and under the top-level `volumes:` (next to nasmusic-data:)
+# and under the top-level `volumes:` (next to nasmusic-data:, the volume name kept from before the Homebeat rename)
 #  caddy-data:
 #  caddy-config:

@@ -10,7 +10,7 @@ from mutagen.id3 import COMM, ID3, SYLT, TXXX, USLT
 from mutagen.mp4 import MP4, MP4FreeForm
 from mutagen.oggopus import OggOpus
 
-from nasmusic.library import lyrics
+from homebeat.library import lyrics
 
 # The owner's real files (SpotiFLAC-Mobile) look like this.
 SPOTIFLAC = """[ti:Clarity]

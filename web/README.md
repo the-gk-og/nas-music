@@ -1,4 +1,4 @@
-# nas-music web player
+# Homebeat web player
 
 Vite + Svelte 5 + TypeScript. Built to `dist/` and served by the server at `/` (the desktop app in
 `../desktop` bundles the same build). Spec: `docs/v2.md` §6–§8, §10.

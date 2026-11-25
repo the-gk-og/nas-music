@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from nasmusic import db
-from nasmusic.db import migrations
-from nasmusic.voice import match, service
-from nasmusic.voice.parse import from_slots, parse
+from homebeat import db
+from homebeat.db import migrations
+from homebeat.voice import match, service
+from homebeat.voice.parse import from_slots, parse
 from tests.conftest import track_ids, user_client
 from tests.test_cast import FakeSpeaker, wait_for
 
@@ -313,7 +313,7 @@ V6_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v6.sql").read_text()
 
 
 def test_v6_to_v7(tmp_path):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = db.connect(path)
     conn.executescript(V6_SCHEMA)
     conn.execute("INSERT INTO schema_version (version) VALUES (6)")
@@ -325,7 +325,7 @@ def test_v6_to_v7(tmp_path):
     for t in ("voice_tokens", "voice_devices"):
         assert migrations._table_exists(conn, t)
     assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'voice_tokens_user'").fetchone()
-    assert len(list(tmp_path.glob("nasmusic.db.v6-backup-*"))) == 1
+    assert len(list(tmp_path.glob("homebeat.db.v6-backup-*"))) == 1
     assert not migrations.migrate_v6_to_v7(conn, db.schema_sql())
     db.init(conn)
     assert len(list(tmp_path.glob("*-backup-*"))) == 1

@@ -42,7 +42,7 @@ Docker: add the audiobooks folder read-only next to the music (commented line in
 volumes:
   - /mnt/NAS/Shared/music:/music:ro
   - /mnt/NAS/Shared/audiobooks:/audiobooks:ro
-  - nasmusic-data:/data
+  - homebeat-data:/data
 ```
 
 The `audiobooks` job runs after every library scan (cheap when nothing changed: it compares file names,

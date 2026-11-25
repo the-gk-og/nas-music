@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from nasmusic.library import cleanup, scanner
+from homebeat.library import cleanup, scanner
 from tests.conftest import track_ids, user_client
 
 

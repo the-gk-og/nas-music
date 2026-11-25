@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from nasmusic import auth
+from homebeat import auth
 from tests.conftest import make_user, track_ids
 
 URL = "/api/v1/connect"
@@ -269,7 +269,7 @@ def test_state_persisted_and_restored(tc, conn, app):
     saved = json.loads(row[0])
     assert saved["trackId"] == "tX" and saved["volume"] == 0.5
     # A fresh hub (server restart) loads it, not playing.
-    from nasmusic.app.connect_api import make_hub
+    from homebeat.app.connect_api import make_hub
 
     app.state.ctx.hub = make_hub(app.state.ctx.cfg)
     with tc.websocket_connect(URL, headers={"Authorization": f"Bearer {tok}"}) as ws:

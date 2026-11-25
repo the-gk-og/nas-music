@@ -4,7 +4,7 @@ import os
 import httpx
 import pytest
 
-from nasmusic.app import autoeq
+from homebeat.app import autoeq
 
 INDEX = """# Index
 This is a list of all equalization profiles.

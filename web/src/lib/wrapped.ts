@@ -124,7 +124,7 @@ function fit(ctx: CanvasRenderingContext2D, text: string, max: number): string {
   return t + '…';
 }
 
-export function drawCard(ctx: CanvasRenderingContext2D, card: Card, colors: [string, string], images: Images = {}, footer = 'nas-music') {
+export function drawCard(ctx: CanvasRenderingContext2D, card: Card, colors: [string, string], images: Images = {}, footer = 'Homebeat') {
   const W = CARD_W;
   const H = CARD_H;
   const g = ctx.createLinearGradient(0, 0, W, H);

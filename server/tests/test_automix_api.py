@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from nasmusic.ai import automix, djmix
+from homebeat.ai import automix, djmix
 from tests.ai.test_djmix import SR, synth
 
 # ---------------------------------------------------------------- job + API
@@ -18,8 +18,8 @@ def _write_wav(path, audio, sr=SR):
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg")
 def test_job_resumable_and_track_mix_exposed(cfg, scanned, client, monkeypatch):
-    from nasmusic.ai import api as ai
-    from nasmusic.core import ai_config
+    from homebeat.ai import api as ai
+    from homebeat.core import ai_config
     from tests.conftest import track_ids
 
     conn = scanned

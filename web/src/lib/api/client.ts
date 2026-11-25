@@ -385,7 +385,7 @@ export class ApiClient {
   disconnectScrobble = (service: ScrobbleServiceId) => this.del<ScrobbleStatus>(`/me/scrobble/${service}`);
   connectListenBrainz = (token: string) => this.post<ScrobbleStatus>('/me/scrobble/listenbrainz/connect', { token });
   lastfmConnect = () => this.post<{ authUrl: string }>('/me/scrobble/lastfm/connect');
-  /** 409 until the user approved nas-music on last.fm; 410 when the request expired. */
+  /** 409 until the user approved Homebeat on last.fm; 410 when the request expired. */
   lastfmComplete = () => this.post<ScrobbleStatus>('/me/scrobble/lastfm/complete');
   retryScrobbles = () => this.post<ScrobbleStatus>('/me/scrobble/retry');
   importListenBrainz = () => this.post<ScrobbleStatus>('/me/scrobble/listenbrainz/import', {});

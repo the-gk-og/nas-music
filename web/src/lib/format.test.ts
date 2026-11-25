@@ -54,8 +54,8 @@ describe('formatLine', () => {
 
 describe('tabTitle', () => {
   it('shows the song while something is loaded', () => {
-    expect(tabTitle({ title: 'Song', artist: 'Band' }, true)).toBe('▶ Song · Band — nas-music');
-    expect(tabTitle({ title: 'Song', artist: null }, false)).toBe('Song — nas-music');
-    expect(tabTitle(null, false)).toBe('nas-music');
+    expect(tabTitle({ title: 'Song', artist: 'Band' }, true)).toBe('▶ Song · Band — Homebeat');
+    expect(tabTitle({ title: 'Song', artist: null }, false)).toBe('Song — Homebeat');
+    expect(tabTitle(null, false)).toBe('Homebeat');
   });
 });

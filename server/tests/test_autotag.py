@@ -12,7 +12,7 @@ import httpx
 import numpy as np
 import pytest
 
-from nasmusic.library import acoustid, autotag, chromaprint, musicbrainz
+from homebeat.library import acoustid, autotag, chromaprint, musicbrainz
 from tests.conftest import png_bytes, track_ids
 
 REL_A = "aaaaaaaa-0000-0000-0000-000000000001"     # "First Album" (album)

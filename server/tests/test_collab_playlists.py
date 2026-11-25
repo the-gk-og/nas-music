@@ -1,7 +1,7 @@
 """Collaborative playlists (schema v5): roles, entry-based conflict-safe ordering, activity, live notify."""
 import threading
 
-from nasmusic.app import playlists as pl
+from homebeat.app import playlists as pl
 from tests.conftest import track_ids, user_client
 
 
@@ -165,7 +165,7 @@ def test_remove_missing_tracks_cleans_entries(client, conn):
     s1, s2, *_ = _ids(conn)
     pid = client.post("/api/v1/playlists", json={"name": "P", "trackIds": [s1, s2]}).json()["id"]
     conn.execute("UPDATE tracks SET missing = 1 WHERE id = ?", (s1,))
-    from nasmusic.app import health
+    from homebeat.app import health
 
     assert health.remove_missing(conn, [s1]) == 1
     assert [e["trackId"] for e in client.get(f"/api/v1/playlists/{pid}").json()["entries"]] == [s2]

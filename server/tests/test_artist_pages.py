@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from PIL import Image
 
-from nasmusic.library import artistinfo
+from homebeat.library import artistinfo
 from tests.conftest import track_ids
 
 API = "/api/v1"
@@ -44,7 +44,7 @@ class Fake:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         u = request.url
         self.calls.append(u)
-        assert request.headers["user-agent"].startswith("nas-music/")
+        assert request.headers["user-agent"].startswith("Homebeat/")
         assert "@" not in request.headers["user-agent"]  # generic UA, no personal contact
         if self.over.get("down"):
             raise httpx.ConnectError("down")
@@ -183,7 +183,7 @@ def test_artist_page(app, client, conn, cfg):
 
 
 def test_appears_on_and_similar(app, client, conn, monkeypatch):
-    from nasmusic.app import ai_adapter
+    from homebeat.app import ai_adapter
 
     feat = conn.execute("SELECT id FROM artists WHERE name = 'The Band feat. X'").fetchone()[0]
     band = band_id(conn)

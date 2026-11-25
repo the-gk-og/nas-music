@@ -1,4 +1,4 @@
-# nas-music desktop (Tauri v2)
+# Homebeat desktop (Tauri v2)
 
 Wraps the web player (`../web`, built to `../web/dist`) in a native window. On first run it shows the
 Connect screen: enter the server address, then sign in. The app talks to the server cross-origin with a

@@ -8,7 +8,7 @@ import pytest
 from mutagen.flac import FLAC
 from PIL import Image
 
-from nasmusic.library import scanner
+from homebeat.library import scanner
 from tests.conftest import png_bytes, track_ids
 
 
@@ -185,7 +185,7 @@ def test_musicbrainz_lookup(client, conn, app):
     res = r.json()["results"][0]
     assert (res["title"], res["album"], res["year"], res["trackNo"]) == ("Song 1", "First Album", 2001, 1)
     ua = seen[0].headers["user-agent"]
-    assert ua.startswith("nas-music/") and "@" not in ua
+    assert ua.startswith("Homebeat/") and "@" not in ua
     rel = client.get("/api/v1/admin/tags/musicbrainz/release/00000000-0000-0000-0000-000000000001").json()
     assert rel["genre"] == "Rock" and rel["tracks"][0]["title"] == "Song 1"
 

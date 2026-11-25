@@ -1,4 +1,4 @@
-"""Podcasts, audiobooks and internet radio (schema v7, nasmusic.spoken, app.spoken_api). All HTTP is mocked."""
+"""Podcasts, audiobooks and internet radio (schema v7, homebeat.spoken, app.spoken_api). All HTTP is mocked."""
 from __future__ import annotations
 
 import shutil
@@ -8,11 +8,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from nasmusic import config as config_mod
-from nasmusic import db
-from nasmusic.core import init_db, open_db
-from nasmusic.db import migrations
-from nasmusic.spoken import audiobooks, feeds, podcasts, stations
+from homebeat import config as config_mod
+from homebeat import db
+from homebeat.core import init_db, open_db
+from homebeat.db import migrations
+from homebeat.spoken import audiobooks, feeds, podcasts, stations
 from tests.conftest import offline, user_client
 
 FEED_URL = "https://feeds.example.com/show.xml"
@@ -154,7 +154,7 @@ def up():
 
 @pytest.fixture
 def sapp(tmp_path, library, books_root, up):
-    from nasmusic.app import create_app
+    from homebeat.app import create_app
 
     cfg = config_mod.from_dict({"library_root": str(library), "data_dir": str(tmp_path / "data"),
                                 "lan_host": "192.168.1.50", "opus_cache_gb": 1, "audiobooks_root": str(books_root),
@@ -506,7 +506,7 @@ def test_family_mode_hides_explicit(sapp, sconn, alice, up):
 def test_cast_signed_spoken_urls(sapp, sconn, alice, up):
     from fastapi.testclient import TestClient
 
-    from nasmusic.app.cast_api import cast_app
+    from homebeat.app.cast_api import cast_app
 
     up.routes[FEED_URL] = httpx.Response(200, content=RSS)
     alice.post("/api/v1/podcasts", json={"feedUrl": FEED_URL})
@@ -550,7 +550,7 @@ def test_art_routes(sapp, sconn, alice, up):
 def test_v6_to_v7(tmp_path):
     from tests.test_migration_v5 import make_v4
 
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = make_v4(path)
     assert migrations.migrate_v4_to_v5(conn, db.schema_sql(), make_backup=False)
     assert migrations.migrate_v5_to_v6(conn, db.schema_sql(), make_backup=False)
@@ -571,7 +571,7 @@ def test_gzipped_feed_is_decoded_once():
 
     import httpx
 
-    from nasmusic.spoken import net
+    from homebeat.spoken import net
 
     rss = b'<?xml version="1.0"?><rss version="2.0"><channel><title>T</title></channel></rss>'
     body = gzip.compress(rss)

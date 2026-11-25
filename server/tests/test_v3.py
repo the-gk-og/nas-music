@@ -10,9 +10,9 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from nasmusic import catalog
-from nasmusic.ai import api as ai
-from nasmusic.catalog import Catalog
+from homebeat import catalog
+from homebeat.ai import api as ai
+from homebeat.catalog import Catalog
 from tests.conftest import make_flac, track_ids, user_client
 
 API = "/api/v1"
@@ -63,7 +63,7 @@ class Upstream:
                                                  "album": {"title": "Remote LP", **cover}, "release_date": "2020-01-02"})
             return httpx.Response(200, json={"error": {"type": "DataException", "code": 800}})
         if host == "musicbrainz.org":
-            assert "nas-music" in request.headers["user-agent"]
+            assert "Homebeat" in request.headers["user-agent"]
             return httpx.Response(200, json={"release-groups": [
                 {"id": "rg-new", "title": "New Record", "first-release-date": "2024-05-01", "primary-type": "Album",
                  "artist-credit": [{"name": "Someone Else"}]},
@@ -315,7 +315,7 @@ def test_home_shelves(client, conn, app):
 
 def test_home_devices_shelf(client, conn, app):
     ids = track_ids(conn)
-    from nasmusic import auth
+    from homebeat import auth
 
     did, tok = auth.create_device(conn, client.user_id, "Living room PC", "desktop")
     with client.websocket_connect(f"{API}/connect", headers={"Authorization": f"Bearer {tok}"}) as ws:
@@ -463,7 +463,7 @@ def test_query_token_only_for_stream_and_art(client, conn, caplog):
         assert anon.get(f"{API}/art/{album}?token={client.token}").status_code == 200
         assert anon.get(f"{API}/stream/{tid}?format=flac&token=wrong").status_code == 401
         assert anon.get(f"{API}/me?token={client.token}").status_code == 401  # not for the rest of the API
-    from nasmusic.app import _RedactTokens
+    from homebeat.app import _RedactTokens
 
     rec = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
                             ("1.2.3.4", "GET", f"/api/v1/stream/x?format=opus&token={client.token}", "1.1", 200), None)

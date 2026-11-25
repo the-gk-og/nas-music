@@ -5,10 +5,10 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 
-from nasmusic.ai import api
-from nasmusic.ai import context as cx
-from nasmusic.ai.common import Settings, ensure_default_settings
-from nasmusic.ai.recommender import Recommender
+from homebeat.ai import api
+from homebeat.ai import context as cx
+from homebeat.ai.common import Settings, ensure_default_settings
+from homebeat.ai.recommender import Recommender
 from tests.ai.conftest import NOW, USER, mix_rows
 
 LOCAL = datetime(2026, 11, 18, 14, 30, tzinfo=UTC)

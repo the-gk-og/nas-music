@@ -6,9 +6,9 @@ from datetime import timedelta
 import numpy as np
 import pytest
 
-from nasmusic.ai import api
-from nasmusic.ai.common import iso
-from nasmusic.ai.recommender import Recommender
+from homebeat.ai import api
+from homebeat.ai.common import iso
+from homebeat.ai.recommender import Recommender
 from tests.ai.conftest import NOW, USER, build_library
 from tests.ai.schema_v2 import add_user
 

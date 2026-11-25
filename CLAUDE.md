@@ -1,4 +1,4 @@
-# nas-music
+# Homebeat
 
 Self-hosted, AI-curated music streaming: a custom server on a TrueNAS box plus a custom Android app.
 Replaces LatentJam. Design doc: https://claude.ai/artifact/PAiW16UTjDX9JSseBPeqnt
@@ -11,13 +11,13 @@ Replaces LatentJam. Design doc: https://claude.ai/artifact/PAiW16UTjDX9JSseBPeqn
   source set / dependency configuration; the `foss` flavour must build and run with no Google code.
 - `api/openapi.yaml` is THE contract between server and app. Change it only deliberately, and
   update both sides (or note the change for the other side in the PR/commit message).
-- `server/nasmusic/db/schema.sql` is the shared database contract between server core and the AI.
+- `server/homebeat/db/schema.sql` is the shared database contract between server core and the AI.
   Before bumping `SCHEMA_VERSION`, copy the current schema.sql to `server/tests/fixtures/schema_vN.sql`;
   `tests/test_migration_chain.py` checks every old version migrates to exactly a fresh install's schema.
 - CI checks both sides against `api/openapi.yaml`: `server/tests/test_openapi_contract.py` (served routes) and
   `web/src/lib/api/contract.test.ts` (requests the web client sends). Document a new endpoint in the same PR.
 - The music library is mounted read-only. Never write to it. **One owner-approved exception (2026-11-24):**
-  the admin trash purge in `server/nasmusic/library/cleanup.py` may delete the exact files of songs an admin
+  the admin trash purge in `server/homebeat/library/cleanup.py` may delete the exact files of songs an admin
   removed, only when config `library_delete_files = true` (the owner then mounts the folder read-write). No
   other code may write to the library; keep the read-only fallback (hide + delete list) working.
 - No secrets in the repo (Cloudflare tokens, Last.fm keys go in `config.toml`, which is gitignored).
@@ -26,14 +26,14 @@ Replaces LatentJam. Design doc: https://claude.ai/artifact/PAiW16UTjDX9JSseBPeqn
 | Path | What | Owner |
 | --- | --- | --- |
 | `api/openapi.yaml` | HTTP API contract | shared |
-| `server/nasmusic/db/` | SQLite schema + migrations, connection helper | server core |
-| `server/nasmusic/{app,library,stream,auth,sync,web}` | FastAPI app, library scanner, streaming/transcode, pairing, sync manifest, web UI | server core |
-| `server/nasmusic/ai/` | Analyser, recommender, mix builder, discovery, nightly jobs | AI engine |
+| `server/homebeat/db/` | SQLite schema + migrations, connection helper | server core |
+| `server/homebeat/{app,library,stream,auth,sync,web}` | FastAPI app, library scanner, streaming/transcode, pairing, sync manifest, web UI | server core |
+| `server/homebeat/ai/` | Analyser, recommender, mix builder, discovery, nightly jobs | AI engine |
 | `android/` | Kotlin/Compose app | Android |
 | `deploy/` | Docker Compose, cloudflared, TrueNAS notes | deploy |
 
-Server core talks to the AI only through `server/nasmusic/ai/api.py` (functions listed there) and
-through the tables in `schema.sql`. The AI never imports from server-core modules except `nasmusic.db`.
+Server core talks to the AI only through `server/homebeat/ai/api.py` (functions listed there) and
+through the tables in `schema.sql`. The AI never imports from server-core modules except `homebeat.db`.
 
 ## Stack
 - Server: Python 3.12, FastAPI, uvicorn, SQLite (WAL), mutagen (tags), ffmpeg (Opus), APScheduler.

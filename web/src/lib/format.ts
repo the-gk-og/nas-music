@@ -33,7 +33,7 @@ export function formatLine(i: { codec?: string | null; bitsPerSample?: number | 
 }
 
 /** Browser tab title: "▶ Song · Artist" while playing, "Song · Artist" when paused, else the app name. */
-export function tabTitle(track: { title: string; artist?: string | null } | null | undefined, playing: boolean, app = 'nas-music'): string {
+export function tabTitle(track: { title: string; artist?: string | null } | null | undefined, playing: boolean, app = 'Homebeat'): string {
   if (!track) return app;
   const t = track.artist ? `${track.title} · ${track.artist}` : track.title;
   return `${playing ? '▶ ' : ''}${t} — ${app}`;

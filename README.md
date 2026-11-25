@@ -1,10 +1,12 @@
-# nas-music
+# Homebeat
 
 A self-hosted, AI-curated music streaming service: a custom server on your NAS that learns what you
 like and builds daily mixes, plus an Android app that downloads them overnight and keeps your
 favourites offline. Free and open source (AGPL-3.0).
 
-- `server/` — Python server: library, streaming, API, recommender (`server/nasmusic/ai`)
+Formerly **nas-music**; existing installs keep their data, see [docs/upgrading-to-homebeat.md](docs/upgrading-to-homebeat.md).
+
+- `server/` — Python server: library, streaming, API, recommender (`server/homebeat/ai`)
 - `android/` — Kotlin/Compose app
 - `deploy/` — Docker Compose for TrueNAS SCALE, Cloudflare Tunnel
 

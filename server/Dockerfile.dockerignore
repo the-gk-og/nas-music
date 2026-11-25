@@ -2,7 +2,7 @@
 *
 !server/pyproject.toml
 !server/uv.lock
-!server/nasmusic
+!server/homebeat
 !server/config.example.toml
 !web
 web/node_modules

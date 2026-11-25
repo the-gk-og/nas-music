@@ -8,10 +8,10 @@ import time
 
 import pytest
 
-from nasmusic import db
-from nasmusic.ai import api
-from nasmusic.ai.common import ensure_default_settings, read_status
-from nasmusic.ai.recommender import Recommender
+from homebeat import db
+from homebeat.ai import api
+from homebeat.ai.common import ensure_default_settings, read_status
+from homebeat.ai.recommender import Recommender
 from tests.ai.conftest import build_library, ffmpeg_ok, write_tone
 from tests.ai.schema_v2 import add_user, init_v2
 from tests.ai.test_analyser import add_track
@@ -35,7 +35,7 @@ def test_nightly_and_analysis_concurrently(tmp_path, cfg, caplog):
         add_track(setup, f"new{k}.flac", duration=30)
     setup.close()
 
-    caplog.set_level(logging.WARNING, logger="nasmusic")
+    caplog.set_level(logging.WARNING, logger="homebeat")
     done = threading.Event()
     results: dict[str, list] = {"analysed": [], "nightly": [], "lock_waits": []}
     errors: list[BaseException] = []

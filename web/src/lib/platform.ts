@@ -10,7 +10,7 @@ export function deviceKind(): DeviceKind {
   return isTauri() ? 'desktop' : 'web';
 }
 
-/** "Firefox on Linux", "Chrome on Windows", "nas-music desktop (macOS)". */
+/** "Firefox on Linux", "Chrome on Windows", "Homebeat desktop (macOS)". */
 export function defaultDeviceName(ua: string = typeof navigator !== 'undefined' ? navigator.userAgent : ''): string {
   const os = /Android/.test(ua)
     ? 'Android'

@@ -22,7 +22,7 @@ function id3End(b: Uint8Array): number {
   return 10 + syncsafe(b, 6) + (b[5] & 0x10 ? 10 : 0);
 }
 
-/** Same rules as the server (nasmusic/library/uploads.py sniff). */
+/** Same rules as the server (homebeat/library/uploads.py sniff). */
 export function sniff(b: Uint8Array): Sniffed | null {
   if (b.length < 4) return null;
   if (ascii(b, 0, 3) === 'ID3' && b.length >= 10) {

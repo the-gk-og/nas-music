@@ -9,11 +9,11 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from nasmusic import auth
-from nasmusic.ai import api as ai
-from nasmusic.app import ai_adapter, create_app
-from nasmusic.app.scheduler import Jobs
-from nasmusic.sync import SYNC_KBPS, estimate_opus_bytes
+from homebeat import auth
+from homebeat.ai import api as ai
+from homebeat.app import ai_adapter, create_app
+from homebeat.app.scheduler import Jobs
+from homebeat.sync import SYNC_KBPS, estimate_opus_bytes
 from tests.conftest import make_user, track_ids
 
 MP3 = b"ID3\x04\x00\x00\x00\x00\x00\x00" + bytes(range(256)) * 40  # fake MP3 bytes
@@ -91,7 +91,7 @@ def test_preview_streams_through_fresh_each_time(client, upstream, sugg, cfg):
     # The Deezer API lookup happens on every request (signed links expire)...
     assert [str(c.url) for c in upstream.calls].count(DEEZER_API) == 2
     # ...and the audio is never written to disk (only SQLite WAL churn is allowed).
-    new = {p for p in _files(cfg.data_dir) - before if not p.name.startswith("nasmusic.db")}
+    new = {p for p in _files(cfg.data_dir) - before if not p.name.startswith("homebeat.db")}
     assert new == set()
 
 

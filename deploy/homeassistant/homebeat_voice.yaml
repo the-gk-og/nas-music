@@ -1,0 +1,106 @@
+# Homebeat voice control for Home Assistant Assist — a Home Assistant "package".
+# Copy to <config>/packages/homebeat_voice.yaml (see README.md next to this file). Needs Home Assistant 2024.6+.
+#
+# How it works: an automation with a `conversation` trigger catches the music sentences below (from any Assist
+# pipeline: voice satellites, the HA phone app, the Assist dialog), sends what you said to Homebeat's
+# POST /api/v1/voice/command, and speaks the answer. Homebeat does the understanding (names, rooms, aliases,
+# family mode); Home Assistant only has to recognise that a sentence is about music.
+#
+# secrets.yaml needs:
+#   homebeat_voice_url: https://192.168.1.50:8443/api/v1/voice/command
+#   homebeat_voice_auth: Bearer nmv_xxxxxxxx      # the voice token from Homebeat → Settings → Voice control
+
+rest_command:
+  homebeat_voice:
+    url: !secret homebeat_voice_url
+    method: post
+    content_type: application/json
+    timeout: 20                  # starting an AI radio can take a few seconds on the NAS
+    verify_ssl: false            # the LAN address uses Homebeat's self-signed certificate
+    headers:
+      Authorization: !secret homebeat_voice_auth
+      # Through the Cloudflare tunnel instead of the LAN? Add the Access service-token headers:
+      # CF-Access-Client-Id: !secret homebeat_cf_id
+      # CF-Access-Client-Secret: !secret homebeat_cf_secret
+    payload: >-
+      {{ {"text": text | default(''), "intent": intent | default(''), "slots": slots | default({}),
+          "area": area | default(''), "areaDevices": area_devices | default([]), "language": "en"} | to_json }}
+
+script:
+  homebeat_voice:
+    alias: Homebeat voice command
+    description: Send a sentence to Homebeat ("play my Pop radio in the bedroom") and return its answer.
+    fields:
+      text:
+        description: What to do, as you'd say it.
+        example: play something chill in Stacey's room
+        required: true
+        selector: { text: {} }
+      area:
+        description: The room you're in (optional; used when no room is named).
+        selector: { area: {} }
+    sequence:
+      - variables:
+          area_name_: "{{ area_name(area) if area else '' }}"
+          players: "{{ (area_entities(area) | select('match', 'media_player\\.') | list) if area else [] }}"
+      - action: rest_command.homebeat_voice
+        data:
+          text: "{{ text }}"
+          area: "{{ area_name_ }}"
+          area_devices: "{{ players }}"
+        response_variable: r
+        continue_on_error: true
+      - if: "{{ r is defined and r.status == 200 and r.content is mapping }}"
+        then:
+          - variables:
+              result: "{{ r.content }}"
+          - stop: done
+            response_variable: result
+      - variables:
+          result:
+            ok: false
+            speech: >-
+              {{ "Homebeat doesn't accept the voice token. Make a new one in Homebeat's settings."
+                 if r is defined and r.status == 401 else "I couldn't reach Homebeat." }}
+      - stop: failed
+        response_variable: result
+
+automation:
+  - id: homebeat_voice_control
+    alias: Homebeat voice control
+    description: Music sentences from Assist go to Homebeat; its answer is spoken back.
+    mode: parallel
+    triggers:
+      - trigger: conversation
+        command:
+          # play anything: playlists, albums, artists, songs, "X radio", mixes, "something chill" …
+          # optionally ending in "in/on <room or speaker>"
+          - "play {query}"
+          - "put on {query}"
+          - "listen to {query}"
+          - "shuffle {query}"
+          - "start {query} radio"
+          - "play some music"
+          - "play music"
+          # controls (worded so they don't take over HA's own "pause" / "stop" for TVs etc.)
+          - "(pause|stop) [the] (music|song|track) [{where}]"
+          - "(resume|unpause|continue) [the] (music|song) [{where}]"
+          - "(skip|next song|next track|skip [this] (song|track)) [{where}]"
+          - "(previous|last) (song|track) [{where}]"
+          - "play the (previous|last) (song|track)"
+          - "[set] [the] music volume to {level} [percent]"
+          - "turn the music (up|down)"
+          - "music (louder|quieter)"
+          - "(what's|what is) playing"
+          - "what (song|track) is (this|that|playing)"
+          - "(who is|who's) (this|singing)"
+          - "what am I listening to"
+    actions:
+      - variables:
+          sat_area: "{{ area_id(trigger.device_id) if trigger.device_id else none }}"
+      - action: script.homebeat_voice
+        data:
+          text: "{{ trigger.sentence }}"
+          area: "{{ sat_area }}"
+        response_variable: answer
+      - set_conversation_response: "{{ answer.speech }}"

@@ -1,14 +1,14 @@
 """v9 -> v10 (playlist folders, classical track fields) against the exact v8 schema (tests/fixtures/schema_v9.sql)."""
 from pathlib import Path
 
-from nasmusic import db
-from nasmusic.db import migrations
+from homebeat import db
+from homebeat.db import migrations
 
 V9_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v9.sql").read_text()
 
 
 def test_v9_to_v10(tmp_path):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = db.connect(path)
     conn.executescript(V9_SCHEMA)
     conn.execute("INSERT INTO schema_version (version) VALUES (9)")
@@ -25,7 +25,7 @@ def test_v9_to_v10(tmp_path):
     assert conn.execute("SELECT work FROM tracks WHERE id = 't1'").fetchone()[0] is None  # backfilled by a scan
     assert {"id", "user_id", "parent_id", "name", "position"} <= migrations._columns(conn, "playlist_folders")
     assert {"user_id", "playlist_id", "folder_id"} <= migrations._columns(conn, "playlist_folder_items")
-    assert len(list(tmp_path.glob("nasmusic.db.v9-backup-*"))) == 1
+    assert len(list(tmp_path.glob("homebeat.db.v9-backup-*"))) == 1
     assert not migrations.migrate_v9_to_v10(conn, db.schema_sql())
     db.init(conn)
     assert len(list(tmp_path.glob("*-backup-*"))) == 1

@@ -9,8 +9,8 @@ import pytest
 from mutagen.flac import FLAC, Picture
 from PIL import Image
 
-from nasmusic import config as config_mod
-from nasmusic.core import init_db, open_db
+from homebeat import config as config_mod
+from homebeat.core import init_db, open_db
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 
@@ -99,7 +99,7 @@ def conn(cfg):
 
 @pytest.fixture
 def scanned(cfg, conn):
-    from nasmusic.library import scanner
+    from homebeat.library import scanner
 
     scanner.scan(cfg, conn)
     return conn
@@ -107,8 +107,8 @@ def scanned(cfg, conn):
 
 @pytest.fixture
 def app(cfg, scanned):
-    from nasmusic.app import create_app
-    from nasmusic.app.scheduler import Jobs
+    from homebeat.app import create_app
+    from homebeat.app.scheduler import Jobs
 
     app = create_app(cfg, jobs=Jobs(cfg))
     offline(app)
@@ -119,8 +119,8 @@ def offline(app):
     """No test may reach a real third-party service: catalogue + weather fail fast unless a test mocks them."""
     import httpx
 
-    from nasmusic.app.weather import Weather
-    from nasmusic.catalog import Catalog
+    from homebeat.app.weather import Weather
+    from homebeat.catalog import Catalog
 
     def refuse(request):
         raise httpx.ConnectError(f"tests are offline: {request.url.host}")
@@ -128,7 +128,7 @@ def offline(app):
     app.state.ctx.catalog = Catalog(httpx.MockTransport(refuse))
     app.state.ctx.weather = Weather(httpx.MockTransport(refuse))
     app.state.ctx.http_transport = httpx.MockTransport(refuse)
-    from nasmusic.library.lrclib import Lrclib
+    from homebeat.library.lrclib import Lrclib
 
     app.state.ctx.lrclib = Lrclib("test", httpx.MockTransport(refuse), min_interval_s=0)
     if getattr(app.state.ctx.hub, "speakers", None) is not None:
@@ -150,7 +150,7 @@ def anon(app):
 
 
 def make_user(conn, username: str, admin: bool = False, password: str = "password123"):
-    from nasmusic.auth import hash_password, users
+    from homebeat.auth import hash_password, users
 
     u = users.by_username(conn, username)
     if u is None:
@@ -162,7 +162,7 @@ def user_client(app, conn, username: str = "alice", admin: bool = True, kind: st
     """A TestClient (not yet entered) with a device token for `username`; attributes user_id/device_id/token."""
     from fastapi.testclient import TestClient
 
-    from nasmusic import auth
+    from homebeat import auth
 
     u = make_user(conn, username, admin)
     device_id, token = auth.create_device(conn, u.id, f"{username}'s {kind}", kind)

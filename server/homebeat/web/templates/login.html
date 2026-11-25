@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block header %}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:380px;margin:12vh auto 0">
+  <h1>♫ {{ server_name }}</h1>
+  {% if configured %}
+  <form method="post" action="/admin/login">
+    <label for="un">Username</label>
+    <input id="un" type="text" name="username" autocomplete="username" value="{{ username }}" autofocus
+           autocapitalize="none" spellcheck="false">
+    <label for="pw">Password</label>
+    <input id="pw" type="password" name="password" autocomplete="current-password" required>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <button type="submit">Log in</button>
+  </form>
+  {% else %}
+  <p>No admin password is set yet.</p>
+  <p class="muted">Run <code>homebeat hash-password</code>, put the output in <code>admin_password_hash</code>
+  in <code>config.toml</code> and restart the server, or run <code>homebeat user passwd admin</code>.</p>
+  {% endif %}
+</div>
+{% endblock %}

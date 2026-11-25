@@ -6,8 +6,8 @@ from datetime import timedelta
 import numpy as np
 import pytest
 
-from nasmusic.ai import api, steering, vibe
-from nasmusic.ai.recommender import Recommender
+from homebeat.ai import api, steering, vibe
+from homebeat.ai.recommender import Recommender
 from tests.ai.conftest import NOW, USER
 
 

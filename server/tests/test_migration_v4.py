@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from nasmusic import db
-from nasmusic.db import migrations
+from homebeat import db
+from homebeat.db import migrations
 
 V3_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v3.sql").read_text()
 
@@ -27,7 +27,7 @@ def make_v3(path: Path):
 
 
 def test_v3_to_v4(tmp_path):  # chains on to v5
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v3(path).close()
     conn = db.connect(path)
     db.init(conn)
@@ -38,7 +38,7 @@ def test_v3_to_v4(tmp_path):  # chains on to v5
     assert conn.execute("SELECT title FROM radio_sessions").fetchone()[0] == "Your radio"
     assert conn.execute("SELECT COUNT(*) FROM toget").fetchone()[0] == 1
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert len(list(tmp_path.glob("nasmusic.db.v3-backup-*"))) == 1
+    assert len(list(tmp_path.glob("homebeat.db.v3-backup-*"))) == 1
     conn.execute("INSERT INTO lyrics_cache (track_id, status, fetched_at) VALUES ('t1', 'not_found', 'x')")
     for _ in range(2):
         db.init(conn)
@@ -46,7 +46,7 @@ def test_v3_to_v4(tmp_path):  # chains on to v5
 
 
 def test_v3_to_v4_failure_rolls_back(tmp_path, monkeypatch):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v3(path).close()
     real = migrations._create_indexes
 
@@ -65,7 +65,7 @@ def test_v3_to_v4_failure_rolls_back(tmp_path, monkeypatch):
 def test_v2_chains_to_v4_with_one_backup(tmp_path):
     from tests.test_migration_v3 import make_v2
 
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v2(path).close()
     conn = db.connect(path)
     db.init(conn)

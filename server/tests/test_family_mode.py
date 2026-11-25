@@ -6,10 +6,10 @@ import httpx
 import pytest
 from mutagen.flac import FLAC
 
-from nasmusic import db
-from nasmusic.ai import api as ai
-from nasmusic.db import family, migrations
-from nasmusic.library import explicit
+from homebeat import db
+from homebeat.ai import api as ai
+from homebeat.db import family, migrations
+from homebeat.library import explicit
 from tests.conftest import track_ids, user_client
 
 API = "/api/v1"
@@ -257,7 +257,7 @@ def test_ai_mask_and_shared_helpers(bob, flagged):
     hidden = family.all_hidden(conn, bob.user_id)
     assert {ids["Song 1"], ids["Closing"]} <= hidden and ids["Song 2"] not in hidden
     assert family.filter_ids(conn, bob.user_id, [ids["Song 2"], ids["Song 1"], ids["Song 2"]]) == [ids["Song 2"]] * 2
-    from nasmusic.ai.recommender import family_mask
+    from homebeat.ai.recommender import family_mask
 
     lib_ids = [ids["Song 1"], ids["Song 2"]]
 
@@ -329,7 +329,7 @@ def test_cast_sign_skips_hidden(client, bob, flagged):
 def test_v5_to_v6_keeps_overrides(tmp_path):
     from tests.test_migration_v5 import make_v4
 
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = make_v4(path)
     migrations.migrate_v4_to_v5(conn, db.schema_sql(), make_backup=False)
     # what a real v5 database has (this code base's v4->v5 step would already create the v6 CHECK)
@@ -350,5 +350,5 @@ def test_v5_to_v6_keeps_overrides(tmp_path):
     for t in ("track_explicit", "family_mode"):
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
-    assert list(tmp_path.glob("nasmusic.db.v5-backup-*"))
+    assert list(tmp_path.glob("homebeat.db.v5-backup-*"))
     assert json.loads(conn.execute("SELECT value FROM tag_overrides WHERE track_id = 't2'").fetchone()[0]) == "clean"

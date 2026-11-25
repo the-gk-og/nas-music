@@ -1,4 +1,4 @@
-from nasmusic import db
+from homebeat import db
 
 
 def test_schema_initialises(tmp_path):
