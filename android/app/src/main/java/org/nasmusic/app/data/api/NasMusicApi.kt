@@ -244,7 +244,7 @@ interface NasMusicApi {
     @GET("library/tracks/{id}/info")
     suspend fun trackInfo(@Path("id") id: String): TrackInfo
 
-    // ---- api 0.10: song credits ----
+    // ---- api 0.12: song credits ----
     @GET("library/tracks/{id}/credits")
     suspend fun trackCredits(@Path("id") id: String): TrackCredits
 
@@ -256,6 +256,37 @@ interface NasMusicApi {
 
     @GET("playlists")
     suspend fun playlists(): List<Playlist>
+
+    // ---- api 0.10: playlist folders (per user) ----
+    @POST("playlists")
+    suspend fun createPlaylistIn(@Body body: NewPlaylistIn): Playlist
+
+    @GET("playlist-folders")
+    suspend fun playlistFolders(): List<PlaylistFolder>
+
+    @POST("playlist-folders")
+    suspend fun createPlaylistFolder(@Body body: NewPlaylistFolder): PlaylistFolder
+
+    /** Body keys: name, parentId (present + null = top level), index. A JsonObject so a null parentId is sent. */
+    @PATCH("playlist-folders/{id}")
+    suspend fun updatePlaylistFolder(@Path("id") id: String, @Body body: kotlinx.serialization.json.JsonObject): PlaylistFolder
+
+    @DELETE("playlist-folders/{id}")
+    suspend fun deletePlaylistFolder(@Path("id") id: String): Response<Unit>
+
+    /** {"folderId": id or null} (null = top level). */
+    @PUT("playlists/{id}/folder")
+    suspend fun setPlaylistFolder(@Path("id") id: String, @Body body: kotlinx.serialization.json.JsonObject): Playlist
+
+    // ---- api 0.10: classical ----
+    @GET("library/composers")
+    suspend fun composers(): List<Composer>
+
+    @GET("library/works")
+    suspend fun works(@Query("composer") composer: String? = null, @Query("albumId") albumId: String? = null, @Query("limit") limit: Int = 1000): List<Work>
+
+    @GET("library/works/{id}")
+    suspend fun work(@Path("id") id: String): Work
 
     @POST("playlists")
     suspend fun createPlaylist(@Body body: NameBody): Playlist

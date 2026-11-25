@@ -25,6 +25,7 @@
   import Credits from './screens/Credits.svelte';
   import Person from './screens/Person.svelte';
   import TrackListPage from './screens/TrackListPage.svelte';
+  import Works from './screens/Works.svelte';
   import PlaylistDetail from './screens/PlaylistDetail.svelte';
   import SmartPlaylistDetail from './screens/SmartPlaylistDetail.svelte';
   import SmartEditor from './screens/SmartEditor.svelte';
@@ -184,6 +185,8 @@
     {:else if n === 'credits'}<Credits id={p} />
     {:else if n === 'person'}<Person id={p} />
     {:else if n === 'genre'}<TrackListPage kind="genre" param={p} />
+    {:else if n === 'composer'}<Works kind="composer" param={p} />
+    {:else if n === 'work'}<Works kind="work" param={p} />
     {:else if n === 'list'}<TrackListPage kind="list" param={p} />
     {:else if n === 'mix'}<TrackListPage kind="mix" param={p} />
     {:else if n === 'playlist'}<PlaylistDetail id={p} />

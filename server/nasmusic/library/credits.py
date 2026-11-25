@@ -1,5 +1,5 @@
 """Song credits: who produced, wrote and played on each track, from MusicBrainz plus the file's own
-composer/lyricist tags. Cached per track in `credit_lookups` / `track_credits` (schema v10).
+composer/lyricist tags. Cached per track in `credit_lookups` / `track_credits` (schema v12).
 
 Source (free, no key): the MusicBrainz recording (https://musicbrainz.org/doc/MusicBrainz_API) with its artist
 relationships (producer, engineer, instrument, vocal, ...), the relationships of the works it records

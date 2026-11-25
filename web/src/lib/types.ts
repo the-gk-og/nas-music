@@ -45,6 +45,46 @@ export interface Track {
   familyHidden?: boolean;
   /** v7 DJ automix analysis (beat grid, key, mix points); absent until the server has analysed the track. */
   mix?: TrackMix | null;
+  /** v10: only when tagged. */
+  composer?: string | null;
+  /** v10 classical: the work this track is a movement of (absent when it is not part of one). */
+  work?: string;
+  workId?: string;
+  /** v10: the movement name without its number ("Allegro con brio"). */
+  movement?: string;
+  movementNo?: number;
+}
+
+/** v10 classical: the tracks of one album that share a work. */
+export interface Work {
+  id: string;
+  title: string;
+  composer?: string | null;
+  albumId: string;
+  album: string;
+  /** The album artist: the performers. */
+  artist: string;
+  year?: number | null;
+  trackCount: number;
+  durationS: number;
+  hasArt: boolean;
+  tracks?: Track[];
+}
+
+export interface Composer {
+  name: string;
+  workCount: number;
+  albumCount: number;
+  trackCount: number;
+}
+
+/** v10: one of the user's own playlist folders. */
+export interface PlaylistFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt?: string;
+  playlistCount: number;
 }
 
 export interface AutomixTransition {
@@ -394,6 +434,8 @@ export interface Playlist {
   collaborative?: boolean;
   /** Parallel to `tracks`. */
   entries?: PlaylistEntry[];
+  /** v10: the folder of the caller's it is filed in (null = top level). */
+  folderId?: string | null;
 }
 
 export interface PlaylistMember {
@@ -989,7 +1031,7 @@ export interface ArtistInfo {
   photoUrl?: string | null;
 }
 
-/** v10 song credits (GET /library/tracks/{id}/credits). */
+/** v12 song credits (GET /library/tracks/{id}/credits). */
 export interface CreditEntry {
   personId: string;
   name: string;
@@ -1010,7 +1052,7 @@ export interface TrackCredits {
   groups: { id: 'producers' | 'writers' | 'musicians' | 'engineers' | 'other'; label: string; people: CreditEntry[] }[];
 }
 
-/** v10 GET /people/{id}: everything in the library one credited person worked on. */
+/** v12 GET /people/{id}: everything in the library one credited person worked on. */
 export interface CreditPerson {
   id: string;
   name: string;

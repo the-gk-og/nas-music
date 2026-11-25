@@ -20,6 +20,7 @@ import type {
   Invite,
   PlaybackState,
   Playlist,
+  PlaylistFolder,
   Queue,
   Session,
   Track,
@@ -58,6 +59,7 @@ export class MockBackend {
   users: MockUser[] = [{ id: 'u1', username: 'admin', password: 'admin123', isAdmin: true, disabled: false, createdAt: iso() }];
   tokens = new Map<string, { userId: string; deviceId: string }>();
   invites: Invite[] = [{ code: 'WELCOME1', note: 'mock invite', createdAt: iso(), expiresAt: new Date(Date.now() + 7 * 864e5).toISOString(), url: '/join/WELCOME1' }];
+  plFolders: Omit<PlaylistFolder, 'playlistCount'>[] = [];
   playlists: (Playlist & { trackIds: string[] })[] = [
     { id: 'p1', name: 'car', trackIds: ['t0_1', 't3_2', 't5_1'], createdAt: iso(), updatedAt: iso() },
     { id: 'p2', name: 'nerdcore', trackIds: ['t1_1', 't1_2'], createdAt: iso(), updatedAt: iso() },
@@ -301,7 +303,19 @@ export class MockBackend {
   }
   private plOut(p: MockBackend['playlists'][number], withTracks = true): Playlist {
     const tracks = this.tracksOf(p.trackIds);
-    return { id: p.id, name: p.name, createdAt: p.createdAt, updatedAt: p.updatedAt, trackCount: tracks.length, durationS: tracks.reduce((s, t) => s + t.durationS, 0), role: 'owner', rev: 0, memberCount: 0, collaborative: false, ...(withTracks ? { tracks } : {}) };
+    return { id: p.id, name: p.name, createdAt: p.createdAt, updatedAt: p.updatedAt, trackCount: tracks.length, durationS: tracks.reduce((s, t) => s + t.durationS, 0), role: 'owner', rev: 0, memberCount: 0, collaborative: false, folderId: p.folderId ?? null, ...(withTracks ? { tracks } : {}) };
+  }
+  /** v10 playlist folders, depth first like the server. */
+  private foldersOut(): PlaylistFolder[] {
+    const out: PlaylistFolder[] = [];
+    const walk = (parent: string | null) => {
+      for (const f of this.plFolders.filter((x) => x.parentId === parent)) {
+        out.push({ ...f, playlistCount: this.playlists.filter((p) => p.folderId === f.id).length });
+        walk(f.id);
+      }
+    };
+    walk(null);
+    return out;
   }
   private getQ(id: string) {
     const q = this.queues.find((x) => x.id === id);
@@ -663,10 +677,42 @@ export class MockBackend {
       };
     }
 
+    // v10 playlist folders
+    if (path === '/playlist-folders') {
+      if (method === 'POST') {
+        const f = { id: nid('f'), name: String(body.name), parentId: (body.parentId as string | null) ?? null, createdAt: iso(), playlistCount: 0 };
+        this.plFolders.push(f);
+        return this.foldersOut().find((x) => x.id === f.id);
+      }
+      return this.foldersOut();
+    }
+    if ((r = m(/^\/playlist-folders\/([^/]+)$/))) {
+      const f = this.plFolders.find((x) => x.id === r![1]);
+      if (!f) throw new HttpError(404, 'no such folder');
+      if (method === 'DELETE') {
+        for (const x of this.plFolders) if (x.parentId === f.id) x.parentId = f.parentId;
+        for (const p of this.playlists) if (p.folderId === f.id) p.folderId = f.parentId;
+        this.plFolders = this.plFolders.filter((x) => x !== f);
+        return undefined;
+      }
+      if (typeof body.name === 'string') f.name = body.name;
+      if ('parentId' in body) f.parentId = (body.parentId as string | null) ?? null;
+      return this.foldersOut().find((x) => x.id === f.id);
+    }
+    if ((r = m(/^\/playlists\/([^/]+)\/folder$/))) {
+      const p = this.getP(r[1]);
+      p.folderId = (body.folderId as string | null) ?? null;
+      return this.plOut(p, false);
+    }
+    // v10 classical: the mock library has no works
+    if (path === '/library/composers') return [];
+    if (path === '/library/works') return [];
+    if (m(/^\/library\/works\/([^/]+)$/)) throw new HttpError(404, 'not found');
+
     // playlists
     if (path === '/playlists') {
       if (method === 'POST') {
-        const p = { id: nid('p'), name: String(body.name), trackIds: [], createdAt: iso(), updatedAt: iso() };
+        const p = { id: nid('p'), name: String(body.name), trackIds: [], createdAt: iso(), updatedAt: iso(), folderId: (body.folderId as string | null) ?? null };
         this.playlists.push(p);
         return this.plOut(p);
       }
@@ -987,6 +1033,24 @@ export class MockBackend {
       };
     if (path === '/admin/autotag/rematch' && method === 'POST') return { queued: (body.trackIds as string[]).length };
     if (path === '/admin/duplicates') return A.dups;
+    // library cleanup (v9): an empty, working console in mock mode
+    if (path === '/admin/cleanup/summary')
+      return {
+        reports: [
+          { id: 'never_played', title: 'Never played', description: 'Songs nobody has played.', kind: 'track', threshold: 90, unit: 'days', count: 0, bytes: 0 },
+          { id: 'fake_lossless', title: 'Fake lossless', description: 'Lossless files made from an MP3/AAC.', kind: 'track', threshold: null, unit: null, count: 0, bytes: 0 },
+        ],
+        inTrash: 0,
+        deleteList: 0,
+        lossless: { lossless: 0, checked: 0, flagged: 0, byVerdict: {} },
+        trashDays: 30,
+        deleteFiles: false,
+      };
+    if (path.startsWith('/admin/cleanup/reports/')) return { total: 0, bytes: 0, items: [] };
+    if (path === '/admin/cleanup/search') return { artists: [], albums: [], tracks: [] };
+    if (path === '/admin/cleanup/trash') return { trashDays: 30, deleteFiles: false, batches: [] };
+    if (path === '/admin/cleanup/delete-list') return [];
+    if (path === '/admin/cleanup/remove' && method === 'POST') return { removed: 0, batchId: 'mock', purgeAfter: iso(), bytes: 0 };
     if (path === '/admin/duplicates/resolve' && method === 'POST') return A.resolveDup(body.keepTrackId as string, body.hideTrackIds as string[]);
     if (path === '/admin/duplicates/unhide' && method === 'POST') return A.unhideDup(body.trackIds as string[]);
     if (path === '/admin/backups') {

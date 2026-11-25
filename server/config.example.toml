@@ -40,6 +40,13 @@ opus_cache_gb = 20                 # LRU limit for transcoded Opus files
 #                                  # register an application (any name/version) and paste its API key here.
 # scan_interval_minutes = 5
 
+# ---- Library cleanup (admin console "Cleanup & trash"; deploy/README.md "Deleting songs") ----
+# Songs an admin removes wait in the trash this many days (restorable), then are purged.
+# trash_days = 30
+# Purging deletes the music files themselves. Needs the music folder mounted read-write (drop `:ro`).
+# Off (default): the library is never written to; purged songs stay hidden and go on a delete list.
+# library_delete_files = false
+
 # ---- Uploads (deploy/README.md "Uploads") ----
 # A SEPARATE writable folder (never inside library_root, which stays read-only). Unset = uploading is off.
 # upload_root = "/uploads"

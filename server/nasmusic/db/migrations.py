@@ -532,13 +532,15 @@ def migrate_v8_to_v9(conn: sqlite3.Connection, schema_sql: str, make_backup: boo
     return True
 
 
-# ---------- v9 -> v10 (additive; other v10 features add their tables to V10_TABLES) ----------
+# ---------- v9 -> v10 (additive: playlist folders, classical-music track fields) ----------
 
-V10_TABLES = ("credit_lookups", "track_credits")
+V10_TABLES = ("playlist_folders", "playlist_folder_items")
+V10_TRACK_COLUMNS = (("work", "TEXT"), ("movement", "TEXT"), ("movement_no", "INTEGER"))
 
 
 def migrate_v9_to_v10(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
-    """New tables for the v10 features (additive). Returns True if it migrated."""
+    """New tables and track columns for the v10 features (additive). Returns True if it migrated.
+    tracks.work stays NULL ("not read yet"); the next library scan backfills it from the files."""
     if current_version(conn) != 9:
         return False
     if make_backup:
@@ -551,6 +553,10 @@ def migrate_v9_to_v10(conn: sqlite3.Connection, schema_sql: str, make_backup: bo
         if current_version(conn) != 9:
             conn.execute("ROLLBACK")
             return False
+        have = _columns(conn, "tracks")
+        for col, decl in V10_TRACK_COLUMNS:
+            if col not in have:
+                conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} {decl}")
         for t in V10_TABLES:
             if not _table_exists(conn, t):
                 conn.execute(_create_table(stmts, t))
@@ -562,4 +568,70 @@ def migrate_v9_to_v10(conn: sqlite3.Connection, schema_sql: str, make_backup: bo
         conn.execute("ROLLBACK")
         raise
     log.warning("schema v9 -> v10 done")
+    return True
+
+
+# ---------- v10 -> v11 (additive; other v11 features add their tables to V11_TABLES) ----------
+
+V11_TABLES = ("library_removed", "lossless_checks")
+
+
+def migrate_v10_to_v11(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """New tables for the v11 features (library cleanup; additive). Returns True if it migrated."""
+    if current_version(conn) != 10:
+        return False
+    if make_backup:
+        dest = backup(conn, "v10-backup")
+        if dest:
+            log.warning("schema v10 -> v11: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 10:
+            conn.execute("ROLLBACK")
+            return False
+        for t in V11_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (11)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v10 -> v11 done")
+    return True
+
+
+# ---------- v11 -> v12 (additive; other v12 features add their tables to V12_TABLES) ----------
+
+V12_TABLES = ("credit_lookups", "track_credits")
+
+
+def migrate_v11_to_v12(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """Song credits (additive). Returns True if it migrated."""
+    if current_version(conn) != 11:
+        return False
+    if make_backup:
+        dest = backup(conn, "v11-backup")
+        if dest:
+            log.warning("schema v11 -> v12: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 11:
+            conn.execute("ROLLBACK")
+            return False
+        for t in V12_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (12)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v11 -> v12 done")
     return True

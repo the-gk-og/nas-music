@@ -198,6 +198,10 @@ a {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.row-item.cur {
+  color: var(--accent);
+}
+
 .row-item .sub {
   font-size: 0.85rem;
   color: var(--fg-3);

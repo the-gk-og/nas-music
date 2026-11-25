@@ -1,4 +1,4 @@
-"""v10 song credits under /api/v1: GET /library/tracks/{id}/credits (producers, songwriters, musicians of one
+"""v12 song credits under /api/v1: GET /library/tracks/{id}/credits (producers, songwriters, musicians of one
 track, each with how many other songs in the caller's library they are on) and GET /people/{personId}
 (everything in the caller's library one person is credited on). Family-mode filtered like every list."""
 from __future__ import annotations

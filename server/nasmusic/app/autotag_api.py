@@ -47,6 +47,8 @@ class TrackIds(BaseModel):
 class ResolveBody(BaseModel):
     keepTrackId: str
     hideTrackIds: list[str] = Field(min_length=1, max_length=100)
+    # v11: also move the other copies to the trash (deleted when it is purged) instead of only hiding them.
+    remove: bool = False
 
 
 def _db_fields(names: list[str]) -> list[str]:
@@ -131,11 +133,19 @@ def duplicate_groups(conn: Conn = Depends(db)):
 
 
 @router.post("/duplicates/resolve")
-def resolve(body: ResolveBody, me: Device = Depends(admin_device), conn: Conn = Depends(db)):
+def resolve(body: ResolveBody, me: Device = Depends(admin_device), conn: Conn = Depends(db),
+            c: AppContext = Depends(ctx)):
     try:
-        return duplicates.resolve(conn, me.user_id, body.keepTrackId, body.hideTrackIds)
+        out = duplicates.resolve(conn, me.user_id, body.keepTrackId, body.hideTrackIds)
     except duplicates.DuplicateError as e:
         raise HTTPException(e.status, e.detail) from e
+    if body.remove:
+        from nasmusic.library import cleanup
+
+        hide = [h for h in body.hideTrackIds if h != body.keepTrackId]
+        r = cleanup.remove(conn, c.cfg, me.user_id, track_ids=hide, reason="duplicate copy")
+        out.update(removed=r["removed"], batchId=r["batchId"], purgeAfter=r["purgeAfter"])
+    return out
 
 
 @router.post("/duplicates/unhide")

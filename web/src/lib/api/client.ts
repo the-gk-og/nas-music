@@ -48,6 +48,9 @@ import type {
   MyDevice,
   PlayEvent,
   Playlist,
+  PlaylistFolder,
+  Composer,
+  Work,
   PlaylistActivity,
   PlaylistMember,
   Queue,
@@ -450,6 +453,11 @@ export class ApiClient {
   folders = (path = '') => this.get<FolderListing>('/library/folders', { path });
   genres = () => this.get<(Genre | string)[]>('/library/genres');
   genreTracks = (g: string) => this.get<Track[]>(`/library/genres/${encodeURIComponent(g)}/tracks`);
+  // v10 classical
+  composers = () => this.get<Composer[]>('/library/composers');
+  works = (q: { composer?: string; albumId?: string } = {}, offset = 0, limit = 500) =>
+    this.get<Work[]>('/library/works', { ...q, offset, limit });
+  work = (id: string) => this.get<Work & { tracks: Track[] }>(`/library/works/${encodeURIComponent(id)}`);
   smartList = (kind: SmartListKind, offset = 0, limit = 500) => this.get<Track[]>(`/lists/${kind}`, { offset, limit });
 
   // ---- AutoEq headphone profiles (server-side proxy, fetched on demand) ----
@@ -473,7 +481,17 @@ export class ApiClient {
 
   // ---- playlists ----
   playlists = () => this.get<Playlist[]>('/playlists');
-  createPlaylist = (name: string) => this.post<Playlist>('/playlists', { name });
+  createPlaylist = (name: string, folderId?: string | null) =>
+    this.post<Playlist>('/playlists', folderId ? { name, folderId } : { name });
+  // v10 playlist folders (per user)
+  playlistFolders = () => this.get<PlaylistFolder[]>('/playlist-folders');
+  createPlaylistFolder = (name: string, parentId?: string | null) =>
+    this.post<PlaylistFolder>('/playlist-folders', { name, parentId: parentId ?? null });
+  updatePlaylistFolder = (id: string, b: { name?: string; parentId?: string | null; index?: number }) =>
+    this.patch<PlaylistFolder>(`/playlist-folders/${encodeURIComponent(id)}`, b);
+  deletePlaylistFolder = (id: string) => this.del<void>(`/playlist-folders/${encodeURIComponent(id)}`);
+  setPlaylistFolder = (id: string, folderId: string | null) =>
+    this.put<Playlist>(`/playlists/${encodeURIComponent(id)}/folder`, { folderId });
   playlist = (id: string) => this.get<Playlist>(`/playlists/${encodeURIComponent(id)}`);
   renamePlaylist = (id: string, name: string) => this.patch<Playlist>(`/playlists/${encodeURIComponent(id)}`, { name });
   deletePlaylist = (id: string) => this.del<void>(`/playlists/${encodeURIComponent(id)}`);

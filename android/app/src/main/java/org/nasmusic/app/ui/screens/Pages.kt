@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -165,6 +166,8 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
     var completeness by remember { mutableStateOf<org.nasmusic.app.data.api.AlbumCompleteness?>(null) }
     var style by rememberPageStyle(c)
     val list = rememberLazyListState()
+    val classical by org.nasmusic.app.data.ClassicalMode.on.collectAsState()
+    LaunchedEffect(Unit) { org.nasmusic.app.data.ClassicalMode.ensure(c.context, c.api) }
     LaunchedEffect(albumId, ui.tagsRev) {
         completeness = null
         album = runCatching { c.api.album(albumId) }.getOrNull()
@@ -197,7 +200,7 @@ fun AlbumScreen(c: AppContainer, albumId: String) {
             else SimpleHeader(c, a.id, a.title, a.artist, meta, play, shuffle, radio, menu)
         }
         completeness?.let { comp -> item { AlbumCompletenessRow(c, comp) { completeness = it } } }
-        songItems(c, a.tracks, name, PlaySource.LIBRARY)
+        albumTrackItems(c, a.tracks, name, classical)  // api 0.10: grouped by work in classical mode
         if (style == "big" && more.isNotEmpty()) item { ShelfHeader("More by ${a.artist}"); ShelfRow(c, more) }
         item { Spacer(Modifier.height(24.dp)) }
     }

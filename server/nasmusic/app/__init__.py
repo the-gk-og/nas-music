@@ -178,10 +178,11 @@ PLAYER_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-i
 
 def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None = None) -> FastAPI:
     from nasmusic import web
-    from nasmusic.app import (account_api, admin_api, api, automix_api, autotag_api, cast_api, collections_api,
-                              connect_api, continuing, credits_api, discover_api, djvoice_api, family_api, imports_api,
-                              insights_api, jam_api,
-                              logbuffer, scrobble_api, smart_api, spoken_api, tags_api, uploads_api, voice_api)
+    from nasmusic.app import (account_api, admin_api, api, automix_api, autotag_api, cast_api, classical_api,
+                              cleanup_api,
+                              collections_api, connect_api, continuing, credits_api, discover_api, djvoice_api, family_api,
+                              imports_api, insights_api, jam_api, logbuffer, scrobble_api, smart_api, spoken_api,
+                              tags_api, uploads_api, voice_api)
     from nasmusic.web import spa
 
     install_token_redaction()
@@ -194,7 +195,7 @@ def create_app(cfg: Config, jobs: Jobs | None = None, context: AppContext | None
               family_api.router, family_api.admin, jam_api.public, jam_api.host, voice_api.public,
               voice_api.router, uploads_api.router, uploads_api.admin, smart_api.router, scrobble_api.router,
               spoken_api.router, automix_api.router, continuing.router, djvoice_api.router,
-              imports_api.router, credits_api.router):
+              imports_api.router, classical_api.router, cleanup_api.router, credits_api.router):
         app.include_router(r, prefix="/api/v1")
     app.include_router(web.router)
     app.include_router(spa.router_for(cfg, web.render_join))  # catch-all: must stay last

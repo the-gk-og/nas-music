@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.10.0
+  version: 0.12.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,12 +10,20 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
-    0.10.0 (schema v10): song credits. GET /library/tracks/{id}/credits lists who produced, wrote and played on a
+    0.12.0 (schema v12): song credits. GET /library/tracks/{id}/credits lists who produced, wrote and played on a
     track (MusicBrainz recording, work and release relationships, plus the file's composer/lyricist tags), grouped
     into producers / writers / musicians / engineers / other, each person with how many OTHER songs in the
     caller's library they are credited on. Lookups run in the background: `status: "pending"` means poll again
     in a few seconds. GET /people/{personId} lists everything in the caller's library a person is credited on.
     Person ids are `mb:<artist MBID>` or `n:<normalised name>` (tag-only names); treat them as opaque.
+    0.11.0 (schema v11): admin library cleanup (/admin/cleanup/*). Pruning reports (never played, unplayed
+    albums, disliked/skipped, low bitrate, fake lossless, very short), search, and removal of songs, albums or
+    artists into a trash (`trash_days`, default 30) with restore. Purging deletes uploaded files, and library
+    files only when the server's `library_delete_files` is on; otherwise songs stay hidden and are listed in a
+    delete list (also as a shell script). A nightly `lossless` job flags lossless files made from MP3/AAC or
+    upsampled; duplicate copies gain `losslessVerdict`/`losslessNote`, /admin/duplicates/resolve takes
+    `remove: true` to trash the other copies, and /admin/preview/{trackId} streams any copy (hidden or removed
+    too) so an admin can compare them by ear. Removed songs drop out of every listing, like missing files.
     0.9.0 (schema v9): (1) search by lyrics. The server keeps a full-text index of the lyrics everyone sees by
     default (admin edit, else the file's own, else cached LRCLIB; per-user edits are private and not indexed),
     filled by the scan job. GET /search gains `scope=lyrics` (only lyric matches, in `lyrics`) and every library
@@ -826,6 +834,9 @@ paths:
         `library.view.<chip>` grid|list (usually per device: `device.<id>.library.view.albums`).
         0.8.2 radio DJ voice (validated on PUT): `dj.voice` (bool, default false), `dj.every` (integer 1-10,
         default 3: the DJ talks before the first song and then every N songs).
+        v10 `library.classical` (bool, default false): classical mode. Album pages group tracks under their
+        work with a play-work button and show movement names; the composer is shown before the performer;
+        the library gets Composers and Works.
       responses:
         '200':
           description: settings
@@ -1104,6 +1115,53 @@ paths:
                         trackCount: { type: integer, description: tracks in this folder and below }
                   tracks: { type: array, items: { $ref: '#/components/schemas/Track' }, description: 'tracks directly in this folder, by file name' }
         '404': { description: no such folder }
+  /library/composers:
+    get:
+      summary: 'v10 classical: composers of works in the library (tracks with a `work`), by name'
+      responses:
+        '200':
+          description: composers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [name, workCount, albumCount, trackCount]
+                  properties:
+                    name: { type: string }
+                    workCount: { type: integer }
+                    albumCount: { type: integer }
+                    trackCount: { type: integer }
+  /library/works:
+    get:
+      summary: 'v10 classical: works, by composer then title; or one album''s works in album order (`albumId`)'
+      parameters:
+        - { name: composer, in: query, schema: { type: string }, description: exact composer name (case-insensitive) }
+        - { name: albumId, in: query, schema: { type: string } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 1000 } }
+      responses:
+        '200':
+          description: works
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Work' } } } }
+  /library/works/{workId}:
+    get:
+      summary: 'v10 classical: one work with its movements in order (play them all for "play whole work")'
+      parameters: [ { name: workId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: work
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Work'
+                  - type: object
+                    required: [tracks]
+                    properties:
+                      tracks: { type: array, items: { $ref: '#/components/schemas/Track' } }
+        '404': { description: not found }
   /library/genres:
     get:
       responses:
@@ -1151,7 +1209,7 @@ paths:
         '404': { description: not found }
   /library/tracks/{trackId}/credits:
     get:
-      summary: Song credits (v10) - producers, songwriters, musicians, engineers
+      summary: Song credits (v12) - producers, songwriters, musicians, engineers
       description: |
         Cached from MusicBrainz; a due lookup is queued in the background and never waited for. While
         `status` is "pending", fetch again after a few seconds. Tag credits (composer, lyricist) show at once.
@@ -1163,7 +1221,7 @@ paths:
         '404': { description: not found }
   /people/{personId}:
     get:
-      summary: Everything in the caller's library one credited person worked on (v10)
+      summary: Everything in the caller's library one credited person worked on (v12)
       parameters: [ { name: personId, in: path, required: true, schema: { type: string }, description: 'mb:<MBID> or n:<name>' } ]
       responses:
         '200':
@@ -1198,10 +1256,77 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 200 }
                 trackIds: { type: array, items: { type: string } }
+                folderId: { type: [string, 'null'], description: 'v10: file it into this folder of the caller''s' }
       responses:
         '200':
           description: created
           content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+        '422': { description: no such folder }
+  /playlist-folders:
+    get:
+      summary: 'v10. The caller''s playlist folders, depth first: every parent comes before its children, siblings in order.'
+      responses:
+        '200':
+          description: folders
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PlaylistFolder' } } } }
+    post:
+      summary: v10. New folder, last among its siblings. At most 500 folders, nested at most 8 deep.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                parentId: { type: [string, 'null'], description: null/omitted = top level }
+      responses:
+        '200':
+          description: created
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistFolder' } } }
+        '422': { description: no such parent, too deep, or too many folders }
+  /playlist-folders/{folderId}:
+    parameters: [ { name: folderId, in: path, required: true, schema: { type: string } } ]
+    patch:
+      summary: v10. Rename, move into another folder (`parentId` present; null = top level) and/or reorder among its siblings (`index`, 0 = first).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                parentId: { type: [string, 'null'] }
+                index: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: updated
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistFolder' } } }
+        '404': { description: not the caller's folder }
+        '422': { description: 'into itself or a subfolder, too deep, or no such parent' }
+    delete:
+      summary: v10. Delete the folder. Its playlists and subfolders move up to its parent; no playlist is deleted.
+      responses: { '204': { description: deleted }, '404': { description: not the caller's folder } }
+  /playlists/{playlistId}/folder:
+    put:
+      summary: v10. File a playlist the caller can see (own or shared) into one of their folders; null = top level.
+      parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                folderId: { type: [string, 'null'], description: null or omitted = top level }
+      responses:
+        '200':
+          description: the playlist summary with its new folderId
+          content: { application/json: { schema: { $ref: '#/components/schemas/Playlist' } } }
+        '404': { description: no such playlist (or no access) }
+        '422': { description: no such folder }
   /playlists/{playlistId}:
     parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
     get:
@@ -2786,10 +2911,20 @@ paths:
               properties:
                 keepTrackId: { type: string }
                 hideTrackIds: { type: array, items: { type: string }, minItems: 1, maxItems: 100 }
+                remove: { type: boolean, default: false, description: 'v11: also move the other copies to the trash (see /admin/cleanup/remove)' }
       responses:
         '200':
           description: done
-          content: { application/json: { schema: { type: object, properties: { hidden: { type: integer }, keptId: { type: string } } } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hidden: { type: integer }
+                  keptId: { type: string }
+                  removed: { type: integer, description: 'remove: true only' }
+                  batchId: { type: string, description: 'remove: true only: the trash batch' }
+                  purgeAfter: { type: string, format: date-time, description: 'remove: true only' }
         '404': { description: unknown track }
         '422': { description: nothing to hide }
   /admin/duplicates/unhide:
@@ -2802,6 +2937,243 @@ paths:
         '200':
           description: done
           content: { application/json: { schema: { type: object, properties: { unhidden: { type: integer } } } } }
+  /admin/cleanup/summary:
+    get:
+      summary: |
+        Admin only (v11). Every pruning report's count and size, how many songs are in the trash and on the
+        delete list, fake-lossless progress, and the server's trash settings.
+      responses:
+        '200':
+          description: summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reports: { type: array, items: { $ref: '#/components/schemas/CleanupReport' } }
+                  inTrash: { type: integer }
+                  deleteList: { type: integer, description: purged songs whose file is still on disk }
+                  lossless:
+                    type: object
+                    properties:
+                      lossless: { type: integer, description: present tracks with a lossless codec }
+                      checked: { type: integer }
+                      flagged: { type: integer }
+                      byVerdict: { type: object, additionalProperties: { type: integer } }
+                  trashDays: { type: integer }
+                  deleteFiles: { type: boolean, description: 'config library_delete_files: purging deletes library files' }
+  /admin/cleanup/reports/{reportId}:
+    get:
+      summary: Admin only (v11). The items of one pruning report (present tracks only).
+      parameters:
+        - { name: reportId, in: path, required: true, schema: { type: string, enum: [never_played, unplayed_albums, disliked, low_quality, fake_lossless, short] } }
+        - { name: threshold, in: query, schema: { type: integer, minimum: 0 }, description: 'days / skips / kbps / seconds (see CleanupReport.unit); default per report' }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 5000 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  bytes: { type: integer }
+                  items: { type: array, items: { $ref: '#/components/schemas/CleanupItem' } }
+        '404': { description: unknown report }
+  /admin/cleanup/search:
+    get:
+      summary: Admin only (v11). Find artists, albums and songs to remove.
+      parameters: [ { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 200 } } ]
+      responses:
+        '200':
+          description: matches
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  artists:
+                    type: array
+                    items: { type: object, properties: { id: { type: string }, name: { type: string }, trackCount: { type: integer }, bytes: { type: integer } } }
+                  albums:
+                    type: array
+                    items: { type: object, properties: { id: { type: string }, title: { type: string }, artist: { type: string }, year: { type: [integer, 'null'] }, trackCount: { type: integer }, bytes: { type: integer }, path: { type: [string, 'null'] } } }
+                  tracks: { type: array, items: { $ref: '#/components/schemas/CleanupItem' } }
+  /admin/cleanup/remove:
+    post:
+      summary: |
+        Admin only (v11). Move songs, whole albums or artists (their albums too) to the trash. They vanish from
+        every listing at once (tracks.missing = 3); playlists, favourites and history stay until the trash is
+        purged, so a restore puts everything back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                trackIds: { type: array, items: { type: string }, maxItems: 50000 }
+                albumIds: { type: array, items: { type: string }, maxItems: 5000 }
+                artistIds: { type: array, items: { type: string }, maxItems: 1000 }
+                reason: { type: [string, 'null'], maxLength: 200 }
+      responses:
+        '200':
+          description: removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed: { type: integer }
+                  batchId: { type: string }
+                  purgeAfter: { type: string, format: date-time }
+                  bytes: { type: integer }
+        '404': { description: nothing to remove (unknown ids, or already removed) }
+  /admin/cleanup/trash:
+    get:
+      summary: Admin only (v11). Removal batches, newest first (purged ones whose file was kept included).
+      responses:
+        '200':
+          description: trash
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trashDays: { type: integer }
+                  deleteFiles: { type: boolean }
+                  batches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        batchId: { type: string }
+                        removedAt: { type: string, format: date-time }
+                        removedBy: { type: [string, 'null'] }
+                        reason: { type: [string, 'null'] }
+                        purgeAfter: { type: string, format: date-time }
+                        count: { type: integer }
+                        bytes: { type: integer }
+                        purgedCount: { type: integer, description: purged but the file was kept (on the delete list) }
+                        purgeError: { type: [string, 'null'] }
+                        sample:
+                          type: array
+                          items: { type: object, properties: { id: { type: string }, title: { type: string }, artist: { type: string }, album: { type: string }, path: { type: string } } }
+  /admin/cleanup/trash/{batchId}:
+    get:
+      summary: Admin only (v11). Every song of one removal batch.
+      parameters: [ { name: batchId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: songs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    title: { type: string }
+                    artist: { type: string }
+                    album: { type: string }
+                    path: { type: string }
+                    bytes: { type: [integer, 'null'] }
+                    purgedAt: { type: [string, 'null'] }
+                    purgeError: { type: [string, 'null'] }
+        '404': { description: no such batch }
+  /admin/cleanup/trash/restore:
+    post:
+      summary: Admin only (v11). Take batches or songs out of the trash (a hidden duplicate goes back to hidden).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                batchIds: { type: array, items: { type: string } }
+                trackIds: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: restored
+          content: { application/json: { schema: { type: object, properties: { restored: { type: integer } } } } }
+  /admin/cleanup/trash/purge:
+    post:
+      summary: |
+        Admin only (v11). Empty these batches now instead of waiting `trashDays` (the nightly cleanup job purges
+        expired ones). Uploaded files are deleted; library files only when `deleteFiles` is on, otherwise (or if
+        deleting fails, e.g. a read-only mount) the songs stay hidden and join the delete list. Not undoable for
+        deleted files.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [batchIds]
+              properties:
+                batchIds: { type: array, items: { type: string }, minItems: 1 }
+      responses:
+        '200':
+          description: purged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  purged: { type: integer }
+                  filesDeleted: { type: integer }
+                  freedBytes: { type: integer }
+                  kept: { type: integer, description: hidden for good, file kept (delete list) }
+                  errors: { type: integer }
+  /admin/cleanup/delete-list:
+    get:
+      summary: |
+        Admin only (v11). Purged songs whose file is still on disk. `format=sh` returns a POSIX shell script
+        (`sh delete-list.sh /path/to/music`); once the files are gone the server forgets the songs.
+      parameters: [ { name: format, in: query, schema: { type: string, enum: [json, sh], default: json } } ]
+      responses:
+        '200':
+          description: list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, properties: { id: { type: string }, path: { type: string }, bytes: { type: [integer, 'null'] }, error: { type: [string, 'null'] } } }
+            text/x-shellscript: { schema: { type: string } }
+  /admin/cleanup/lossless/dismiss:
+    post:
+      summary: 'Admin only (v11). Mark fake-lossless verdicts as fine (dismissed = false flags them again).'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [trackIds]
+              properties:
+                trackIds: { type: array, items: { type: string }, minItems: 1 }
+                dismissed: { type: boolean, default: true }
+      responses:
+        '200':
+          description: done
+          content: { application/json: { schema: { type: object, properties: { updated: { type: integer } } } } }
+  /admin/preview/{trackId}:
+    get:
+      summary: |
+        Admin only (v11). Stream any track, including hidden duplicates and removed songs, to compare copies by
+        ear. `original` (default) is the file as stored; `opus` transcodes at `bitrate`. Accepts `?token=` like
+        /stream. `X-Stream-Format` describes what was sent.
+      parameters:
+        - { name: trackId, in: path, required: true, schema: { type: string } }
+        - { name: format, in: query, schema: { type: string, enum: [original, opus], default: original } }
+        - { name: bitrate, in: query, schema: { type: integer, default: 192 } }
+      responses:
+        '200': { description: audio, content: { 'audio/*': { schema: { type: string, format: binary } } } }
+        '404': { description: unknown track or file missing }
   /admin/users/{userId}/devices:
     get:
       summary: Admin only. A user's devices (online from Connect).
@@ -2845,7 +3217,7 @@ paths:
     post:
       summary: Admin only. Start a job now (background). `backup` makes a manual database backup.
       parameters:
-        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, lyrics, discovery, release_radar, blends, cleanup, backup, explicit, autotag, upload_scan, smart, artist_info, podcasts, audiobooks, automix, credits] } }
+        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, lyrics, discovery, release_radar, blends, cleanup, backup, explicit, autotag, upload_scan, smart, artist_info, podcasts, audiobooks, automix, lossless, credits] } }
       responses:
         '200':
           description: the job's status (state running, or idle if it already finished)
@@ -5021,6 +5393,7 @@ components:
         rev: { type: integer, description: 'v5: bumped on every change (compare with Connect `playlist` messages)' }
         memberCount: { type: integer, description: 'v5: members besides the owner' }
         collaborative: { type: boolean, description: 'v5: memberCount > 0' }
+        folderId: { type: [string, 'null'], description: 'v10: the caller''s folder it is filed in (null = top level). Each user files shared playlists in their own folders.' }
     PlaylistDetail:
       allOf:
         - $ref: '#/components/schemas/Playlist'
@@ -5209,6 +5582,43 @@ components:
       required: [trackIds]
       properties:
         trackIds: { type: array, items: { type: string }, minItems: 1 }
+    CleanupReport:
+      type: object
+      properties:
+        id: { type: string, enum: [never_played, unplayed_albums, disliked, low_quality, fake_lossless, short] }
+        title: { type: string }
+        description: { type: string }
+        kind: { type: string, enum: [track, album] }
+        threshold: { type: [integer, 'null'] }
+        unit: { type: [string, 'null'], enum: [days, skips, kbps, seconds, null] }
+        count: { type: integer }
+        bytes: { type: integer }
+    CleanupItem:
+      type: object
+      description: a song (kind track) or a whole album (kind album; path = its folder) a report suggests pruning
+      properties:
+        kind: { type: string, enum: [track, album] }
+        id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        albumId: { type: string }
+        path: { type: [string, 'null'] }
+        bytes: { type: [integer, 'null'] }
+        durationS: { type: [number, 'null'] }
+        codec: { type: [string, 'null'] }
+        bitrate: { type: [integer, 'null'] }
+        sampleRate: { type: [integer, 'null'] }
+        bitsPerSample: { type: [integer, 'null'] }
+        plays: { type: integer, description: all users }
+        skips: { type: integer }
+        blockedBy: { type: integer, description: users who gave it a thumbs-down }
+        lastPlayed: { type: [string, 'null'] }
+        addedAt: { type: [string, 'null'] }
+        note: { type: [string, 'null'] }
+        verdict: { type: string, description: fake_lossless only }
+        trackCount: { type: integer }
+        trackIds: { type: array, items: { type: string } }
     DuplicateGroup:
       type: object
       required: [groupId, tracks]
@@ -5236,6 +5646,11 @@ components:
               hidden: { type: boolean }
               keptId: { type: [string, 'null'], description: 'hidden: the copy kept instead' }
               recommended: { type: boolean }
+              losslessVerdict:
+                type: [string, 'null']
+                enum: [ok, lossy_source, suspect, upsampled, unknown, error, null]
+                description: v11 fake-lossless checker (lossless codecs only; null = not checked yet)
+              losslessNote: { type: [string, 'null'], description: 'e.g. "cut off at 16.0 kHz: made from an MP3 ~128 kbps"' }
     Queue:
       type: object
       required: [id, name, slot, currentIndex, positionMs, trackCount, durationS, createdAt, updatedAt]
@@ -5605,6 +6020,35 @@ components:
         hasArt: { type: boolean }
         mbid: { type: [string, 'null'] }
         explicit: { type: boolean, description: 'v6: contains explicit tracks (among those the caller can see): "E" badge' }
+    AlbumCompleteness:
+      type: object
+      required: [albumId, status, have, total, missing]
+      properties:
+        albumId: { type: string }
+        status: { type: string, enum: [complete, incomplete, unknown] }
+        have: { type: integer, description: 'library tracks matched to the release ("9" of "9 of 12")' }
+        total: { type: [integer, 'null'], description: 'tracks on the release; null when unknown' }
+        releaseGroupMbid: { type: [string, 'null'] }
+        releaseMbid: { type: [string, 'null'] }
+        releaseTitle: { type: [string, 'null'], description: 'with its MusicBrainz disambiguation, e.g. "Second (2011 remaster)"' }
+        discCount: { type: [integer, 'null'] }
+        missing:
+          type: array
+          items:
+            type: object
+            required: [disc, position, title]
+            properties:
+              disc: { type: integer }
+              position: { type: integer }
+              title: { type: string }
+              durationS: { type: [integer, 'null'] }
+              recordingMbid: { type: [string, 'null'] }
+              toget:
+                type: [object, 'null']
+                description: the caller's To-get item for this song, if any
+                properties:
+                  id: { type: string }
+                  status: { type: string, enum: [want, got, dismissed] }
     TrackCredits:
       type: object
       required: [trackId, status, groups]
@@ -5657,35 +6101,6 @@ components:
                 required: [credits]
                 properties:
                   credits: { type: array, items: { type: string }, description: their roles on this track }
-    AlbumCompleteness:
-      type: object
-      required: [albumId, status, have, total, missing]
-      properties:
-        albumId: { type: string }
-        status: { type: string, enum: [complete, incomplete, unknown] }
-        have: { type: integer, description: 'library tracks matched to the release ("9" of "9 of 12")' }
-        total: { type: [integer, 'null'], description: 'tracks on the release; null when unknown' }
-        releaseGroupMbid: { type: [string, 'null'] }
-        releaseMbid: { type: [string, 'null'] }
-        releaseTitle: { type: [string, 'null'], description: 'with its MusicBrainz disambiguation, e.g. "Second (2011 remaster)"' }
-        discCount: { type: [integer, 'null'] }
-        missing:
-          type: array
-          items:
-            type: object
-            required: [disc, position, title]
-            properties:
-              disc: { type: integer }
-              position: { type: integer }
-              title: { type: string }
-              durationS: { type: [integer, 'null'] }
-              recordingMbid: { type: [string, 'null'] }
-              toget:
-                type: [object, 'null']
-                description: the caller's To-get item for this song, if any
-                properties:
-                  id: { type: string }
-                  status: { type: string, enum: [want, got, dismissed] }
     Track:
       type: object
       required: [id, title, artistId, artist, albumId, album, durationS, starred]
@@ -5712,6 +6127,36 @@ components:
         familyHidden: { type: boolean, description: 'v6, queues/playlists only (true): hidden by the caller''s family mode; skip it' }
         mix:
           $ref: '#/components/schemas/TrackMix'
+        composer: { type: string, description: 'v10: only when tagged' }
+        work: { type: string, description: 'v10 classical: the work (composition) this track is a movement of; only when it is part of one (WORK tag, or a "Work: I. Movement" title on a track with a composer)' }
+        workId: { type: string, description: 'v10: GET /library/works/{workId}; present with `work`' }
+        movement: { type: string, description: 'v10: the movement name without its number ("Allegro con brio"); show it instead of the title under a work heading' }
+        movementNo: { type: integer, description: 'v10: the movement''s number in the work' }
+    Work:
+      type: object
+      description: 'v10 classical: the tracks of one album that share a `work`, in movement order'
+      required: [id, title, albumId, album, artist, trackCount, durationS, hasArt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        composer: { type: [string, 'null'] }
+        albumId: { type: string }
+        album: { type: string }
+        artist: { type: string, description: the album artist (the performers) }
+        year: { type: [integer, 'null'] }
+        trackCount: { type: integer }
+        durationS: { type: number }
+        hasArt: { type: boolean, description: 'cover at /art/{albumId}' }
+    PlaylistFolder:
+      type: object
+      description: 'v10: one of the caller''s own playlist folders'
+      required: [id, name, parentId, createdAt, playlistCount]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        parentId: { type: [string, 'null'], description: null = top level }
+        createdAt: { type: string, format: date-time }
+        playlistCount: { type: integer, description: playlists filed directly in this folder }
     ExplicitStatus:
       type: string
       enum: [explicit, probable, clean, unknown]

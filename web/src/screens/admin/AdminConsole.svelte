@@ -1,11 +1,12 @@
 <script lang="ts">
   // Admin console: desktop-first (section list on the left), chips on phones.
-  import { Activity, ArrowLeft, Baby, Bug, Copy, DatabaseBackup, HeartPulse, Library, ListChecks, ScrollText, Settings, Tags, Upload, Users, WandSparkles } from '@lucide/svelte';
+  import { Activity, ArrowLeft, Baby, Bug, Copy, DatabaseBackup, Eraser, HeartPulse, Library, ListChecks, ScrollText, Settings, Tags, Upload, Users, WandSparkles } from '@lucide/svelte';
   import { appearance } from '../../lib/appearance.svelte';
   import { session } from '../../lib/session.svelte';
   import { ui } from '../../lib/ui.svelte';
   import AutotagAdmin from './AutotagAdmin.svelte';
   import Backups from './Backups.svelte';
+  import CleanupAdmin from './CleanupAdmin.svelte';
   import Dashboard from './Dashboard.svelte';
   import FamilyAdmin from './FamilyAdmin.svelte';
   import DuplicatesAdmin from './DuplicatesAdmin.svelte';
@@ -29,6 +30,7 @@
     { id: 'family', label: 'Family & explicit', icon: Baby },
     { id: 'autotag', label: 'Tag fixing', icon: WandSparkles },
     { id: 'duplicates', label: 'Duplicates', icon: Copy },
+    { id: 'cleanup', label: 'Cleanup & trash', icon: Eraser },
     { id: 'health', label: 'Health & pruning', icon: HeartPulse },
     { id: 'logs', label: 'Logs & jobs', icon: ScrollText },
     { id: 'reports', label: 'Bug reports', icon: Bug },
@@ -68,6 +70,7 @@
       {:else if section === 'family'}<FamilyAdmin />
       {:else if section === 'autotag'}<AutotagAdmin />
       {:else if section === 'duplicates'}<DuplicatesAdmin />
+      {:else if section === 'cleanup'}<CleanupAdmin />
       {:else if section === 'health'}<Health />
       {:else if section === 'logs'}<Logs />
       {:else if section === 'reports'}<Reports />

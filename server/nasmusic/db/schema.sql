@@ -1,4 +1,4 @@
--- nas-music shared schema v10 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
+-- nas-music shared schema v12 (SQLite, WAL mode). Contract between server core and nasmusic.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
@@ -23,7 +23,12 @@
 -- v8 adds toget_admin (the admin's check-off of users' want-list items) and continue_dismissed (Continue
 -- listening items the user swiped away; an item comes back once it is played again after that).
 -- v9 adds the lyrics search index (lyrics_index + the FTS5 table lyrics_fts), filled by the scan job.
--- v10 adds song credits (credit_lookups, track_credits: producers, songwriters, musicians from MusicBrainz).
+-- v10 adds playlist folders (playlist_folders, playlist_folder_items: each user files the playlists they can
+-- see, their own and shared ones, into their own folder tree) and classical-music fields on tracks (work,
+-- movement, movement_no: from WORK/MOVEMENTNAME/MOVEMENT tags or a "Work: I. Movement" title).
+-- v11 adds library cleanup: library_removed (the admin trash; tracks.missing = 3) and lossless_checks (the
+-- fake-lossless checker's spectral verdicts).
+-- v12 adds song credits (credit_lookups, track_credits: producers, songwriters, musicians from MusicBrainz).
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
 -- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
@@ -105,7 +110,8 @@ CREATE TABLE IF NOT EXISTS tracks (
     mbid            TEXT,              -- MusicBrainz recording id
     added_at        TEXT NOT NULL,
     -- 0 = present; 1 = file vanished on last scan (kept for history); 2 (v6) = hidden by an admin as a
-    -- duplicate copy (see duplicate_hidden). Everything that filters `missing = 0` skips both.
+    -- duplicate copy (see duplicate_hidden); 3 (v11) = removed by an admin (see library_removed).
+    -- Everything that filters `missing = 0` skips all of them.
     missing         INTEGER NOT NULL DEFAULT 0,
     -- v2 song-info fields, filled by the scanner
     composer        TEXT,
@@ -130,7 +136,13 @@ CREATE TABLE IF NOT EXISTS tracks (
     rg_album_gain   REAL,
     rg_album_peak   REAL,
     rg_source       TEXT,
-    loudness_lufs   REAL               -- integrated loudness of the track (measured, or derived from the gain)
+    loudness_lufs   REAL,              -- integrated loudness of the track (measured, or derived from the gain)
+    -- v10 classical music (nasmusic.library.classical). `work` is the composition a track belongs to, from the
+    -- WORK tag (ID3 TIT1/GRP1, MP4 \xa9wrk) or a "Work: I. Movement" title; NULL = not read since v10
+    -- (the scanner backfills it), '' = not part of a work. movement_no is the movement's number in the work.
+    work            TEXT,
+    movement        TEXT,
+    movement_no     INTEGER
 );
 CREATE INDEX IF NOT EXISTS tracks_album ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS tracks_artist ON tracks(artist_id);
@@ -268,6 +280,27 @@ CREATE TABLE IF NOT EXISTS playlist_activity (
     detail      TEXT                       -- JSON
 );
 CREATE INDEX IF NOT EXISTS playlist_activity_pl ON playlist_activity(playlist_id, id);
+
+-- v10: playlist folders. Each user has their own tree (parent_id NULL = top level); `position` orders siblings.
+-- playlist_folder_items files a playlist the user can see (own or shared) into one of their folders; a
+-- playlist with no row is at the top level. Deleting a folder moves its contents up (nasmusic.app.playlist_folders).
+CREATE TABLE IF NOT EXISTS playlist_folders (
+    id          TEXT PRIMARY KEY,          -- uuid4 hex
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    parent_id   TEXT REFERENCES playlist_folders(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    position    REAL NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS playlist_folders_user ON playlist_folders(user_id, parent_id);
+
+CREATE TABLE IF NOT EXISTS playlist_folder_items (
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    folder_id   TEXT NOT NULL REFERENCES playlist_folders(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, playlist_id)
+);
+CREATE INDEX IF NOT EXISTS playlist_folder_items_folder ON playlist_folder_items(folder_id);
 
 -- Musicolet-style named queues shared by a user's devices. Max 20 per user.
 CREATE TABLE IF NOT EXISTS queues (
@@ -1106,7 +1139,37 @@ CREATE VIRTUAL TABLE IF NOT EXISTS lyrics_fts USING fts5(
     tokenize = 'unicode61 remove_diacritics 2'
 );
 
--- ---------- v10: song credits (shared cache, server core writes; nasmusic.library.credits) ----------
+-- v11 library cleanup: tracks an admin removed (tracks.missing = 3). A removal sits in the trash until
+-- purge_after (restoring deletes the row). Purging deletes uploaded files, and library files too when config
+-- library_delete_files is on (the music folder must then be mounted read-write); otherwise the track stays
+-- hidden for good and is listed in the admin's delete list. purged_at marks a purge that kept the row.
+CREATE TABLE IF NOT EXISTS library_removed (
+    track_id     TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    batch_id     TEXT NOT NULL,
+    reason       TEXT,
+    removed_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+    removed_at   TEXT NOT NULL,
+    purge_after  TEXT NOT NULL,
+    purged_at    TEXT,
+    purge_error  TEXT                     -- why the file could not be deleted (read-only mount, permissions)
+);
+CREATE INDEX IF NOT EXISTS idx_library_removed_batch ON library_removed(batch_id);
+
+-- v11 fake-lossless checker (nasmusic.library.lossless): the spectrum of lossless files. A sharp cutoff well
+-- below the Nyquist frequency means the file was made from a lossy (MP3/AAC) source; a hi-res file whose
+-- content stops at ~22 kHz was upsampled from CD. Rechecked when tracks.mtime changes.
+CREATE TABLE IF NOT EXISTS lossless_checks (
+    track_id     TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    mtime        REAL NOT NULL,           -- tracks.mtime the check was made on
+    verdict      TEXT NOT NULL,           -- ok | lossy_source | suspect | upsampled | unknown | error
+    cutoff_hz    INTEGER,                 -- where the content stops (null = reaches Nyquist)
+    source_guess TEXT,                    -- e.g. "MP3 ~128 kbps", "CD 44.1 kHz"
+    detail       TEXT,
+    checked_at   TEXT NOT NULL,
+    dismissed    INTEGER NOT NULL DEFAULT 0   -- an admin said "it's fine"
+);
+
+-- ---------- v12: song credits (shared cache, server core writes; nasmusic.library.credits) ----------
 
 -- One row per track looked up on MusicBrainz. Refreshed rarely (ok 180 days, not_found 60, error 1).
 CREATE TABLE IF NOT EXISTS credit_lookups (
