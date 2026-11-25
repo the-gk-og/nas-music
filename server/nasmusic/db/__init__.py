@@ -5,7 +5,7 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 
 def connect(path: Path | str) -> sqlite3.Connection:
@@ -50,9 +50,12 @@ def init(conn: sqlite3.Connection, admin_username: str = "admin", admin_password
     from_v9 = migrations.migrate_v9_to_v10(
         conn, sql, make_backup=backup and not (from_v1 or from_v2 or from_v3 or from_v4 or from_v5 or from_v6
                                                or from_v7 or from_v8))
-    migrations.migrate_v10_to_v11(
+    from_v10 = migrations.migrate_v10_to_v11(
         conn, sql, make_backup=backup and not (from_v1 or from_v2 or from_v3 or from_v4 or from_v5 or from_v6
                                                or from_v7 or from_v8 or from_v9))
+    migrations.migrate_v11_to_v12(
+        conn, sql, make_backup=backup and not (from_v1 or from_v2 or from_v3 or from_v4 or from_v5 or from_v6
+                                               or from_v7 or from_v8 or from_v9 or from_v10))
     conn.executescript(sql)
     if conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 0:
         conn.execute("INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,))

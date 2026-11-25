@@ -8,6 +8,7 @@
     Folder,
     Gauge,
     Info,
+    Users,
     ListEnd,
     ListMusic,
     ListPlus,
@@ -215,6 +216,7 @@
       <button onclick={() => goto('artist', t.artistId)}><User />Go to artist</button>
       <button onclick={() => { ui.close(); void player.startRadio({ type: 'track', id: t.id }, `${t.title} radio`); }}><Radio />Start radio</button>
       <button onclick={() => moreLike(t.id)}><Sparkles />More like this</button>
+      <button onclick={() => goto('credits', t.id)}><Users />Credits</button>
       <button onclick={() => ui.open({ kind: 'songInfo', trackId: t.id })}><Info />Song info</button>
       {#if session.isAdmin}<button onclick={() => ui.open({ kind: 'tagEdit', trackIds: [t.id], title: t.title })}><Tags />Edit tags</button>{/if}
       <button onclick={() => share(t.id)}><Share2 />Share</button>

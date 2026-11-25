@@ -85,6 +85,7 @@ class Config:
     lrclib_enabled: bool = True                 # lyrics fallback from lrclib.net when a file has none
     album_completeness_enabled: bool = True     # album pages: "9 of 12" + missing tracks, from MusicBrainz
     artist_info_enabled: bool = True            # artist pages: photo/bio/links from MusicBrainz + Wikipedia/Wikidata
+    credits_enabled: bool = True                # song credits (producers, songwriters, musicians) from MusicBrainz
     explicit_deezer: bool = True                # explicit-content job asks Deezer (free API) about untagged tracks
     # ---- library cleanup (nasmusic/library/cleanup.py, admin console "Cleanup") ----
     trash_days: int = 30                        # removed songs stay restorable this long, then are purged

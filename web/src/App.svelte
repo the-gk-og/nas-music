@@ -22,6 +22,8 @@
   import Folders from './screens/Folders.svelte';
   import AlbumDetail from './screens/AlbumDetail.svelte';
   import ArtistDetail from './screens/ArtistDetail.svelte';
+  import Credits from './screens/Credits.svelte';
+  import Person from './screens/Person.svelte';
   import TrackListPage from './screens/TrackListPage.svelte';
   import Works from './screens/Works.svelte';
   import PlaylistDetail from './screens/PlaylistDetail.svelte';
@@ -180,6 +182,8 @@
     {:else if n === 'folders'}<Folders path={p} />
     {:else if n === 'album'}<AlbumDetail id={p} />
     {:else if n === 'artist'}<ArtistDetail id={p} />
+    {:else if n === 'credits'}<Credits id={p} />
+    {:else if n === 'person'}<Person id={p} />
     {:else if n === 'genre'}<TrackListPage kind="genre" param={p} />
     {:else if n === 'composer'}<Works kind="composer" param={p} />
     {:else if n === 'work'}<Works kind="work" param={p} />

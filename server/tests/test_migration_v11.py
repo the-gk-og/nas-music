@@ -16,7 +16,7 @@ def test_v10_to_v11(tmp_path):
     conn.close()
     conn = db.connect(path)
     db.init(conn)
-    assert migrations.current_version(conn) == db.SCHEMA_VERSION == 11
+    assert migrations.current_version(conn) == db.SCHEMA_VERSION >= 11
     assert {"track_id", "batch_id", "purge_after", "purged_at", "purge_error"} <= migrations._columns(conn, "library_removed")
     assert {"track_id", "mtime", "verdict", "cutoff_hz", "dismissed"} <= migrations._columns(conn, "lossless_checks")
     assert conn.execute("SELECT username FROM users").fetchone()[0] == "owner"

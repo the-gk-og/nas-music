@@ -602,3 +602,36 @@ def migrate_v10_to_v11(conn: sqlite3.Connection, schema_sql: str, make_backup: b
         raise
     log.warning("schema v10 -> v11 done")
     return True
+
+
+# ---------- v11 -> v12 (additive; other v12 features add their tables to V12_TABLES) ----------
+
+V12_TABLES = ("credit_lookups", "track_credits")
+
+
+def migrate_v11_to_v12(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """Song credits (additive). Returns True if it migrated."""
+    if current_version(conn) != 11:
+        return False
+    if make_backup:
+        dest = backup(conn, "v11-backup")
+        if dest:
+            log.warning("schema v11 -> v12: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 11:
+            conn.execute("ROLLBACK")
+            return False
+        for t in V12_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (12)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v11 -> v12 done")
+    return True

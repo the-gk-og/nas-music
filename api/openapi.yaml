@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.11.0
+  version: 0.12.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -10,6 +10,12 @@ info:
     set by login/register with `"cookie": true`. Cross-origin requests (Tauri desktop app) must use the bearer
     header; CORS allows `tauri://localhost` and `http(s)://tauri.localhost` without credentials.
     Errors are `{"detail": "..."}` with a 4xx/5xx status. A disabled user's tokens get 401.
+    0.12.0 (schema v12): song credits. GET /library/tracks/{id}/credits lists who produced, wrote and played on a
+    track (MusicBrainz recording, work and release relationships, plus the file's composer/lyricist tags), grouped
+    into producers / writers / musicians / engineers / other, each person with how many OTHER songs in the
+    caller's library they are credited on. Lookups run in the background: `status: "pending"` means poll again
+    in a few seconds. GET /people/{personId} lists everything in the caller's library a person is credited on.
+    Person ids are `mb:<artist MBID>` or `n:<normalised name>` (tag-only names); treat them as opaque.
     0.11.0 (schema v11): admin library cleanup (/admin/cleanup/*). Pruning reports (never played, unplayed
     albums, disliked/skipped, low bitrate, fake lossless, very short), search, and removal of songs, albums or
     artists into a trash (`trash_days`, default 30) with restore. Purging deletes uploaded files, and library
@@ -1201,6 +1207,27 @@ paths:
           description: song info
           content: { application/json: { schema: { $ref: '#/components/schemas/TrackInfo' } } }
         '404': { description: not found }
+  /library/tracks/{trackId}/credits:
+    get:
+      summary: Song credits (v12) - producers, songwriters, musicians, engineers
+      description: |
+        Cached from MusicBrainz; a due lookup is queued in the background and never waited for. While
+        `status` is "pending", fetch again after a few seconds. Tag credits (composer, lyricist) show at once.
+      parameters: [ { name: trackId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: credits
+          content: { application/json: { schema: { $ref: '#/components/schemas/TrackCredits' } } }
+        '404': { description: not found }
+  /people/{personId}:
+    get:
+      summary: Everything in the caller's library one credited person worked on (v12)
+      parameters: [ { name: personId, in: path, required: true, schema: { type: string }, description: 'mb:<MBID> or n:<name>' } ]
+      responses:
+        '200':
+          description: the person and their tracks
+          content: { application/json: { schema: { $ref: '#/components/schemas/CreditPerson' } } }
+        '404': { description: not credited on anything the caller can see }
   /lists/{kind}:
     get:
       summary: Smart lists for the calling user.
@@ -3190,7 +3217,7 @@ paths:
     post:
       summary: Admin only. Start a job now (background). `backup` makes a manual database backup.
       parameters:
-        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, lyrics, discovery, release_radar, blends, cleanup, backup, explicit, autotag, upload_scan, smart, artist_info, podcasts, audiobooks, automix, lossless] } }
+        - { name: name, in: path, required: true, schema: { type: string, enum: [scan, full_scan, analyse, loudness, nightly, pretranscode, lyrics, discovery, release_radar, blends, cleanup, backup, explicit, autotag, upload_scan, smart, artist_info, podcasts, audiobooks, automix, lossless, credits] } }
       responses:
         '200':
           description: the job's status (state running, or idle if it already finished)
@@ -6022,6 +6049,58 @@ components:
                 properties:
                   id: { type: string }
                   status: { type: string, enum: [want, got, dismissed] }
+    TrackCredits:
+      type: object
+      required: [trackId, status, groups]
+      properties:
+        trackId: { type: string }
+        status: { type: string, enum: [ok, not_found, error, pending, none], description: 'the MusicBrainz lookup; none = credits are turned off and never looked up' }
+        fetchedAt: { type: [string, 'null'], format: date-time }
+        recordingMbid: { type: [string, 'null'] }
+        musicbrainzUrl: { type: [string, 'null'], description: the recording on musicbrainz.org (credit the source) }
+        groups:
+          type: array
+          description: non-empty groups only, in this order
+          items:
+            type: object
+            required: [id, label, people]
+            properties:
+              id: { type: string, enum: [producers, writers, musicians, engineers, other] }
+              label: { type: string, description: 'e.g. "Producers", "Songwriters"' }
+              people: { type: array, items: { $ref: '#/components/schemas/CreditEntry' } }
+    CreditEntry:
+      type: object
+      required: [personId, name, roles, otherTracks]
+      properties:
+        personId: { type: string }
+        name: { type: string, description: as credited }
+        mbid: { type: [string, 'null'] }
+        roles: { type: array, items: { type: string }, description: 'display labels, e.g. ["Co-producer"], ["Electric guitar", "Bass"], ["Composer", "Lyricist"]' }
+        albumWide: { type: boolean, description: credited on the album (release) rather than this song specifically }
+        fromTags: { type: boolean, description: only known from the file's tags }
+        otherTracks: { type: integer, description: other songs in the caller's library they are credited on }
+        artistId: { type: [string, 'null'], description: their artist page in this library, if they are also an artist here }
+    CreditPerson:
+      type: object
+      required: [id, name, roles, trackCount, tracks]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        mbid: { type: [string, 'null'] }
+        musicbrainzUrl: { type: [string, 'null'] }
+        artistId: { type: [string, 'null'] }
+        roles: { type: array, items: { type: string }, description: their roles across these tracks, most common first }
+        trackCount: { type: integer }
+        tracks:
+          type: array
+          description: by artist, album, disc, track number
+          items:
+            allOf:
+              - $ref: '#/components/schemas/Track'
+              - type: object
+                required: [credits]
+                properties:
+                  credits: { type: array, items: { type: string }, description: their roles on this track }
     Track:
       type: object
       required: [id, title, artistId, artist, albumId, album, durationS, starred]

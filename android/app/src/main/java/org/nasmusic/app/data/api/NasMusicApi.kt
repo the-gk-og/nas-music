@@ -244,6 +244,13 @@ interface NasMusicApi {
     @GET("library/tracks/{id}/info")
     suspend fun trackInfo(@Path("id") id: String): TrackInfo
 
+    // ---- api 0.12: song credits ----
+    @GET("library/tracks/{id}/credits")
+    suspend fun trackCredits(@Path("id") id: String): TrackCredits
+
+    @GET("people/{id}")
+    suspend fun person(@Path("id") id: String): CreditPerson
+
     @GET("lists/{kind}")
     suspend fun smartList(@Path("kind") kind: String, @Query("offset") offset: Int = 0, @Query("limit") limit: Int = 500): List<Track>
 

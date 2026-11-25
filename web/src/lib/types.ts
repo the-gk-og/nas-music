@@ -1031,6 +1031,39 @@ export interface ArtistInfo {
   photoUrl?: string | null;
 }
 
+/** v12 song credits (GET /library/tracks/{id}/credits). */
+export interface CreditEntry {
+  personId: string;
+  name: string;
+  mbid?: string | null;
+  roles: string[];
+  albumWide?: boolean;
+  fromTags?: boolean;
+  otherTracks: number;
+  artistId?: string | null;
+}
+
+export interface TrackCredits {
+  trackId: string;
+  status: 'ok' | 'not_found' | 'error' | 'pending' | 'none';
+  fetchedAt?: string | null;
+  recordingMbid?: string | null;
+  musicbrainzUrl?: string | null;
+  groups: { id: 'producers' | 'writers' | 'musicians' | 'engineers' | 'other'; label: string; people: CreditEntry[] }[];
+}
+
+/** v12 GET /people/{id}: everything in the library one credited person worked on. */
+export interface CreditPerson {
+  id: string;
+  name: string;
+  mbid?: string | null;
+  musicbrainzUrl?: string | null;
+  artistId?: string | null;
+  roles: string[];
+  trackCount: number;
+  tracks: (Track & { credits: string[] })[];
+}
+
 export interface ArtistPage {
   id: string;
   name: string;
