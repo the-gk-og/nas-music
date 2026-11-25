@@ -272,6 +272,9 @@ private fun NavGraphBuilder.routes(c: AppContainer, motion: MotionLevel) {
     composable("artist/{id}") { e -> ArtistScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("credits/{id}") { e -> org.homebeat.app.ui.screens.CreditsScreen(c, e.arguments?.getString("id").orEmpty()) }
     composable("person/{id}") { e -> org.homebeat.app.ui.screens.PersonScreen(c, android.net.Uri.decode(e.arguments?.getString("id").orEmpty())) }
+    // Songs stored on the phone (Settings → Music on this phone)
+    composable(org.homebeat.app.ui.screens.LocalRoutes.ALBUM) { e -> org.homebeat.app.ui.screens.LocalAlbumScreen(c, android.net.Uri.decode(e.arguments?.getString("id").orEmpty())) }
+    composable(org.homebeat.app.ui.screens.LocalRoutes.ARTIST) { e -> org.homebeat.app.ui.screens.LocalArtistScreen(c, android.net.Uri.decode(e.arguments?.getString("id").orEmpty())) }
     composable("genre/{name}") { e -> GenreScreen(c, android.net.Uri.decode(e.arguments?.getString("name").orEmpty())) }
     composable("playlist/{id}") { e -> PlaylistScreen(c, e.arguments?.getString("id").orEmpty()) }
     // api 0.10: playlist folders and classical works

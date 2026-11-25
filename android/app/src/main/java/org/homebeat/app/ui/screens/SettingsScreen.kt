@@ -195,6 +195,10 @@ fun SettingsScreen(c: AppContainer) {
         OutlinedButton(enabled = settings.offlineFavourites || settings.smartDownloads, onClick = { SyncScheduler.syncNow(c.context) }) { Text("Sync now") }
 
         HorizontalDivider()
+        Section("Music on this phone")
+        LocalMusicSettings(c)
+
+        HorizontalDivider()
         Section("Family mode")
         org.homebeat.app.ui.FamilySettings(c)
 

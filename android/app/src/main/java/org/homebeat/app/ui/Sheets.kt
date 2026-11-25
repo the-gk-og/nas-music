@@ -95,8 +95,9 @@ fun GlobalSheets(c: AppContainer) {
     SelectionBar(c)
     ui.songMenu?.let { SongMenuSheet(c, it) { ui.songMenu = null } }
     ui.songInfo?.let { SongInfoSheet(c, it) { ui.songInfo = null } }
-    ui.addToPlaylist?.let { AddToPlaylistDialog(c, it.map { t -> t.id }) { ui.addToPlaylist = null } }
-    ui.addToQueue?.let { AddToQueueDialog(c, it.map { t -> t.id }) { ui.addToQueue = null } }
+    // Server playlists and queues can't hold songs stored on the phone.
+    ui.addToPlaylist?.let { sel -> ServerOnly(ui, sel, { ui.addToPlaylist = null }) { ids -> AddToPlaylistDialog(c, ids) { ui.addToPlaylist = null } } }
+    ui.addToQueue?.let { sel -> ServerOnly(ui, sel, { ui.addToQueue = null }) { ids -> AddToQueueDialog(c, ids) { ui.addToQueue = null } } }
     ui.tagEdit?.let { TagEditDialog(c, it) { ui.tagEdit = null; ui.tagsRev++ } }
     if (ui.devicesOpen) DevicesSheet(c) { ui.devicesOpen = false }
     if (ui.vibeOpen) org.homebeat.app.ui.screens.VibeDialog(c) { ui.vibeOpen = false }
@@ -104,6 +105,17 @@ fun GlobalSheets(c: AppContainer) {
     if (ui.abOpen) AbRepeatDialog(c) { ui.abOpen = false }
     if (ui.queueSheet) QueueSheet(c) { ui.queueSheet = false }
     ui.bugReport?.let { afterCrash -> BugReportDialog(c, afterCrash) { ui.bugReport = null } }
+}
+
+/** Runs [content] with the NAS songs of [tracks]; with none (all stored on the phone) explains and closes. */
+@Composable
+private fun ServerOnly(ui: UiController, tracks: List<org.homebeat.app.data.api.Track>, dismiss: () -> Unit, content: @Composable (List<String>) -> Unit) {
+    val ids = tracks.map { it.id }.filterNot(org.homebeat.app.local.LocalIds::isLocal)
+    if (ids.isEmpty()) {
+        LaunchedEffect(Unit) { ui.toast = "Songs stored on this phone can't go into server playlists or queues"; dismiss() }
+        return
+    }
+    content(ids)
 }
 
 /** What to say after a download tap: it only starts at once on the home network (or the tunnel when allowed). */
@@ -128,8 +140,9 @@ private fun SongMenuSheet(c: AppContainer, target: SongMenuTarget, onDismiss: ()
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(bottom = 8.dp)) {
             Text(t.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 24.dp))
             Text("${t.artist} · ${t.album}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
+            val onPhone = org.homebeat.app.local.LocalIds.isLocal(t.id)
             if (isCurrent) {
-                MenuItem(Icons.Default.Lyrics, "Show lyrics") { close { ui.lyricsRequested = true; ui.go("now") } }
+                if (!onPhone) MenuItem(Icons.Default.Lyrics, "Show lyrics") { close { ui.lyricsRequested = true; ui.go("now") } }
                 MenuItem(Icons.Default.Repeat, "A-B repeat") { close { ui.abOpen = true } }
                 MenuItem(Icons.Default.Speed, "Play speed and pitch") { close { ui.speedOpen = true } }
                 HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
@@ -138,6 +151,16 @@ private fun SongMenuSheet(c: AppContainer, target: SongMenuTarget, onDismiss: ()
                 MenuItem(Icons.Default.Close, "Remove from queue") { close { removeFromQueueWithUndo(c, ui, idx, t) } }
             }
             MenuItem(Icons.AutoMirrored.Filled.PlaylistPlay, "Play next") { close { c.player.playNext(listOf(t)); ui.toast = "Playing next" } }
+            if (onPhone) {
+                // A song stored on the phone: the server knows nothing about it, so only player actions.
+                MenuItem(Icons.AutoMirrored.Filled.QueueMusic, "Add to queue") { close { c.player.addToQueue(listOf(t)); ui.toast = "Added to queue" } }
+                HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
+                MenuItem(Icons.Default.Album, "Go to album") { close { ui.go(org.homebeat.app.ui.screens.LocalRoutes.album(t.albumId)) } }
+                MenuItem(Icons.Default.Person, "Go to artist") { close { ui.go(org.homebeat.app.ui.screens.LocalRoutes.artist(t.artistId)) } }
+                Text("Stored on this phone", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                return@Column
+            }
             MenuItem(Icons.AutoMirrored.Filled.QueueMusic, "Add to a queue") { close { ui.addToQueue = listOf(t) } }
             MenuItem(Icons.AutoMirrored.Filled.PlaylistAdd, "Add to playlists") { close { ui.addToPlaylist = listOf(t) } }
             val dl by c.offline.downloads.collectAsStateWithLifecycle(emptyList())

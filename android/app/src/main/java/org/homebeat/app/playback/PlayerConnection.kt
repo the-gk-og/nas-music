@@ -262,7 +262,15 @@ class PlayerConnection(
         searchQuery: String? = null,
     ) {
         if (tracks.isEmpty()) return
+        // Songs stored on this phone can't play on another device or a Cast speaker: leave them out there.
+        if ((connect.isRemote || ext != null) && org.homebeat.app.local.LocalIds.anyLocal(tracks)) {
+            val (kept, at) = OfflinePlayback.playable(tracks, startIndex, tracks.filterNot { org.homebeat.app.local.LocalIds.isLocal(it.id) }.map { it.id }.toSet())
+                ?: run { offline.toast("Songs stored on this phone only play on this phone"); return }
+            offline.toast("Skipping songs stored on this phone")
+            return play(kept, at, source, queueName, mixId, reasons?.let { r -> kept.map { k -> r.getOrNull(tracks.indexOf(k)) } }, searchQuery)
+        }
         // Offline: play just the downloaded songs of the list, without an error per missing one.
+        // Songs stored on the phone always play (see OfflinePlayback).
         if (!connect.isRemote && ext == null && offline.isOffline()) {
             val (kept, at) = OfflinePlayback.playable(tracks, startIndex, offline.downloadedIds())
                 ?: run { offline.toast("You're offline and none of these songs are downloaded"); return }
@@ -459,7 +467,10 @@ class PlayerConnection(
     fun playNext(tracks: List<Track>) = enqueue(tracks, next = true)
     fun addToQueue(tracks: List<Track>) = enqueue(tracks, next = false)
 
-    private fun enqueue(tracks: List<Track>, next: Boolean) {
+    private fun enqueue(all: List<Track>, next: Boolean) {
+        val tracks = if (connect.isRemote || ext != null) all.filterNot { org.homebeat.app.local.LocalIds.isLocal(it.id) } else all
+        if (tracks.size < all.size) offline.toast("Songs stored on this phone only play on this phone")
+        if (tracks.isEmpty()) return
         queues.added(tracks.map { it.id }, next)
         if (connect.isRemote) return // the active device picks it up from the queue change
         withController { c ->

@@ -32,7 +32,9 @@ object MediaItems {
     /** api 0.7 Track.mix as JSON (DJ automix). */
     const val EXTRA_MIX = "nas.mix"
 
-    fun artUrl(albumId: String, size: Int = 512) = RoutedCallFactory.virtual("art/$albumId?size=$size")
+    /** Cover URL for in-app loading; a phone song's album (`local:album:`) loads straight from MediaStore. */
+    fun artUrl(albumId: String, size: Int = 512): String =
+        org.homebeat.app.local.LocalLibrary.artUri(albumId) ?: RoutedCallFactory.virtual("art/$albumId?size=$size")
 
     /**
      * Authority of [ArtProvider] (`<applicationId>.art`), set at app start. When set, media items carry

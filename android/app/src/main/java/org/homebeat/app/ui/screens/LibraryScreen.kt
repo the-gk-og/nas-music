@@ -91,12 +91,17 @@ fun LibraryScreen(c: AppContainer) {
     // api 0.10: the Composers chip only in classical mode
     val classical by org.homebeat.app.data.ClassicalMode.on.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { org.homebeat.app.data.ClassicalMode.ensure(c.context, c.api) }
+    // Settings → Music on this phone adds an "On this phone" chip.
+    val phoneMusic by c.localMusic.enabled.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize()) {
         TopBar(c, "Library")
         Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CHIPS.filter { it.first != "composers" || classical }.forEach { (k, label) -> FilterChip(chip == k, { chip = k }, label = { Text(label) }) }
+                CHIPS.filter { it.first != "composers" || classical }.forEach { (k, label) ->
+                    FilterChip(chip == k, { chip = k }, label = { Text(label) })
+                    if (k == "downloaded" && phoneMusic) FilterChip(chip == "phone", { chip = "phone" }, label = { Text("On this phone") })
+                }
                 // Spoken word + live radio live apart from music (their own player, no recommendations).
                 FilterChip(false, { ui.go("spoken") }, label = { Text("Podcasts & more") })
             }
@@ -106,7 +111,7 @@ fun LibraryScreen(c: AppContainer) {
                     sorts.forEach { (k, label) -> DropdownMenuItem({ Text(if (k == sort) "✓ $label" else label) }, { sort = k; sortMenu = false }) }
                 }
             } }
-            if (chip != "folders" && chip != "songs" && chip != "downloaded" && chip != "composers") IconButton(onClick = {
+            if (chip != "folders" && chip != "songs" && chip != "downloaded" && chip != "composers" && chip != "phone") IconButton(onClick = {
                 scope.launch { c.settings.setLibraryView(chip, if (view == "grid") "list" else "grid") }
             }) { Icon(if (view == "grid") Icons.AutoMirrored.Filled.List else Icons.Default.GridView, if (view == "grid") "List view" else "Grid view") }
         }
@@ -118,6 +123,7 @@ fun LibraryScreen(c: AppContainer) {
             androidx.compose.runtime.key(refreshKey) {
                 when (chip) {
                     "downloaded" -> DownloadedSection(c)
+                    "phone" -> { LaunchedEffect(Unit) { if (refreshKey > 0) c.localMusic.rescan() }; LocalMusicSection(c) }
                     "playlists" -> PlaylistsSection(c, view, sort)
                     "albums" -> AlbumsSection(c, view, sort)
                     "artists" -> ArtistsSection(c, view, sort)
