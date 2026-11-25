@@ -16,6 +16,9 @@ import {
   matrixCoefficients,
   presetFor,
   PRESETS,
+  RTA_CENTRES,
+  SAFETY_DB,
+  rtaBands,
   saveProfiles,
   type AudioCtxLike,
 } from './eq';
@@ -101,6 +104,7 @@ describe('buildEqGraph', () => {
       'merger',
       'panner',
       'gain',
+      'gain',
       'destination',
     ]);
     // The matrix routes both channels to both outputs.
@@ -182,14 +186,15 @@ describe('buildEqGraph', () => {
 });
 
 describe('auto headroom', () => {
-  it('takes off the biggest boost of the whole curve, and nothing for cuts', () => {
+  it('takes off the biggest boost of the whole curve plus a safety margin, and only the margin for cuts', () => {
     const one = {
       ...defaultEq(),
       enabled: true,
       bands: [0, 0, 0, 0, 0, 12, 0, 0, 0, 0],
     };
-    expect(autoHeadroomDb(one)).toBeCloseTo(-12, 1);
-    expect(autoHeadroomDb({ ...one, bands: Array(10).fill(-6) })).toBe(0);
+    expect(autoHeadroomDb(one)).toBeCloseTo(-12 - SAFETY_DB, 1);
+    expect(autoHeadroomDb({ ...one, bands: Array(10).fill(-6) })).toBe(-SAFETY_DB);
+    expect(autoHeadroomDb({ ...one, bands: Array(10).fill(0) })).toBe(0);
     expect(autoHeadroomDb({ ...one, enabled: false })).toBe(0);
     // Bass boost stacks with the low bands.
     const stacked = autoHeadroomDb({
@@ -230,10 +235,42 @@ describe('auto headroom', () => {
     });
     const g = buildEqGraph(ctx as unknown as AudioCtxLike);
     g.apply({ ...defaultEq(), enabled: true });
-    expect(chain(g.panner as unknown as FakeNode)).toEqual(['panner', 'limiter', 'gain', 'destination']);
+    expect(chain(g.panner as unknown as FakeNode)).toEqual(['panner', 'limiter', 'gain', 'gain', 'destination']);
     g.apply({ ...defaultEq(), enabled: false });
-    expect(chain(g.panner as unknown as FakeNode)).toEqual(['panner', 'gain', 'destination']);
+    expect(chain(g.panner as unknown as FakeNode)).toEqual(['panner', 'gain', 'gain', 'destination']);
+    // The look-ahead worklet replaces it and stays in, EQ on or off.
+    g.useLimiter(new FakeNode('worklet') as unknown as AudioNode);
+    expect(chain(g.panner as unknown as FakeNode)).toEqual(['panner', 'worklet', 'gain', 'gain', 'destination']);
+    g.apply({ ...defaultEq(), enabled: true });
+    expect(chain(g.panner as unknown as FakeNode)).toEqual(['panner', 'worklet', 'gain', 'gain', 'destination']);
   });
+
+  it('catches a narrow peak between the sweep points', () => {
+    const s = {
+      ...defaultEq(),
+      enabled: true,
+      mode: 'parametric' as const,
+      parametric: [{ type: 'PK' as const, fc: 3170, gainDb: 12, q: 20, on: true, slope: 12 as const }],
+    };
+    expect(autoHeadroomDb(s)).toBeCloseTo(-12 - SAFETY_DB, 1);
+  });
+});
+
+it('reads the RTA level of a tone in its own band', () => {
+  // A 1 kHz tone as Web Audio's analyser reports it: main lobe over 3 bins, the rest at the floor.
+  const fs = 48000;
+  const n = 4096; // fftSize 8192
+  const bins = new Float32Array(n).fill(-200);
+  const k = Math.round(1000 / (fs / 2 / n));
+  bins[k - 1] = -24;
+  bins[k] = -18; // about what a −6 dBFS sine reads (the analyser reads ≈ 12 dB low)
+  bins[k + 1] = -24;
+  const db = rtaBands(bins, fs);
+  const i = RTA_CENTRES.findIndex((c) => Math.abs(c - 1008) < 10);
+  expect(db[i]).toBeGreaterThan(-6);
+  expect(db[i]).toBeLessThan(0);
+  expect(db[i + 6]).toBe(-120);
+  expect(db.length).toBe(RTA_CENTRES.length);
 });
 
 it('detects presets', () => {
@@ -352,8 +389,8 @@ describe('parametric EQ', () => {
     expect(lp[2] - lp[1]).toBeCloseTo(-24, 0);
     const hp12 = curveDb(para({ type: 'HP', fc: 200, q: Math.SQRT1_2 }), [25, 50]);
     expect(hp12[0] - hp12[1]).toBeCloseTo(-12, 0);
-    expect(autoHeadroomDb(para({ type: 'LP', fc: 5000, q: 4 }))).toBeCloseTo(-20 * Math.log10(4), 0);
-    expect(autoHeadroomDb(para({ type: 'HP', fc: 80, slope: 48 }))).toBeCloseTo(0, 1);
+    expect(autoHeadroomDb(para({ type: 'LP', fc: 5000, q: 4 }))).toBeCloseTo(-20 * Math.log10(4) - SAFETY_DB, 0);
+    expect(autoHeadroomDb(para({ type: 'HP', fc: 80, slope: 48 }))).toBeCloseTo(-SAFETY_DB, 1);
     expect(autoHeadroomDb(para({ type: 'PK', fc: 1000, gainDb: 6, on: false }))).toBe(0);
   });
 

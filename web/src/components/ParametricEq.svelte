@@ -5,12 +5,14 @@
     PARAM_LABELS,
     PARAM_MAX_GAIN,
     PARAM_TYPES,
+    RTA_CENTRES,
     autoHeadroomDb,
     bandsFromAutoEq,
     bandsFromGraphic,
     clampBandParams,
     curveDb,
     isPass,
+    rtaBands,
     type ParamBand,
     type ParamType,
   } from '../lib/eq';
@@ -39,6 +41,59 @@
     return FREQS.map((f, i) => `${i ? 'L' : 'M'}${fx(f).toFixed(1)},${dy(c[i]).toFixed(1)}`).join('');
   });
   const headroom = $derived(autoHeadroomDb(eq));
+
+  // RTA: live spectrum of what's playing (after the EQ), behind the curve. 0 dBFS at the top, RTA_FLOOR at the bottom.
+  const RTA_KEY = 'hb.eq.rta';
+  const RTA_FLOOR = -84;
+  let rta = $state(readRta());
+  let spectrum = $state<number[] | null>(null);
+  function readRta() {
+    try {
+      return localStorage.getItem(RTA_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
+  function toggleRta() {
+    rta = !rta;
+    try {
+      localStorage.setItem(RTA_KEY, rta ? '1' : '0');
+    } catch {
+      /* private mode: just not remembered */
+    }
+  }
+  $effect(() => {
+    if (!rta) {
+      spectrum = null;
+      return;
+    }
+    let raf = 0;
+    let bins: Float32Array<ArrayBuffer> | null = null;
+    const now: number[] = [];
+    const shown = RTA_CENTRES.map(() => RTA_FLOOR);
+    let last = 0;
+    const tick = (t: number) => {
+      raf = requestAnimationFrame(tick);
+      if (t - last < 30) return; // ~30 fps is plenty
+      last = t;
+      const a = player.rta();
+      if (!a) return;
+      if (!bins || bins.length !== a.frequencyBinCount) bins = new Float32Array(a.frequencyBinCount);
+      a.getFloatFrequencyData(bins);
+      rtaBands(bins, a.context.sampleRate, now);
+      // Rises at once, falls back gently.
+      for (let i = 0; i < shown.length; i++) shown[i] = Math.max(now[i], shown[i] - 1.2, RTA_FLOOR);
+      spectrum = shown.slice();
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  });
+  const ry = (db: number) => Math.max(0, Math.min(1, db / RTA_FLOOR)) * H;
+  const rtaPath = $derived.by(() => {
+    if (!spectrum) return '';
+    const pts = spectrum.map((db, i) => `L${fx(RTA_CENTRES[i]).toFixed(1)},${ry(db).toFixed(1)}`).join('');
+    return `M${fx(RTA_CENTRES[0]).toFixed(1)},${H}${pts}L${fx(RTA_CENTRES[RTA_CENTRES.length - 1]).toFixed(1)},${H}Z`;
+  });
   let sel = $state(0);
   const cur = $derived(bands[Math.min(sel, bands.length - 1)] as ParamBand | undefined);
 
@@ -116,6 +171,7 @@
     >
       {#each GRID_F as f}<line class="grid" x1={fx(f)} x2={fx(f)} y1="0" y2={H} />{/each}
       {#each GRID_DB as d}<line class="grid" class:zero={d === 0} x1="0" x2={W} y1={dy(d)} y2={dy(d)} />{/each}
+      {#if rtaPath}<path d={rtaPath} class="rta" />{/if}
       <path d={path} class="curve" />
       {#each bands as b, i}
         <circle
@@ -137,6 +193,7 @@
       {#each [[20, '20'], [100, '100'], [1000, '1 k'], [10000, '10 k']] as [f, l]}<span style:left="{(fx(+f) / W) * 100}%">{l}</span>{/each}
     </div>
     {#if headroom < -0.05}<span class="hr muted small">Auto headroom {headroom.toFixed(1)} dB</span>{/if}
+    <button class="rta-toggle small" class:on={rta} aria-pressed={rta} title="Real-time analyser: live spectrum of what's playing" onclick={toggleRta}>RTA</button>
   </div>
 
   <div class="list">
@@ -259,6 +316,29 @@
   .axis span {
     position: absolute;
     transform: translateX(-10%);
+  }
+  .rta {
+    fill: color-mix(in srgb, var(--accent) 18%, transparent);
+    stroke: color-mix(in srgb, var(--accent) 45%, transparent);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+  }
+  .rta-toggle {
+    position: absolute;
+    top: 6px;
+    left: 10px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--bg-1);
+    color: var(--fg-2);
+    cursor: pointer;
+  }
+  .rta-toggle.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
   }
   .hr {
     position: absolute;

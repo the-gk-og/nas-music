@@ -32,6 +32,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +57,9 @@ import org.homebeat.app.AppContainer
 import org.homebeat.app.eq.EqBand
 import org.homebeat.app.eq.EqEngine
 import org.homebeat.app.eq.EqSettings
+import org.homebeat.app.eq.RtaTap
+import org.homebeat.app.eq.Spectrum
+import kotlinx.coroutines.delay
 
 private const val F_MIN = 20.0
 private const val F_MAX = 20_000.0
@@ -65,6 +70,9 @@ private fun xToFreq(x: Float, w: Float) = F_MIN * (F_MAX / F_MIN).pow((x / w).co
 private fun dbToY(db: Double, h: Float) = ((DB_RANGE - db.coerceIn(-DB_RANGE, DB_RANGE)) / (2 * DB_RANGE) * h).toFloat()
 private fun yToDb(y: Float, h: Float) = DB_RANGE - (y / h).coerceIn(0f, 1f) * 2 * DB_RANGE
 
+/** RTA scale: 0 dBFS at the top of the graph, this at the bottom. */
+private const val RTA_FLOOR = -84.0
+
 private fun freqLabel(f: Double) = if (f >= 1000) "%.1f k".format(f / 1000).replace(".0 k", " k") else "${f.roundToInt()}"
 
 /** Parametric EQ: response curve with draggable band handles, band chips, and the selected band's controls. */
@@ -74,9 +82,10 @@ fun ParametricEqPage(c: AppContainer, eq: EqSettings) {
     val bands = eq.parametric
     if (sel > bands.lastIndex) sel = bands.lastIndex.coerceAtLeast(0)
     fun set(i: Int, b: EqBand) = c.eq.update { it.withParam(i, b).copy(enabled = true) }
+    val rta by c.eq.rta.collectAsState()
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
-        ResponseCurve(eq, sel, onSelect = { sel = it }, onDrag = { i, b -> set(i, b) })
+        ResponseCurve(eq, sel, rta, onRta = c.eq::setRta, onSelect = { sel = it }, onDrag = { i, b -> set(i, b) })
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             bands.forEachIndexed { i, b ->
                 FilterChip(
@@ -111,8 +120,31 @@ fun ParametricEqPage(c: AppContainer, eq: EqSettings) {
 }
 
 @Composable
-private fun ResponseCurve(eq: EqSettings, sel: Int, onSelect: (Int) -> Unit, onDrag: (Int, EqBand) -> Unit) {
+private fun ResponseCurve(eq: EqSettings, sel: Int, rta: Boolean, onRta: (Boolean) -> Unit, onSelect: (Int) -> Unit, onDrag: (Int, EqBand) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
+    val rtaColor = MaterialTheme.colorScheme.tertiary
+    // Live spectrum of what's playing (after the EQ), ~30 fps: rises at once, falls back gently.
+    var spectrum by remember { mutableStateOf<DoubleArray?>(null) }
+    LaunchedEffect(rta) {
+        if (!rta) { spectrum = null; return@LaunchedEffect }
+        RtaTap.enabled = true
+        val buf = FloatArray(Spectrum.SIZE)
+        val now = DoubleArray(Spectrum.CENTRES.size)
+        val shown = DoubleArray(Spectrum.CENTRES.size) { RTA_FLOOR }
+        try {
+            while (true) {
+                if (RtaTap.snapshot(buf)) {
+                    Spectrum.bandsDb(buf, RtaTap.sampleRate, now)
+                    for (i in shown.indices) shown[i] = maxOf(now[i], shown[i] - 1.2, RTA_FLOOR)
+                    spectrum = shown.copyOf()
+                }
+                delay(33)
+            }
+        } finally {
+            RtaTap.enabled = false
+            RtaTap.clear()
+        }
+    }
     val grid = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
     val freqs = remember { DoubleArray(160) { i -> F_MIN * (F_MAX / F_MIN).pow(i / 159.0) } }
     val curve = remember(eq) { EqEngine.curveDb(eq, freqs) }
@@ -155,6 +187,17 @@ private fun ResponseCurve(eq: EqSettings, sel: Int, onSelect: (Int) -> Unit, onD
             for (db in listOf(-12.0, -6.0, 0.0, 6.0, 12.0)) {
                 val y = dbToY(db, h); drawLine(if (db == 0.0) grid.copy(alpha = 0.9f) else grid, Offset(0f, y), Offset(w, y))
             }
+            spectrum?.let { sp ->
+                fun ry(db: Double) = ((db / RTA_FLOOR).coerceIn(0.0, 1.0) * h).toFloat()
+                val fill = Path().apply {
+                    moveTo(freqToX(Spectrum.CENTRES[0], w), h)
+                    sp.forEachIndexed { i, db -> lineTo(freqToX(Spectrum.CENTRES[i], w), ry(db)) }
+                    lineTo(freqToX(Spectrum.CENTRES.last(), w), h); close()
+                }
+                drawPath(fill, rtaColor.copy(alpha = 0.22f))
+                val line = Path().apply { sp.forEachIndexed { i, db -> val x = freqToX(Spectrum.CENTRES[i], w); if (i == 0) moveTo(x, ry(db)) else lineTo(x, ry(db)) } }
+                drawPath(line, rtaColor.copy(alpha = 0.6f), style = Stroke(1.dp.toPx()))
+            }
             val path = Path()
             freqs.forEachIndexed { i, f ->
                 val p = Offset(freqToX(f, w), dbToY(curve[i], h))
@@ -171,6 +214,10 @@ private fun ResponseCurve(eq: EqSettings, sel: Int, onSelect: (Int) -> Unit, onD
             if (headroom < -0.05) "Auto headroom %.1f dB".format(headroom) else "",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+        )
+        FilterChip(
+            selected = rta, onClick = { onRta(!rta) }, label = { Text("RTA") },
+            modifier = Modifier.align(Alignment.TopStart).padding(start = 4.dp).height(28.dp),
         )
     }
 }

@@ -29,6 +29,15 @@ class EqRepository(context: Context) {
     /** On: each output keeps its own EQ and it switches as you plug in / connect. Off: one EQ for everything. */
     val perDevice: StateFlow<Boolean> = _perDevice.asStateFlow()
 
+    private val _rta = MutableStateFlow(prefs.getBoolean("rta", false))
+    /** Real-time analyser drawn behind the parametric curve. */
+    val rta: StateFlow<Boolean> = _rta.asStateFlow()
+
+    fun setRta(on: Boolean) {
+        _rta.value = on
+        prefs.edit().putBoolean("rta", on).apply()
+    }
+
     private val _output = MutableStateFlow(OutputDetector.current(audio))
     /** The physical output playing right now. */
     val output: StateFlow<AudioOutput> = _output.asStateFlow()

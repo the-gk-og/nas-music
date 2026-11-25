@@ -1,6 +1,6 @@
 // Equalizer model + Web Audio graph (§6). The graph is:
 //   source → preamp → [AutoEq headphone filters] → 10 × peaking biquad → [parametric bands] → bass-boost low-shelf → [pitch worklet] → stereo matrix
-//   (width / mono) → balance (StereoPanner) → [limiter, while the EQ is on] → volume → destination
+//   (width / mono) → balance (StereoPanner) → limiter → post (RTA tap) → volume → destination
 // The preamp includes automatic headroom: the biggest boost of the whole curve is taken off, so boosts never clip
 // (same maths as the Android EqEngine). The user's preamp is a trim on top; the limiter catches what's left.
 // The stereo matrix does both "surround" widening and mono: L' = a·L + b·R, R' = a·R + b·L with
@@ -190,20 +190,27 @@ export function curveDb(s: EqSettings, freqs: number[], fs = 48000): number[] {
 
 const clampBand = (v: number) => Math.max(-EQ_MAX_DB, Math.min(EQ_MAX_DB, v));
 
-/** Automatic headroom (dB, ≤ 0): minus the curve's highest boost between 20 Hz and 20 kHz. */
+/** Extra headroom (dB) whenever any filter is active: phase shifts raise the sample peaks of loud masters even where
+ * the curve is flat or cut, and the limiter should only catch the odd peak, not work all the time. Same as Android. */
+export const SAFETY_DB = 1;
+
+/** Automatic headroom (dB, ≤ 0): minus the curve's highest boost between 20 Hz and 20 kHz, minus [SAFETY_DB]. */
 export function autoHeadroomDb(s: EqSettings, fs = 48000): number {
   const filters = curveFilters(s, fs);
   if (!filters.length) return 0;
   const top = Math.min(20000, fs * 0.45);
   const probes = [...EQ_FREQS.filter((f) => f < top), BASS_HZ / 2];
   for (let i = 0; i < 96; i++) probes.push(20 * Math.pow(top / 20, i / 95));
+  // Band centres too, so a narrow peak between sweep points isn't missed.
+  if (s.mode === 'parametric') for (const b of activeParams(s)) if (b.fc < fs * 0.49) probes.push(b.fc);
+  for (const f of s.headphone?.filters ?? []) if (f.fc < fs * 0.49) probes.push(f.fc);
   let peak = -Infinity;
   for (const f of probes) {
     let db = 0;
     for (const c of filters) db += biquadResponseDb(c, fs, f);
     peak = Math.max(peak, db);
   }
-  return peak > 0 ? -peak : 0;
+  return -(Math.max(0, peak) + SAFETY_DB);
 }
 
 /** Bass boost: low shelf at 100 Hz, 0–100 % → 0–12 dB. */
@@ -312,8 +319,11 @@ export interface EqGraph {
   bass: BiquadFilterNode;
   matrix: { ll: GainNode; lr: GainNode; rl: GainNode; rr: GainNode };
   panner: StereoPannerNode;
-  /** Peak limiter between balance and volume; only in the chain while the EQ is on. Null if unsupported. */
-  limiter: DynamicsCompressorNode | null;
+  /** Peak limiter between balance and volume. Starts as a DynamicsCompressor that is only in the chain while the
+   * EQ is on; [useLimiter] swaps in the look-ahead worklet, which stays in. Null if unsupported. */
+  limiter: AudioNode | null;
+  /** Fixed point after the limiter, before volume (the RTA taps it). */
+  post: GainNode;
   volume: GainNode;
   /** AutoEq filters currently in the chain (rebuilt when the profile changes). */
   headphone: AudioNode[];
@@ -323,6 +333,8 @@ export interface EqGraph {
   /** Insert an extra node (e.g. the pitch shifter) between the bass shelf and the stereo matrix. Later inserts go
    * after earlier ones; `output` defaults to `node` (pass it for a sub-graph with separate ends). */
   insert(node: AudioNode, output?: AudioNode): void;
+  /** Replace the limiter with [node] (the look-ahead worklet), always in the chain. */
+  useLimiter(node: AudioNode): void;
 }
 
 function setParam(p: AudioParam, v: number, t: number) {
@@ -362,26 +374,31 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
   lr.connect(merger, 0, 1);
 
   const panner = ctx.createStereoPanner();
+  const post = ctx.createGain();
   const volume = ctx.createGain();
-  // Brick-wall-ish limiter: only acts on peaks near full scale (auto headroom keeps the EQ itself below it).
-  const limiter = ctx.createDynamicsCompressor ? ctx.createDynamicsCompressor() : null;
-  if (limiter) {
-    limiter.threshold.value = -1;
-    limiter.knee.value = 0;
-    limiter.ratio.value = 20;
-    limiter.attack.value = 0.001;
-    limiter.release.value = 0.15;
+  // Fallback limiter until the look-ahead worklet loads: a fast compressor that only acts on peaks near full scale
+  // (auto headroom keeps the EQ itself below it).
+  const compressor = ctx.createDynamicsCompressor ? ctx.createDynamicsCompressor() : null;
+  if (compressor) {
+    compressor.threshold.value = -1;
+    compressor.knee.value = 0;
+    compressor.ratio.value = 20;
+    compressor.attack.value = 0.001;
+    compressor.release.value = 0.15;
   }
+  let limiter: AudioNode | null = compressor;
+  let always = false; // the worklet stays in the chain; the compressor only while the EQ is on
   let limiting = false;
   const setLimiter = (on: boolean) => {
+    on = on || always;
     if (!limiter || on === limiting) return;
     limiting = on;
     panner.disconnect();
     limiter.disconnect();
     if (on) {
       panner.connect(limiter);
-      limiter.connect(volume);
-    } else panner.connect(volume);
+      limiter.connect(post);
+    } else panner.connect(post);
   };
 
   preamp.connect(bands[0]);
@@ -389,7 +406,8 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
   bands[bands.length - 1].connect(bass);
   bass.connect(splitter);
   merger.connect(panner);
-  panner.connect(volume);
+  panner.connect(post);
+  post.connect(volume);
   volume.connect(ctx.destination);
 
   let tail: AudioNode = bass; // last node before the stereo matrix (see insert)
@@ -489,6 +507,7 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
     matrix: { ll, lr, rl, rr },
     panner,
     limiter,
+    post,
     volume,
     apply(s: EqSettings) {
       const t = ctx.currentTime;
@@ -512,6 +531,15 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
       tail.connect(node);
       output.connect(splitter);
       tail = output;
+    },
+    useLimiter(node: AudioNode) {
+      setLimiter(false);
+      limiter?.disconnect();
+      limiter = node;
+      graph.limiter = node;
+      always = true;
+      limiting = false;
+      setLimiter(true);
     },
   };
   return graph;
@@ -546,5 +574,39 @@ export function saveProfiles(storage: Pick<Storage, 'setItem'> | null, profiles:
 
 /** Served from web/public so it satisfies `script-src 'self'`. */
 export const PITCH_WORKLET_URL = 'pitch-worklet.js';
+/** RTA band centres: 1/6 octave, 20 Hz – 20 kHz (as on Android). */
+export const RTA_CENTRES = Array.from({ length: 61 }, (_, i) => 20 * Math.pow(2, i / 6)).filter((f) => f <= 20500);
+
+/** Web Audio's analyser reads a full-scale sine about 12 dB low (Blackman window, 1/N scaling); this lifts it to 0 dB. */
+const RTA_OFFSET_DB = 12;
+
+/**
+ * RTA levels per [RTA_CENTRES] band from AnalyserNode.getFloatFrequencyData (dB per bin): power summed over each
+ * band, or the 3 bins round its centre where the band is narrower than that. Floor −120 dB.
+ */
+export function rtaBands(binsDb: Float32Array | number[], fs: number, out: number[] = []): number[] {
+  const n = binsDb.length; // fftSize / 2
+  const binHz = fs / (2 * n);
+  const edge = Math.pow(2, 1 / 12);
+  RTA_CENTRES.forEach((c, b) => {
+    let k0 = Math.max(1, Math.ceil(c / edge / binHz));
+    let k1 = Math.min(n - 1, Math.floor((c * edge) / binHz));
+    if (k1 - k0 < 2) {
+      const kc = Math.max(2, Math.min(n - 2, Math.round(c / binHz)));
+      k0 = kc - 1;
+      k1 = kc + 1;
+    }
+    let p = 0;
+    for (let k = k0; k <= k1; k++) {
+      const v = binsDb[k];
+      if (Number.isFinite(v)) p += Math.pow(10, v / 10);
+    }
+    out[b] = c >= fs / 2 || p <= 0 ? -120 : Math.max(-120, 10 * Math.log10(p) + RTA_OFFSET_DB);
+  });
+  return out;
+}
+
+/** Look-ahead peak limiter (same algorithm as Android's LookaheadLimiter). */
+export const LIMITER_WORKLET_URL = 'limiter-worklet.js';
 
 export const semitonesToRatio = (st: number) => Math.pow(2, st / 12);

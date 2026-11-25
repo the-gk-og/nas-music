@@ -6,6 +6,7 @@ import { mockBackend } from './api/mock';
 import { ConnectClient, extrapolatePosition, type ConnectStatus } from './connect';
 import { preferServer, resumeQueueId, resumeSpot } from './resume';
 import {
+  LIMITER_WORKLET_URL,
   PITCH_WORKLET_URL,
   buildEqGraph,
   defaultEq,
@@ -889,6 +890,7 @@ export class Player {
       this.applyEq();
       void this.applySink();
       void this.loadPitchWorklet();
+      void this.loadLimiterWorklet();
     } catch (e) {
       console.warn('Web Audio unavailable, EQ disabled', e);
       this.graph = null;
@@ -915,6 +917,36 @@ export class Player {
       }
     }
     return this.analyserNode;
+  }
+
+  private rtaNode: AnalyserNode | null = null;
+
+  /** Spectrum tap for the parametric EQ's RTA: after the EQ and limiter, before volume. Null without Web Audio. */
+  rta(): AnalyserNode | null {
+    if (!this.ctx || !this.graph) return null;
+    if (!this.rtaNode) {
+      try {
+        const a = this.ctx.createAnalyser();
+        a.fftSize = 8192;
+        a.smoothingTimeConstant = 0.5;
+        this.graph.post.connect(a);
+        this.rtaNode = a;
+      } catch {
+        return null;
+      }
+    }
+    return this.rtaNode;
+  }
+
+  /** Swap the fallback compressor for the look-ahead limiter (turns peaks down instead of squashing them). */
+  private async loadLimiterWorklet() {
+    if (!this.ctx?.audioWorklet || !this.graph) return;
+    try {
+      await this.ctx.audioWorklet.addModule(new URL(LIMITER_WORKLET_URL, document.baseURI).href);
+      this.graph.useLimiter(new AudioWorkletNode(this.ctx, 'hb-limiter', { outputChannelCount: [2] }));
+    } catch (e) {
+      console.warn('Look-ahead limiter unavailable, using the compressor', e);
+    }
   }
 
   private async loadPitchWorklet() {

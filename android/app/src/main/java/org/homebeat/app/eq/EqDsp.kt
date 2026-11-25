@@ -124,8 +124,8 @@ class Biquad(b0: Double, b1: Double, b2: Double, a1: Double, a2: Double, channel
  *   so a +6 dB bass boost no longer drives the signal into clipping. The user's preamp is a trim on top.
  * - **No clicks.** Settings changes go through [update]; filters keep their state and gains glide at [GLIDE_DB_PER_S]
  *   in [BLOCK]-frame steps, gains/mix ramp per sample.
- * - **A real limiter** (stereo-linked, instant attack, smooth release) instead of a clipper catches what's left
- *   (widening, a positive preamp).
+ * - **A real limiter** ([LookaheadLimiter]: stereo-linked, 3 ms look-ahead so it turns down *before* a peak instead of
+ *   bending the waveform, smooth release) catches what's left (widening, a positive preamp, phase-shifted peaks).
  */
 class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
     var settings: EqSettings = initial
@@ -152,9 +152,14 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
     private var curSide = 1.0
     private var curL = 1.0
     private var curR = 1.0
-    private var limGain = 1.0
-    private val release = kotlin.math.exp(-1.0 / (RELEASE_S * fs))
-    private var stateClear = true
+    private val limiter = LookaheadLimiter(channels, fs, LIMIT, LOOKAHEAD_S, RELEASE_S)
+    /** Running the chain (else bypassed). Declared before init: snap() sets it. */
+    private var active = false
+    /** Wet/dry crossfade used when the chain starts or stops, so the latency change doesn't click. */
+    private var mix = 1.0
+    private val mixStep = 1.0 / (FADE_S * fs)
+    private var dry = FloatArray(0)
+    private val frame = DoubleArray(channels)
 
     /** Gain (dB) the auto headroom takes off right now; ≤ 0. */
     var autoHeadroomDb = 0.0
@@ -231,6 +236,7 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
         if (hpMix == 0.0 && settings.headphone == null) { hpProfile = null; hpFilters = emptyList() }
         retune()
         curPreamp = targetPreamp(); curSide = tSide(); curL = tL(); curR = tR()
+        active = wantActive(); mix = 1.0
     }
 
     private fun retune() {
@@ -240,7 +246,9 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
             ?.forEachIndexed { i, b -> hpFilters.getOrNull(i)?.retune(b) }
         for (sl in slots) Biquad.band(sl.band, fs, channels, sl.cur).forEachIndexed { i, b -> sl.filters.getOrNull(i)?.retune(b) }
         paramDirty = false
-        autoHeadroomDb = -peakResponseDb().coerceAtLeast(0.0)
+        // Plus a safety margin whenever filters are active: phase shifts raise sample peaks of loud masters even
+        // where the curve is flat or cut, and the limiter should only ever catch the odd peak, not work all the time.
+        autoHeadroomDb = if (active().isEmpty()) 0.0 else -(peakResponseDb().coerceAtLeast(0.0) + SAFETY_DB)
     }
 
     /** Highest boost of the current curve, 20 Hz … 20 kHz. */
@@ -248,11 +256,16 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
         val all = active()
         if (all.isEmpty()) return 0.0
         var peak = Double.NEGATIVE_INFINITY
-        for (f in probeHz) {
+        fun probe(f: Double) {
+            if (f <= 0 || f >= fs * 0.49) return
             var db = 0.0
             for (b in all) db += b.responseDb(fs, f)
             if (db > peak) peak = db
         }
+        for (f in probeHz) probe(f)
+        // Narrow (high-Q) peaks fall between the sweep points: check every band's own centre too.
+        for (sl in slots) probe(sl.band.fc)
+        hpProfile?.filters?.forEach { probe(it.fc) }
         return peak
     }
 
@@ -279,9 +292,15 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
     private fun atTargets() = bandDb.indices.all { bandDb[it] == tBand(it) } && bassDb == tBass() && hpMix == tHp() &&
         slots.all { it.cur == tSlot(it) && !it.dying }
 
+    /**
+     * While the EQ is on, the chain always runs (so the limiter's 3 ms look-ahead delay never comes and goes while
+     * you play with the sliders). It only drops out when switched off and everything has glided back to neutral.
+     */
+    private fun wantActive() = settings.enabled || !(neutralNow() && atTargets())
+
     /** True when processing would change nothing (lets the processor pass audio straight through). */
     val isIdentity: Boolean
-        get() = neutralNow() && atTargets() && targetPreamp() == 1.0 && tSide() == 1.0 && tL() == 1.0 && tR() == 1.0
+        get() = !active && !wantActive()
 
     /** Move gliding gains one block towards their targets; true when filters were retuned. */
     private fun glide(frames: Int): Boolean {
@@ -304,20 +323,39 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
     }
 
     fun process(buf: FloatArray, frames: Int) {
-        if (isIdentity) {
-            if (!stateClear) {
-                bands.forEach { it.clear() }; bass.clear(); hpFilters.forEach { it.clear() }; slots.forEach { s -> s.filters.forEach { it.clear() } }
-                limGain = 1.0; stateClear = true
-            }
-            return
+        val want = wantActive()
+        if (!active && !want) return
+        if (!active) {
+            // Starting: fresh filter state and an empty delay line, crossfaded in from the dry signal.
+            bands.forEach { it.clear() }; bass.clear(); hpFilters.forEach { it.clear() }; slots.forEach { s -> s.filters.forEach { it.clear() } }
+            limiter.reset()
+            active = true; mix = 0.0
         }
-        stateClear = false
+        // While starting or stopping, keep the dry signal to crossfade with (the chain adds the limiter's latency).
+        val n = frames * channels
+        val xfade = mix < 1.0 || !want
+        if (xfade) {
+            if (dry.size < n) dry = FloatArray(n)
+            System.arraycopy(buf, 0, dry, 0, n)
+        }
         var f0 = 0
         while (f0 < frames) {
-            val n = minOf(BLOCK, frames - f0)
-            glide(n)
-            processBlock(buf, f0, n)
-            f0 += n
+            val k = minOf(BLOCK, frames - f0)
+            glide(k)
+            processBlock(buf, f0, k)
+            f0 += k
+        }
+        if (xfade) {
+            val target = if (want) 1.0 else 0.0
+            for (f in 0 until frames) {
+                mix = if (target > mix) minOf(target, mix + mixStep) else maxOf(target, mix - mixStep)
+                for (ch in 0 until channels) {
+                    val i = f * channels + ch
+                    buf[i] = (buf[i] * mix + dry[i] * (1 - mix)).toFloat()
+                }
+            }
+            // Fully back to dry: bypass from the next buffer on.
+            if (!want && mix == 0.0) active = false
         }
     }
 
@@ -348,24 +386,17 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
                 }
                 l *= l0 + (l1 - l0) * t
                 r *= r0 + (r1 - r0) * t
-                val g = limiterGain(maxOf(kotlin.math.abs(l), kotlin.math.abs(r)))
-                buf[base] = (l * g).coerceIn(-1.0, 1.0).toFloat()
-                buf[base + 1] = (r * g).coerceIn(-1.0, 1.0).toFloat()
+                frame[0] = l; frame[1] = r
+                limiter.process(frame)
+                buf[base] = frame[0].toFloat()
+                buf[base + 1] = frame[1].toFloat()
             } else {
-                for (ch in 0 until channels) {
-                    val x = buf[base + ch].toDouble()
-                    buf[base + ch] = (x * limiterGain(kotlin.math.abs(x))).coerceIn(-1.0, 1.0).toFloat()
-                }
+                for (ch in 0 until channels) frame[ch] = buf[base + ch].toDouble()
+                limiter.process(frame)
+                for (ch in 0 until channels) buf[base + ch] = frame[ch].toFloat()
             }
         }
         curPreamp = p1; curSide = s1; curL = l1; curR = r1
-    }
-
-    /** Peak limiter: clamps instantly to [LIMIT] and recovers over [RELEASE_S]. */
-    private fun limiterGain(peak: Double): Double {
-        val released = 1.0 - (1.0 - limGain) * release
-        limGain = if (peak * released > LIMIT) LIMIT / peak else released
-        return limGain
     }
 
     companion object {
@@ -377,6 +408,10 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
         const val BLOCK = 64
         const val LIMIT = 0.98
         const val RELEASE_S = 0.15
+        const val LOOKAHEAD_S = 0.003
+        const val FADE_S = 0.01
+        /** Extra headroom (dB) on top of the curve's peak boost while any filter is active. */
+        const val SAFETY_DB = 1.0
         private const val PROBES = 96
 
         /** Auto headroom (dB, ≤ 0) these settings get; for the UI. */
@@ -388,5 +423,69 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
             val all = e.active()
             return DoubleArray(freqs.size) { i -> all.sumOf { it.responseDb(e.fs, freqs[i].coerceAtMost(e.fs * 0.49)) } }
         }
+    }
+}
+
+/**
+ * Stereo-linked look-ahead peak limiter. Audio is delayed by [latency] frames; the gain needed by any frame in that
+ * window (sliding minimum) is reached smoothly before the frame comes out, so peaks are turned down rather than
+ * clipped, which is what made the old instant limiter sound distorted on loud masters. Allocation-free.
+ */
+class LookaheadLimiter(
+    private val channels: Int,
+    fs: Double,
+    private val ceiling: Double = 0.98,
+    lookaheadS: Double = 0.003,
+    releaseS: Double = 0.15,
+) {
+    val latency: Int = kotlin.math.max(1, kotlin.math.round(lookaheadS * fs).toInt())
+    private val delay = Array(channels) { DoubleArray(latency) }
+    private var pos = 0
+    // Monotonic deque (circular) of (frame number, required gain): its front is the minimum over the last latency + 1 frames.
+    private val cap = latency + 2
+    private val dqN = LongArray(cap)
+    private val dqG = DoubleArray(cap)
+    private var head = 0
+    private var size = 0
+    private var n = 0L
+    // Released gain, then a moving average over `latency` frames of it (the smooth attack).
+    private var held = 1.0
+    private val avg = DoubleArray(latency) { 1.0 }
+    private var sum = latency.toDouble()
+    private var env = 1.0
+    private val release = 1 - kotlin.math.exp(-1.0 / (releaseS * fs))
+
+    /** Gain currently applied (1 = not limiting). */
+    val gain: Double get() = env
+
+    fun reset() {
+        delay.forEach { it.fill(0.0) }
+        avg.fill(1.0); sum = latency.toDouble()
+        pos = 0; head = 0; size = 0; n = 0; held = 1.0; env = 1.0
+    }
+
+    /** One frame in (one value per channel), the frame from [latency] frames ago out, in place. */
+    fun process(frame: DoubleArray) {
+        var peak = 0.0
+        for (ch in 0 until channels) peak = maxOf(peak, kotlin.math.abs(frame[ch]))
+        val need = if (peak > ceiling) ceiling / peak else 1.0
+        // Push, keeping the deque increasing so its front is the window minimum.
+        while (size > 0 && dqG[(head + size - 1) % cap] >= need) size--
+        dqN[(head + size) % cap] = n; dqG[(head + size) % cap] = need; size++
+        while (dqN[head] <= n - (latency + 1)) { head = (head + 1) % cap; size-- }
+        // Drop instantly to the window minimum, recover slowly.
+        held = minOf(dqG[head], held + (1 - held) * release)
+        // Every value averaged here is ≤ what the delayed frame needs, so the average is too: no overshoot, and the
+        // gain ramps down over the look-ahead instead of stepping.
+        sum += held - avg[pos]; avg[pos] = held
+        env = (sum / latency).coerceIn(0.0, 1.0)
+        for (ch in 0 until channels) {
+            val out = delay[ch][pos] * env
+            delay[ch][pos] = frame[ch]
+            frame[ch] = out.coerceIn(-ceiling, ceiling) // float rounding only
+        }
+        pos = (pos + 1) % latency
+        n++
+        if (n % 65_536 == 0L) sum = avg.sum() // stop rounding drift
     }
 }

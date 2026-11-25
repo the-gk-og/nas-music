@@ -35,23 +35,29 @@ class EqAndContextTest {
         return sqrt(sum / n)
     }
 
-    @Test fun `disabled or flat eq is an exact pass-through`() {
+    @Test fun `disabled eq is an exact pass-through, flat eq only delays by the limiter look-ahead`() {
         val a = sine(1000.0); val b = a.copyOf()
         val e = EqEngine(EqSettings(enabled = false, bandsDb = List(10) { 6f }), fs, 2)
         assertTrue(e.isIdentity)
         e.process(b, b.size / 2)
         assertTrue(a.contentEquals(b))
-        assertTrue(EqEngine(EqSettings(enabled = true), fs, 2).isIdentity)
+
+        val flat = EqEngine(EqSettings(enabled = true), fs, 2)
+        assertFalse(flat.isIdentity)
+        val c = a.copyOf()
+        flat.process(c, c.size / 2)
+        val lat = (EqEngine.LOOKAHEAD_S * fs).toInt()
+        for (f in 1000 until 1100) assertEquals(a[(f - lat) * 2], c[f * 2], 1e-6f)
     }
 
     @Test fun `a 1 kHz boost lifts 1 kHz about 12 dB over 63 Hz, with auto headroom so neither clips`() {
         val s = EqSettings(enabled = true).withBand(5, 12f)
         val e = EqEngine(s, fs, 2)
-        assertEquals(-12.0, e.autoHeadroomDb, 0.3)
+        assertEquals(-12.0 - EqEngine.SAFETY_DB, e.autoHeadroomDb, 0.3)
         val hi = sine(1000.0); val before = rms(hi)
         e.process(hi, hi.size / 2)
         val hiDb = 20 * kotlin.math.log10(rms(hi) / before)
-        assertEquals(0.0, hiDb, 0.7) // the boost is paid for by the headroom
+        assertEquals(-EqEngine.SAFETY_DB, hiDb, 0.7) // the boost is paid for by the headroom
 
         val lo = sine(63.0); val loBefore = rms(lo)
         EqEngine(s, fs, 2).process(lo, lo.size / 2)
@@ -60,11 +66,10 @@ class EqAndContextTest {
     }
 
     @Test fun `cuts need no headroom and presets stay gentle`() {
-        assertEquals(0.0, EqEngine.headroomDb(EqSettings(enabled = true, bandsDb = List(10) { -6f })), 1e-9)
         assertEquals(0.0, EqEngine.headroomDb(EqSettings(enabled = false, bandsDb = List(10) { 6f })), 1e-9)
         for ((name, bands) in EqSettings.PRESETS) {
             val h = EqEngine.headroomDb(EqSettings(enabled = true, bandsDb = bands))
-            assertTrue("$name costs ${h} dB", h > -7.0)
+            assertTrue("$name costs ${h} dB", h > -8.0)
         }
     }
 
@@ -83,21 +88,40 @@ class EqAndContextTest {
         // …and it does get there.
         val c = sine(1000.0, amp = 0.5); val before = rms(c)
         e.process(c, c.size / 2)
-        assertEquals(-12.0, 20 * kotlin.math.log10(rms(c) / before), 0.7)
+        assertEquals(-12.0 - EqEngine.SAFETY_DB, 20 * kotlin.math.log10(rms(c) / before), 0.7)
     }
 
     @Test fun `mono, balance and preamp`() {
-        val buf = FloatArray(200) { i -> if (i % 2 == 0) 0.4f else 0f } // left only
-        EqEngine(EqSettings(enabled = true, mono = true), fs, 2).process(buf, 100)
-        assertEquals(0.2f, buf[0], 1e-4f); assertEquals(0.2f, buf[1], 1e-4f)
+        val buf = FloatArray(2000) { i -> if (i % 2 == 0) 0.4f else 0f } // left only
+        EqEngine(EqSettings(enabled = true, mono = true), fs, 2).process(buf, 1000)
+        assertEquals(0.2f, buf[1000], 1e-4f); assertEquals(0.2f, buf[1001], 1e-4f)
 
-        val b2 = FloatArray(200) { 0.3f }
-        EqEngine(EqSettings(enabled = true, balance = 1f), fs, 2).process(b2, 100)
-        assertEquals(0f, b2[0], 1e-6f); assertEquals(0.3f, b2[1], 1e-4f)
+        val b2 = FloatArray(2000) { 0.3f }
+        EqEngine(EqSettings(enabled = true, balance = 1f), fs, 2).process(b2, 1000)
+        assertEquals(0f, b2[1000], 1e-6f); assertEquals(0.3f, b2[1001], 1e-4f)
 
-        val b3 = FloatArray(200) { 0.2f }
-        EqEngine(EqSettings(enabled = true, preampDb = -6f), fs, 2).process(b3, 100)
-        assertEquals(0.1f, b3[0], 0.002f)
+        val b3 = FloatArray(2000) { 0.2f }
+        EqEngine(EqSettings(enabled = true, preampDb = -6f), fs, 2).process(b3, 1000)
+        assertEquals(0.1f, b3[1000], 0.002f)
+    }
+
+    @Test fun `limiter turns loud peaks down smoothly instead of clipping them`() {
+        // A full-scale 100 Hz sine pushed +6 dB: the limiter holds it at the ceiling with a steady gain, so the
+        // waveform keeps its shape (no flat tops).
+        val buf = sine(100.0, amp = 0.95)
+        EqEngine(EqSettings(enabled = true, preampDb = 6f), fs, 2).process(buf, buf.size / 2)
+        val tail = (fs / 2 until fs).map { buf[it * 2].toDouble() }
+        assertTrue(tail.all { abs(it) <= EqEngine.LIMIT + 1e-6 })
+        // Count samples sitting on the ceiling: a clipper would flatten about a third of every cycle at +6 dB.
+        val pinned = tail.count { abs(it) > EqEngine.LIMIT - 1e-4 }
+        assertTrue("pinned $pinned", pinned < tail.size / 50)
+        // And it really is a sine still: peak / rms ≈ √2.
+        val rmsTail = sqrt(tail.sumOf { it * it } / tail.size)
+        assertEquals(sqrt(2.0), tail.maxOf { abs(it) } / rmsTail, 0.05)
+    }
+
+    @Test fun `active filters leave a safety margin even when they only cut`() {
+        assertEquals(-EqEngine.SAFETY_DB, EqEngine.headroomDb(EqSettings(enabled = true, bandsDb = List(10) { -6f })), 1e-9)
     }
 
     @Test fun `output never exceeds full scale`() {

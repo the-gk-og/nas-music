@@ -49,6 +49,7 @@ class EqAudioProcessor(private val current: () -> EqSettings) : BaseAudioProcess
             else for (i in 0 until samples) out.putFloat(scratch[i])
         }
         out.flip()
+        if (RtaTap.enabled) RtaTap.push(out.duplicate().order(ByteOrder.nativeOrder()), bytesPerSample == 4, fmt.channelCount, fmt.sampleRate)
     }
 
     override fun onFlush() { engine = null }
