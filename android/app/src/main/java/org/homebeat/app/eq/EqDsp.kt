@@ -370,7 +370,7 @@ class EqEngine(initial: EqSettings, val sampleRate: Int, val channels: Int) {
 
     companion object {
         /** ~1 octave per band: neighbouring bands blend smoothly. */
-        const val Q = 1.41
+        const val Q = EqSettings.GRAPHIC_Q
         const val BASS_HZ = 100.0
         const val BASS_MAX_DB = 12.0
         const val GLIDE_DB_PER_S = 80.0

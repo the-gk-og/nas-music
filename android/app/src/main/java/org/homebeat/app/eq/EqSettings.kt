@@ -35,6 +35,8 @@ data class EqSettings(
         const val GRAPHIC = "graphic"
         const val PARAMETRIC = "parametric"
         const val MAX_PARAM_BANDS = 16
+        /** Q of the graphic bands (~1 octave). Kept here, not in EqEngine: this file is also compiled into the Wear app. */
+        const val GRAPHIC_Q = 1.41
 
         val BANDS_HZ = floatArrayOf(31.5f, 63f, 125f, 250f, 500f, 1000f, 2000f, 4000f, 8000f, 16000f)
         val BAND_LABELS = listOf("31.5", "63", "125", "250", "500", "1 k", "2 k", "4 k", "8 k", "16 k")
@@ -106,6 +108,6 @@ data class EqBand(
         /** Starting point when switching to parametric: the graphic sliders that aren't flat, as peaks. */
         fun fromGraphic(bandsDb: List<Float>) = EqSettings.BANDS_HZ.indices
             .filter { bandsDb.getOrElse(it) { 0f } != 0f }
-            .map { EqBand("PK", EqSettings.BANDS_HZ[it].toDouble(), bandsDb[it].toDouble(), EqEngine.Q) }
+            .map { EqBand("PK", EqSettings.BANDS_HZ[it].toDouble(), bandsDb[it].toDouble(), EqSettings.GRAPHIC_Q) }
     }
 }
