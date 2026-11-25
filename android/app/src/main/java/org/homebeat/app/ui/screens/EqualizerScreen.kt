@@ -93,7 +93,7 @@ fun EqualizerScreen(c: AppContainer) {
                 Row(Modifier.clickable { outputs = true }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(outputIcon(editing.kind), null, tint = MaterialTheme.colorScheme.primary)
                     Text(
-                        editing.label + if (editing.key == output.key) "" else "  (not connected)",
+                        editing.label + if (editing.key == output.key || editing.kind == "all") "" else "  (not connected)",
                         color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).padding(start = 12.dp),
                     )
                     Icon(Icons.Default.KeyboardArrowDown, "Choose output")
@@ -124,7 +124,7 @@ fun EqualizerScreen(c: AppContainer) {
 
 private fun outputIcon(kind: String) = when (kind) {
     "bluetooth" -> Icons.Default.Bluetooth
-    "wired" -> Icons.Default.Headphones
+    "wired", "usb" -> Icons.Default.Headphones
     else -> Icons.Default.Speaker
 }
 

@@ -139,7 +139,7 @@
     <span class="sep"></span>
     <input type="checkbox" class="switch" aria-label="Equalizer on" checked={eq.enabled} onchange={(e) => player.setEq({ enabled: e.currentTarget.checked })} />
   </div>
-  <p class="muted note">Settings are saved per output device. {player.sinkSupported ? '' : 'This browser cannot switch outputs; the profile follows the system default.'}</p>
+  <p class="muted note">{player.eqPerDevice ? 'Settings are saved per output device and switch with it.' : 'One EQ for all outputs (per-device EQ is off in Settings).'} {player.sinkSupported ? '' : 'This browser cannot switch outputs; the profile follows the system default.'}</p>
 
   {#if page === 'bands'}
     <div class="chips">

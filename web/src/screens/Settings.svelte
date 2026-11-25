@@ -216,6 +216,10 @@
 
   <div class="section-title">Playback</div>
   <div class="pad form">
+    <label class="sig inline">
+      <div><div>EQ per output device</div><div class="muted small">On: each output (speakers, headphones, Bluetooth…) keeps its own EQ, switched automatically. Off: one EQ for everything.</div></div>
+      <input type="checkbox" class="switch" checked={player.eqPerDevice} onchange={(e) => player.setEqPerDevice(e.currentTarget.checked)} />
+    </label>
     <div class="opt">
       <div>
         <div>Transitions</div>
