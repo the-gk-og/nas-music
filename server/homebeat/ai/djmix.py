@@ -29,6 +29,7 @@ from typing import Any
 
 import numpy as np
 
+from . import audiohash
 from .common import iso, transaction
 
 log = logging.getLogger("homebeat.ai.djmix")
@@ -469,15 +470,40 @@ COLUMNS = ("version", "bpm", "bpm_confidence", "beat_s", "downbeat_s", "beats_pe
            "energy", "energy_curve", "curve_step_s", "duration_s")
 
 
-def write_row(conn: sqlite3.Connection, track_id: str, a: DjAnalysis | dict) -> None:
+def write_row(conn: sqlite3.Connection, track_id: str, a: DjAnalysis | dict, audio_hash: str | None = None) -> None:
     d = asdict(a) if isinstance(a, DjAnalysis) else dict(a)
     vals = [d.get(c) for c in COLUMNS]
     vals[COLUMNS.index("grid_stable")] = int(bool(d.get("grid_stable")))
     vals[COLUMNS.index("energy_curve")] = json.dumps(d.get("energy_curve") or [])
     with transaction(conn):
         conn.execute(
-            f"INSERT OR REPLACE INTO track_dj (track_id, status, error, {', '.join(COLUMNS)}, analysed_at) "
-            f"VALUES (?, 'done', NULL, {', '.join('?' * len(COLUMNS))}, ?)", (track_id, *vals, iso()))
+            f"INSERT OR REPLACE INTO track_dj (track_id, status, error, {', '.join(COLUMNS)}, analysed_at, "
+            f"audio_hash) VALUES (?, 'done', NULL, {', '.join('?' * len(COLUMNS))}, ?, ?)",
+            (track_id, *vals, iso(), audio_hash))
+
+
+def reuse_row(conn: sqlite3.Connection, track_id: str, version: str, audio_hash: str | None) -> bool:
+    """Satisfy `track_id` from a finished `track_dj` row with the same audio (schema v13, see `audiohash`):
+    its own row after a retag is re-stamped, another track's (a move, rename or copy) is copied. A row of
+    `version`, or any version when only the basic analyser is available. False if there is none."""
+    if not audio_hash:
+        return False
+    src = conn.execute(
+        "SELECT track_id FROM track_dj WHERE audio_hash = ? AND status = 'done' AND (version = ? OR ? = ?) "
+        "ORDER BY track_id = ? DESC, version = ? DESC, analysed_at DESC LIMIT 1",
+        (audio_hash, version, version, BASIC_VERSION, track_id, ESSENTIA_VERSION)).fetchone()
+    if src is None:
+        return False
+    with transaction(conn):
+        if src[0] == track_id:
+            conn.execute("UPDATE track_dj SET analysed_at = ? WHERE track_id = ?", (iso(), track_id))
+        else:
+            cols = ", ".join(COLUMNS)
+            conn.execute(
+                f"INSERT OR REPLACE INTO track_dj (track_id, status, error, {cols}, analysed_at, audio_hash) "
+                f"SELECT ?, status, error, {cols}, ?, audio_hash FROM track_dj WHERE track_id = ?",
+                (track_id, iso(), src[0]))
+    return True
 
 
 def write_failure(conn: sqlite3.Connection, track_id: str, version: str, error: str) -> None:
@@ -490,7 +516,7 @@ def pending(conn: sqlite3.Connection, version: str, limit: int | None = None) ->
     """Tracks to (re)analyse: no row, the file changed since, an older/basic version once Essentia is here,
     or a failure older than RETRY_DAYS."""
     sql = """
-        SELECT t.id, t.path, t.duration_s FROM tracks t LEFT JOIN track_dj d ON d.track_id = t.id
+        SELECT t.id, t.path, t.duration_s, t.mtime, t.flac_bytes FROM tracks t LEFT JOIN track_dj d ON d.track_id = t.id
         WHERE t.missing = 0 AND (
             d.track_id IS NULL
             OR d.analysed_at < strftime('%Y-%m-%dT%H:%M:%SZ', t.mtime, 'unixepoch')
@@ -518,20 +544,33 @@ def _work(path: str, use_essentia: bool) -> dict:
 
 def run(conn: sqlite3.Connection, library_root: Path, time_budget_s: float = 50 * 60, limit: int | None = None,
         workers: int = 1, in_process: bool = False) -> dict[str, Any]:
-    """The `automix` job body. Returns {analysed, failed, left, version}. Stops starting new tracks once the
-    time budget is used; whatever is unfinished is picked up by the next run."""
+    """The `automix` job body. Returns {analysed, reused, failed, left, version}; `analysed` includes the
+    `reused` tracks, satisfied from a row with the same audio hash without decoding. Stops starting new tracks
+    once the time budget is used; whatever is unfinished is picked up by the next run. Leftover budget goes to
+    hashing rows analysed before schema v13 (`audiohash.backfill`)."""
     use_es = essentia_available()
     version = ESSENTIA_VERSION if use_es else BASIC_VERSION
     todo = pending(conn, version, limit)
-    res: dict[str, Any] = {"version": version, "analysed": 0, "failed": 0, "left": len(todo)}
-    if not todo:
-        return res
+    res: dict[str, Any] = {"version": version, "analysed": 0, "reused": 0, "failed": 0, "left": len(todo)}
     t0 = time.monotonic()
     root = Path(library_root)
+    if not todo:
+        audiohash.backfill(conn, root, "track_dj", time_budget_s=time_budget_s)
+        return res
+    hashes: dict[str, str | None] = {}
+
+    def reused(row) -> bool:
+        h = hashes[row["id"]] = audiohash.current(conn, root, row["id"], row["path"], row["mtime"],
+                                                  row["flac_bytes"])
+        if reuse_row(conn, row["id"], version, h):
+            res["analysed"] += 1
+            res["reused"] += 1
+            return True
+        return False
 
     def done(row, fut_result=None, err: Exception | None = None):
         if err is None:
-            write_row(conn, row["id"], fut_result)
+            write_row(conn, row["id"], fut_result, hashes.get(row["id"]))
             res["analysed"] += 1
         else:
             log.warning("automix analysis failed for %s: %s", row["path"], err)
@@ -542,6 +581,8 @@ def run(conn: sqlite3.Connection, library_root: Path, time_budget_s: float = 50 
         for row in todo:
             if time.monotonic() - t0 > time_budget_s:
                 break
+            if reused(row):
+                continue
             try:
                 done(row, _work(str(root / row["path"]), use_es))
             except Exception as e:  # noqa: BLE001
@@ -555,6 +596,8 @@ def run(conn: sqlite3.Connection, library_root: Path, time_budget_s: float = 50 
             while queue or flying:
                 while queue and len(flying) < workers and time.monotonic() - t0 < time_budget_s:
                     row = queue.pop(0)
+                    if reused(row):
+                        continue
                     flying[pool.submit(_work, str(root / row["path"]), use_es)] = row
                 if not flying:
                     break
@@ -570,6 +613,8 @@ def run(conn: sqlite3.Connection, library_root: Path, time_budget_s: float = 50 
         finally:
             pool.shutdown(wait=True, cancel_futures=True)
     res["left"] = len(todo) - res["analysed"] - res["failed"]
+    if not res["left"]:
+        audiohash.backfill(conn, root, "track_dj", time_budget_s=max(0.0, time_budget_s - (time.monotonic() - t0)))
     log.info("automix analysis: %s", res)
     return res
 

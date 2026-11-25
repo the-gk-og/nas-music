@@ -158,6 +158,13 @@ To free space afterwards: `DELETE FROM features WHERE model_version = 'old-versi
   `pending` rows, and the next run picks them up. Safe to kill at any time.
 * Failures are stored as `failed` with the error and retried after `ai.analysis.retry_failed_days`,
   or as soon as the file changes.
+* **Results follow the audio, not the file** (schema v13, `audiohash.py`). Before decoding, the track's
+  audio-content hash is looked up: FLAC's STREAMINFO MD5, MP4 `mdat`, Ogg audio pages, WAV/AIFF data, or
+  the bytes between ID3v2 and APE/ID3v1 tags for MP3 and the rest. A retag (new mtime, same audio) just
+  re-stamps the existing row; a moved, renamed or copied file gets the row of the track that already has
+  that audio. Hashes are cached per (mtime, size) in `audio_hashes`. Rows analysed before v13 get their
+  hash in the background after the pending work (`audiohash.backfill`, 20 min per run). The automix
+  analysis (`djmix.py`, `track_dj`) does the same.
 * Extraction runs in a **spawn** process pool (`ai.analysis.workers`, default 2) at `nice 10`. Spawn is
   used because the server has threads and TensorFlow does not survive `fork`.
 * The library is only ever read (ffmpeg decodes to a pipe).
