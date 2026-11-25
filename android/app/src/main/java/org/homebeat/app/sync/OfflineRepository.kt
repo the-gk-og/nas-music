@@ -65,7 +65,8 @@ class OfflineRepository(
     /** "Download" on a song (or a selection): keep these offline until the user removes them. */
     suspend fun downloadTracks(tracks: List<Track>) {
         val dao = db.downloads()
-        for (t in tracks.filterNot { it.missing }.distinctBy { it.id }) {
+        // Songs stored on the phone are already here: nothing to download.
+        for (t in tracks.filterNot { it.missing || org.homebeat.app.local.LocalIds.isLocal(it.id) }.distinctBy { it.id }) {
             val cur = dao.get(t.id)
             dao.upsert(
                 cur?.copy(manual = true, trackJson = cur.trackJson ?: LibraryRepository.encodeTrack(t))

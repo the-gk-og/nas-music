@@ -23,16 +23,19 @@ object OfflinePlayback {
      * the next downloaded one after it (wrapping round). Null when nothing in the list is downloaded.
      */
     fun playable(tracks: List<Track>, start: Int, downloaded: Set<String>): Pair<List<Track>, Int>? {
-        val kept = tracks.withIndex().filter { it.value.id in downloaded }
+        val kept = tracks.withIndex().filter { here(it.value.id, downloaded) }
         if (kept.isEmpty()) return null
         val s = start.coerceIn(0, tracks.size - 1)
         val at = kept.indexOfFirst { it.index >= s }.takeIf { it >= 0 } ?: 0
         return kept.map { it.value } to at
     }
 
-    /** Index of the next downloaded item after [current] in [ids], or null if there is none. */
+    /** Index of the next downloaded (or on-phone) item after [current] in [ids], or null if there is none. */
     fun nextPlayable(ids: List<String>, current: Int, downloaded: Set<String>): Int? =
-        ((current + 1) until ids.size).firstOrNull { ids[it] in downloaded }
+        ((current + 1) until ids.size).firstOrNull { here(ids[it], downloaded) }
+
+    /** Downloaded, or a song stored on the phone itself (always playable without a connection). */
+    private fun here(id: String, downloaded: Set<String>) = id in downloaded || org.homebeat.app.local.LocalIds.isLocal(id)
 
     /**
      * A radio from downloaded songs: the seed (if downloaded) first, then songs by the same artist and from

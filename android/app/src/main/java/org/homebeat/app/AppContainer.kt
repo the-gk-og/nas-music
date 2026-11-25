@@ -71,6 +71,8 @@ class AppContainer(val context: Context) {
 
     val library = LibraryRepository(api, db, ApiFactory.json)
     val offline = org.homebeat.app.sync.OfflineRepository(context, db, downloader, settings, scope)
+    /** Songs stored on the phone itself (Settings → Music on this phone; off by default). */
+    val localMusic = org.homebeat.app.local.LocalLibrary(context, scope)
     val lyrics = LyricsRepository(db.lyrics(), { api.lyrics(it) }, ApiFactory.json)
 
     // ---- v2 ----
@@ -89,7 +91,8 @@ class AppContainer(val context: Context) {
         org.homebeat.app.playback.OfflineSource(
             isOffline = { router.route.value == Route.OFFLINE },
             downloadedIds = { offline.downloadedIds.value },
-            downloadedTracks = { offline.offlineTracks.value },
+            // Offline radio also draws on songs stored on the phone.
+            downloadedTracks = { offline.offlineTracks.value + localMusic.tracks.value },
             toast = { ui.toast(it) },
         ),
         listening = { listening.settings.value },
