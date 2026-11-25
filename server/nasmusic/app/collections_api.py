@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from nasmusic.app import collections as coll
+from nasmusic.app import playlist_folders as plf
 from nasmusic.app import playlists as pl
 from nasmusic.app.context import AppContext, ctx, db, device
 from nasmusic.auth import Device
@@ -36,6 +37,7 @@ class Name(BaseModel):
 
 class NewPlaylist(Name):
     trackIds: list[str] = Field(default_factory=list, max_length=10_000)
+    folderId: str | None = None   # v9: file it straight into one of the caller's folders
 
 
 class AddTracks(BaseModel):
@@ -46,6 +48,51 @@ class AddTracks(BaseModel):
 class Move(BaseModel):
     from_: int = Field(alias="from", ge=0)
     to: int = Field(ge=0)
+
+
+# ---------- v9 playlist folders (per user; see nasmusic.app.playlist_folders) ----------
+
+
+class NewFolder(Name):
+    parentId: str | None = None
+
+
+class FolderPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    parentId: str | None = None   # present (even null) = move; null = top level
+    index: int | None = Field(default=None, ge=0)
+
+
+class PlaylistFolderBody(BaseModel):
+    folderId: str | None = None   # null or omitted = top level
+
+
+@router.get("/playlist-folders")
+def playlist_folders(me: Device = Depends(device), conn: Conn = Depends(db)):
+    return plf.list_folders(conn, me.user_id)
+
+
+@router.post("/playlist-folders")
+def create_playlist_folder(body: NewFolder, me: Device = Depends(device), conn: Conn = Depends(db)):
+    return _run(plf.create_folder, conn, me.user_id, body.name, body.parentId)
+
+
+@router.patch("/playlist-folders/{fid}")
+def patch_playlist_folder(fid: str, body: FolderPatch, me: Device = Depends(device), conn: Conn = Depends(db)):
+    parent = body.parentId if "parentId" in body.model_fields_set else plf.UNSET
+    return _run(plf.update_folder, conn, me.user_id, fid, name=body.name, parent_id=parent, index=body.index)
+
+
+@router.delete("/playlist-folders/{fid}", status_code=204)
+def delete_playlist_folder(fid: str, me: Device = Depends(device), conn: Conn = Depends(db)):
+    _run(plf.delete_folder, conn, me.user_id, fid)
+    return Response(status_code=204)
+
+
+@router.put("/playlists/{pid}/folder")
+def put_playlist_folder(pid: str, body: PlaylistFolderBody, me: Device = Depends(device), conn: Conn = Depends(db)):
+    _run(plf.set_playlist_folder, conn, me.user_id, pid, body.folderId)
+    return _run(pl.summary_for, conn, me.user_id, pid)
 
 
 # ---------- playlists (owner, editors, viewers; see nasmusic.app.playlists) ----------
@@ -100,7 +147,7 @@ def playlists(me: Device = Depends(device), conn: Conn = Depends(db)):
 
 @router.post("/playlists")
 def create_playlist(body: NewPlaylist, me: Device = Depends(device), conn: Conn = Depends(db)):
-    return _run(pl.create_playlist, conn, me.user_id, body.name, body.trackIds)
+    return _run(pl.create_playlist, conn, me.user_id, body.name, body.trackIds, body.folderId)
 
 
 @router.get("/playlists/{pid}")

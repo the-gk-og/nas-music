@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: nas-music API
-  version: 0.9.1
+  version: 0.10.0
   description: |
     Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
@@ -820,6 +820,9 @@ paths:
         `library.view.<chip>` grid|list (usually per device: `device.<id>.library.view.albums`).
         0.8.2 radio DJ voice (validated on PUT): `dj.voice` (bool, default false), `dj.every` (integer 1-10,
         default 3: the DJ talks before the first song and then every N songs).
+        v10 `library.classical` (bool, default false): classical mode. Album pages group tracks under their
+        work with a play-work button and show movement names; the composer is shown before the performer;
+        the library gets Composers and Works.
       responses:
         '200':
           description: settings
@@ -1098,6 +1101,53 @@ paths:
                         trackCount: { type: integer, description: tracks in this folder and below }
                   tracks: { type: array, items: { $ref: '#/components/schemas/Track' }, description: 'tracks directly in this folder, by file name' }
         '404': { description: no such folder }
+  /library/composers:
+    get:
+      summary: 'v10 classical: composers of works in the library (tracks with a `work`), by name'
+      responses:
+        '200':
+          description: composers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [name, workCount, albumCount, trackCount]
+                  properties:
+                    name: { type: string }
+                    workCount: { type: integer }
+                    albumCount: { type: integer }
+                    trackCount: { type: integer }
+  /library/works:
+    get:
+      summary: 'v10 classical: works, by composer then title; or one album''s works in album order (`albumId`)'
+      parameters:
+        - { name: composer, in: query, schema: { type: string }, description: exact composer name (case-insensitive) }
+        - { name: albumId, in: query, schema: { type: string } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 200, maximum: 1000 } }
+      responses:
+        '200':
+          description: works
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Work' } } } }
+  /library/works/{workId}:
+    get:
+      summary: 'v10 classical: one work with its movements in order (play them all for "play whole work")'
+      parameters: [ { name: workId, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200':
+          description: work
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Work'
+                  - type: object
+                    required: [tracks]
+                    properties:
+                      tracks: { type: array, items: { $ref: '#/components/schemas/Track' } }
+        '404': { description: not found }
   /library/genres:
     get:
       responses:
@@ -1171,10 +1221,77 @@ paths:
               properties:
                 name: { type: string, minLength: 1, maxLength: 200 }
                 trackIds: { type: array, items: { type: string } }
+                folderId: { type: [string, 'null'], description: 'v10: file it into this folder of the caller''s' }
       responses:
         '200':
           description: created
           content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistDetail' } } }
+        '422': { description: no such folder }
+  /playlist-folders:
+    get:
+      summary: 'v10. The caller''s playlist folders, depth first: every parent comes before its children, siblings in order.'
+      responses:
+        '200':
+          description: folders
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PlaylistFolder' } } } }
+    post:
+      summary: v10. New folder, last among its siblings. At most 500 folders, nested at most 8 deep.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                parentId: { type: [string, 'null'], description: null/omitted = top level }
+      responses:
+        '200':
+          description: created
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistFolder' } } }
+        '422': { description: no such parent, too deep, or too many folders }
+  /playlist-folders/{folderId}:
+    parameters: [ { name: folderId, in: path, required: true, schema: { type: string } } ]
+    patch:
+      summary: v10. Rename, move into another folder (`parentId` present; null = top level) and/or reorder among its siblings (`index`, 0 = first).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                parentId: { type: [string, 'null'] }
+                index: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: updated
+          content: { application/json: { schema: { $ref: '#/components/schemas/PlaylistFolder' } } }
+        '404': { description: not the caller's folder }
+        '422': { description: 'into itself or a subfolder, too deep, or no such parent' }
+    delete:
+      summary: v10. Delete the folder. Its playlists and subfolders move up to its parent; no playlist is deleted.
+      responses: { '204': { description: deleted }, '404': { description: not the caller's folder } }
+  /playlists/{playlistId}/folder:
+    put:
+      summary: v10. File a playlist the caller can see (own or shared) into one of their folders; null = top level.
+      parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                folderId: { type: [string, 'null'], description: null or omitted = top level }
+      responses:
+        '200':
+          description: the playlist summary with its new folderId
+          content: { application/json: { schema: { $ref: '#/components/schemas/Playlist' } } }
+        '404': { description: no such playlist (or no access) }
+        '422': { description: no such folder }
   /playlists/{playlistId}:
     parameters: [ { name: playlistId, in: path, required: true, schema: { type: string } } ]
     get:
@@ -4994,6 +5111,7 @@ components:
         rev: { type: integer, description: 'v5: bumped on every change (compare with Connect `playlist` messages)' }
         memberCount: { type: integer, description: 'v5: members besides the owner' }
         collaborative: { type: boolean, description: 'v5: memberCount > 0' }
+        folderId: { type: [string, 'null'], description: 'v10: the caller''s folder it is filed in (null = top level). Each user files shared playlists in their own folders.' }
     PlaylistDetail:
       allOf:
         - $ref: '#/components/schemas/Playlist'
@@ -5633,6 +5751,36 @@ components:
         familyHidden: { type: boolean, description: 'v6, queues/playlists only (true): hidden by the caller''s family mode; skip it' }
         mix:
           $ref: '#/components/schemas/TrackMix'
+        composer: { type: string, description: 'v10: only when tagged' }
+        work: { type: string, description: 'v10 classical: the work (composition) this track is a movement of; only when it is part of one (WORK tag, or a "Work: I. Movement" title on a track with a composer)' }
+        workId: { type: string, description: 'v10: GET /library/works/{workId}; present with `work`' }
+        movement: { type: string, description: 'v10: the movement name without its number ("Allegro con brio"); show it instead of the title under a work heading' }
+        movementNo: { type: integer, description: 'v10: the movement''s number in the work' }
+    Work:
+      type: object
+      description: 'v10 classical: the tracks of one album that share a `work`, in movement order'
+      required: [id, title, albumId, album, artist, trackCount, durationS, hasArt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        composer: { type: [string, 'null'] }
+        albumId: { type: string }
+        album: { type: string }
+        artist: { type: string, description: the album artist (the performers) }
+        year: { type: [integer, 'null'] }
+        trackCount: { type: integer }
+        durationS: { type: number }
+        hasArt: { type: boolean, description: 'cover at /art/{albumId}' }
+    PlaylistFolder:
+      type: object
+      description: 'v10: one of the caller''s own playlist folders'
+      required: [id, name, parentId, createdAt, playlistCount]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        parentId: { type: [string, 'null'], description: null = top level }
+        createdAt: { type: string, format: date-time }
+        playlistCount: { type: integer, description: playlists filed directly in this folder }
     ExplicitStatus:
       type: string
       enum: [explicit, probable, clean, unknown]

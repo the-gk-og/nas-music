@@ -24,6 +24,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,7 +88,9 @@ fun SongRow(
                     ExplicitBadge(track.explicit)
                     Text(track.title, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
                 }
-                Text(track.artist, color = color.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                // api 0.10 classical mode: composer before performer
+                val classical by org.nasmusic.app.data.ClassicalMode.on.collectAsState()
+                Text(org.nasmusic.app.data.Classical.artistLine(track, classical), color = color.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
                 Row {
                     Text(track.album, color = color.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                     Text(formatDuration(track.durationS), color = color.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall)

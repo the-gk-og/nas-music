@@ -5,9 +5,11 @@
     Moon,
     Captions,
     Disc3,
+    Folder,
     Gauge,
     Info,
     ListEnd,
+    ListMusic,
     ListPlus,
     ListStart,
     LogOut,
@@ -419,6 +421,18 @@
   </Sheet>
 {:else if d?.kind === 'vibe'}
   <VibeSheet />
+{:else if d?.kind === 'pick'}
+  <Sheet label={d.title}>
+    <div class="pad">
+      <h2>{d.title}</h2>
+      {#each d.options as o (o.value)}
+        <button class="row-item" class:cur={o.current} style:padding-left="{18 + (o.depth ?? 0) * 20}px" onclick={() => { const r = d.resolve; ui.dialog = null; r(o.value); }}>
+          {#if o.value}<Folder size={20} />{:else}<ListMusic size={20} />{/if}{o.label}
+        </button>
+      {/each}
+    </div>
+    <div class="foot"><span></span><button class="btn text" onclick={() => ui.close()}>Cancel</button></div>
+  </Sheet>
 {:else if d?.kind === 'confirm'}
   <Sheet label={d.title}>
     <div class="pad">

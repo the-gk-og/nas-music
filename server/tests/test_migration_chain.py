@@ -3,7 +3,7 @@ db.SCHEMA_VERSION. The per-step tests (test_migration_vN.py) check what each ste
 steps together land on exactly the schema a fresh install gets, that no row is lost on the way, and that a
 failed step leaves the database as it was. v5 -> v6 and v6 -> v7 each combine several features' changes.
 
-Adding schema v9: copy the current schema.sql to tests/fixtures/schema_v8.sql *before* changing it;
+Adding schema v11: copy the current schema.sql to tests/fixtures/schema_v10.sql *before* changing it;
 test_every_old_version_has_a_fixture fails until that fixture exists."""
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ OLD_VERSIONS = list(range(1, db.SCHEMA_VERSION))
 # Versions whose fixture holds every table we care about filling generically (v1-v4 are covered with real
 # data by test_v1_rows_survive / test_v4_rows_survive below; their steps move columns between tables).
 FILLABLE = [v for v in OLD_VERSIONS if v >= 5]
-STEPS = {5: "migrate_v5_to_v6", 6: "migrate_v6_to_v7", 7: "migrate_v7_to_v8", 8: "migrate_v8_to_v9"}
+STEPS = {5: "migrate_v5_to_v6", 6: "migrate_v6_to_v7", 7: "migrate_v7_to_v8", 8: "migrate_v8_to_v9", 9: "migrate_v9_to_v10"}
 
 
 # ---------- helpers ----------

@@ -66,6 +66,12 @@ class Jobs:
         res["togetGot"] = toget.match_owned(conn)  # wanted albums/songs that the library now has
         res["lyricsIndex"] = self._lyrics_index(conn, full=full)
         try:
+            from nasmusic.library import classical
+
+            res["classicalBackfill"] = classical.backfill(self.cfg, conn)  # v10: work tags of older tracks
+        except Exception:
+            log.exception("classical backfill failed")
+        try:
             from nasmusic.app import notify
 
             res["newMusic"] = notify.new_music(conn, getattr(self, "hub", None))

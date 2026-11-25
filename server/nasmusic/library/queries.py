@@ -18,7 +18,7 @@ import unicodedata
 from pathlib import Path
 
 from nasmusic.db import family
-from nasmusic.library import art, loudness
+from nasmusic.library import art, classical, loudness
 
 TRACK_COLS = """t.id, t.title, t.artist_id, ar.name AS artist, t.album_id, al.title AS album, t.track_no, t.disc_no,
        t.year, t.genre, t.duration_s, t.flac_bytes, t.missing, ut.starred_at, ut.rating,
@@ -26,7 +26,7 @@ TRACK_COLS = """t.id, t.title, t.artist_id, ar.name AS artist, t.album_id, al.ti
        dj.bpm AS dj_bpm, dj.beat_s AS dj_beat_s, dj.downbeat_s AS dj_downbeat_s, dj.beats_per_bar AS dj_beats_per_bar,
        dj.grid_stable AS dj_grid_stable, dj.key AS dj_key, dj.camelot AS dj_camelot, dj.mix_in_s AS dj_mix_in_s,
        dj.mix_out_s AS dj_mix_out_s, dj.intro_end_s AS dj_intro_end_s, dj.outro_start_s AS dj_outro_start_s,
-       dj.last_beat_s AS dj_last_beat_s, dj.energy AS dj_energy"""
+       dj.last_beat_s AS dj_last_beat_s, dj.energy AS dj_energy, t.composer, t.work, t.movement, t.movement_no"""
 TRACK_FROM = """FROM tracks t JOIN artists ar ON ar.id = t.artist_id JOIN albums al ON al.id = t.album_id
 LEFT JOIN user_tracks ut ON ut.track_id = t.id AND ut.user_id = ?
 LEFT JOIN track_explicit fx ON fx.track_id = t.id
@@ -78,6 +78,17 @@ def track_dict(r: sqlite3.Row) -> dict:
     }
     if r["missing"]:
         d["missing"] = True
+    keys = r.keys()
+    if "work" in keys:  # v10 classical fields (only when set)
+        if r["composer"]:
+            d["composer"] = r["composer"]
+        if r["work"]:
+            d["work"] = r["work"]
+            d["workId"] = classical.work_id(r["album_id"], r["work"])
+            if r["movement"]:
+                d["movement"] = r["movement"]
+            if r["movement_no"] is not None:
+                d["movementNo"] = r["movement_no"]
     rg = loudness.replay_gain(r)
     if rg is not None:
         d["replayGain"] = rg

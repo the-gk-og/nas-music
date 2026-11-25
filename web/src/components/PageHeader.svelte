@@ -23,7 +23,7 @@
     menu,
   }: {
     item: ShelfItem;
-    kind: 'album' | 'artist' | 'playlist' | 'mix' | 'smart_list' | 'smart_playlist' | 'genre';
+    kind: 'album' | 'artist' | 'playlist' | 'mix' | 'smart_list' | 'smart_playlist' | 'genre' | 'work';
     label: string;
     meta?: string;
     onplay?: () => void;
@@ -34,7 +34,7 @@
 
   const styleKind = $derived(kind === 'album' || kind === 'artist' ? kind : 'playlist');
   const style = $derived<PageStyle>(appearance.pageStyle(styleKind));
-  const pinKind = $derived(kind);
+  const pinKind = $derived(kind === 'work' ? null : kind); // v10 works can't be pinned
   let color = $state('rgb(40,40,40)');
   let menuOpen = $state(false);
 

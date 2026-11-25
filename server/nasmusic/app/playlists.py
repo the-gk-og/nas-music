@@ -103,10 +103,13 @@ def _playlist_summary(conn: sqlite3.Connection, row: sqlite3.Row, uid: str | Non
         m = conn.execute("SELECT role FROM playlist_members WHERE playlist_id = ? AND user_id = ?",
                          (row["id"], uid)).fetchone()
         role = m[0] if m else "viewer"
+    viewer = uid if uid is not None else row["user_id"]
+    folder = conn.execute("SELECT folder_id FROM playlist_folder_items WHERE user_id = ? AND playlist_id = ?",
+                          (viewer, row["id"])).fetchone()
     return {"id": row["id"], "name": row["name"], "createdAt": row["created_at"], "updatedAt": row["updated_at"],
             "trackCount": s[0], "durationS": round(s[1], 3), "ownerId": row["user_id"],
             "owner": owner[0] if owner else None, "role": role, "rev": row["rev"], "memberCount": members,
-            "collaborative": members > 0}
+            "collaborative": members > 0, "folderId": folder[0] if folder else None}
 
 
 def list_playlists(conn: sqlite3.Connection, uid: str) -> list[dict]:
@@ -187,16 +190,23 @@ def _insert(conn: sqlite3.Connection, pid: str, uid: str, track_ids: list[str], 
 # ---------- writing ----------
 
 
-def create_playlist(conn: sqlite3.Connection, uid: str, name: str, track_ids: list[str] | None = None) -> dict:
+def create_playlist(conn: sqlite3.Connection, uid: str, name: str, track_ids: list[str] | None = None,
+                    folder_id: str | None = None) -> dict:
     ids = list(track_ids or [])
     _check_tracks(conn, ids)
     pid = uuid.uuid4().hex
     now = now_iso()
     with _tx(conn):
+        if folder_id is not None and conn.execute("SELECT 1 FROM playlist_folders WHERE id = ? AND user_id = ?",
+                                                  (folder_id, uid)).fetchone() is None:
+            raise BadRequest("no such folder")
         conn.execute("INSERT INTO playlists (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
                      (pid, uid, name.strip()[:200] or "Playlist", now, now))
         _insert(conn, pid, uid, ids, [float(i + 1) for i in range(len(ids))])
         _log(conn, pid, uid, "create", count=len(ids))
+        if folder_id is not None:  # v10
+            conn.execute("INSERT INTO playlist_folder_items (user_id, playlist_id, folder_id) VALUES (?, ?, ?)",
+                         (uid, pid, folder_id))
     return get_playlist(conn, uid, pid)
 
 
@@ -357,6 +367,8 @@ def remove_member(conn: sqlite3.Connection, uid: str, pid: str, member_id: str) 
         if conn.execute("DELETE FROM playlist_members WHERE playlist_id = ? AND user_id = ?",
                         (pid, member_id)).rowcount != 1:
             raise NotFound("not a member")
+        # v10: their filing of it into their folders goes with their access
+        conn.execute("DELETE FROM playlist_folder_items WHERE user_id = ? AND playlist_id = ?", (member_id, pid))
         _touch(conn, pid)
         _log(conn, pid, uid, "leave" if member_id == uid else "member_remove", user=u[0] if u else None)
 
