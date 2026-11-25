@@ -7,6 +7,10 @@ Resumable and interrupt-safe:
   'pending' rows, which the next run picks up again.
 * Failures are recorded as 'failed' with the error and retried after `ai.analysis.retry_failed_days`
   (or immediately if the file's mtime changes).
+* Results follow the audio, not the file (schema v13, see `audiohash`): before decoding a track, its
+  audio-content hash is looked up. A retag (new mtime, same audio) just re-stamps the existing row, and a
+  moved/renamed file or a second copy gets the row of the track that already has that audio. Rows analysed
+  before v13 get their hash in the background (`audiohash.backfill`) after the pending work.
 
 Extraction runs in a small spawn-based process pool (default 2 workers): spawn, not fork, because the
 server process has threads (uvicorn, APScheduler) and TensorFlow does not survive fork.
@@ -24,6 +28,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from . import audiohash
 from .common import BASIC_VERSION, iso, load_settings, now_utc, to_blob, transaction
 from .extractors import Features, effective_version, make_extractor
 
@@ -64,7 +69,7 @@ def _excerpt_args(settings) -> tuple[int, float]:
 def pending_tracks(conn: sqlite3.Connection, version: str, retry_failed_days: float,
                    limit: int | None = None) -> list[sqlite3.Row]:
     sql = """
-        SELECT t.id, t.path, t.duration_s
+        SELECT t.id, t.path, t.duration_s, t.mtime, t.flac_bytes
         FROM tracks t
         LEFT JOIN features f ON f.track_id = t.id AND f.model_version = :v
         LEFT JOIN analysis_jobs j ON j.track_id = t.id AND j.model_version = :v
@@ -92,25 +97,63 @@ def _set_job(conn: sqlite3.Connection, track_id: str, version: str, status: str,
     )
 
 
-def write_features(conn: sqlite3.Connection, track_id: str, version: str, f: Features | dict) -> None:
+def write_features(conn: sqlite3.Connection, track_id: str, version: str, f: Features | dict,
+                   audio_hash: str | None = None) -> None:
     d = f if isinstance(f, dict) else {**asdict(f), "embedding": f.embedding.astype("<f4").tobytes()}
     emb = d["embedding"] if isinstance(d["embedding"], bytes) else to_blob(d["embedding"])
     with transaction(conn):
         conn.execute(
             "INSERT OR REPLACE INTO features (track_id, model_version, embedding, dims, bpm, key, energy, "
-            "danceability, tags, analysed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "danceability, tags, analysed_at, audio_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (track_id, version, emb, len(emb) // 4, d.get("bpm"), d.get("key"), d.get("energy"),
-             d.get("danceability"), json.dumps(d.get("tags") or {}), iso()),
+             d.get("danceability"), json.dumps(d.get("tags") or {}), iso(), audio_hash),
         )
         _set_job(conn, track_id, version, "done")
 
 
-def analyse_pending(conn: sqlite3.Connection, cfg, limit: int | None = None, workers: int | None = None) -> int:
+def reuse_features(conn: sqlite3.Connection, track_id: str, version: str, audio_hash: str | None) -> bool:
+    """Satisfy `track_id` from an existing `features` row with the same audio, without decoding anything.
+    Its own row (a retag) is re-stamped; another track's row (a move, rename or copy) is copied.
+    Returns False if no row has this audio yet."""
+    if not audio_hash:
+        return False
+    src = conn.execute(
+        "SELECT track_id FROM features WHERE audio_hash = ? AND model_version = ? "
+        "ORDER BY track_id = ? DESC, analysed_at DESC LIMIT 1", (audio_hash, version, track_id)).fetchone()
+    if src is None:
+        return False
+    with transaction(conn):
+        if src[0] == track_id:
+            conn.execute("UPDATE features SET analysed_at = ? WHERE track_id = ? AND model_version = ?",
+                         (iso(), track_id, version))
+        else:
+            conn.execute(
+                "INSERT OR REPLACE INTO features (track_id, model_version, embedding, dims, bpm, key, energy, "
+                "danceability, tags, analysed_at, audio_hash) SELECT ?, model_version, embedding, dims, bpm, key, "
+                "energy, danceability, tags, ?, audio_hash FROM features WHERE track_id = ? AND model_version = ?",
+                (track_id, iso(), src[0], version))
+        _set_job(conn, track_id, version, "done")
+    return True
+
+
+BACKFILL_BUDGET_S = 20 * 60
+
+
+def analyse_pending(conn: sqlite3.Connection, cfg, limit: int | None = None, workers: int | None = None,
+                    backfill_budget_s: float = BACKFILL_BUDGET_S) -> int:
+    """Analyse what `pending_tracks` returns; returns how many tracks got features (decoded or reused)."""
     settings = load_settings(conn)
     version = effective_version(cfg.model_version)
+    root = cfg.library_root if isinstance(cfg.library_root, Path) else Path(cfg.library_root)  # keeps upload routing
     todo = pending_tracks(conn, version, settings.num("ai.analysis.retry_failed_days"), limit)
-    if not todo:
-        return 0
+    done = _analyse(conn, cfg, settings, version, root, todo, workers) if todo else 0
+    if backfill_budget_s > 0:
+        audiohash.backfill(conn, root, "features", "model_version", version, time_budget_s=backfill_budget_s)
+    return done
+
+
+def _analyse(conn: sqlite3.Connection, cfg, settings, version: str, root: Path, todo: list[sqlite3.Row],
+             workers: int | None) -> int:
     workers = max(1, int(workers or settings.int("ai.analysis.workers")))
     max_seconds = settings.num("ai.analysis.max_seconds")
     log.info("analysing %d tracks with %s (%d workers)", len(todo), version, workers)
@@ -119,24 +162,33 @@ def analyse_pending(conn: sqlite3.Connection, cfg, limit: int | None = None, wor
         for row in todo:
             _set_job(conn, row["id"], version, "pending")
 
-    done = 0
-    root = cfg.library_root if isinstance(cfg.library_root, Path) else Path(cfg.library_root)  # keeps upload routing
+    done = reused = 0
     ctx = mp.get_context("spawn")
-    pool = ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_init_worker,
-                               initargs=(version, str(cfg.data_dir), max_seconds, *_excerpt_args(settings)))
-    in_flight: dict[Future, sqlite3.Row] = {}
+    pool: ProcessPoolExecutor | None = None  # started on the first track that really needs decoding
+    in_flight: dict[Future, tuple[sqlite3.Row, str | None]] = {}
     queue = list(todo)
     started = time.monotonic()
     try:
         while queue or in_flight:
             while queue and len(in_flight) < workers * 2:
                 row = queue.pop(0)
-                in_flight[pool.submit(_extract, str(root / row["path"]), row["duration_s"])] = row
+                h = audiohash.current(conn, root, row["id"], row["path"], row["mtime"], row["flac_bytes"])
+                if reuse_features(conn, row["id"], version, h):
+                    done += 1
+                    reused += 1
+                    continue
+                if pool is None:
+                    pool = ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=_init_worker,
+                                               initargs=(version, str(cfg.data_dir), max_seconds,
+                                                         *_excerpt_args(settings)))
+                in_flight[pool.submit(_extract, str(root / row["path"]), row["duration_s"])] = (row, h)
+            if not in_flight:
+                continue
             finished, _ = wait(in_flight, return_when=FIRST_COMPLETED)
             for fut in finished:
-                row = in_flight.pop(fut)
+                row, h = in_flight.pop(fut)
                 try:
-                    write_features(conn, row["id"], version, fut.result())
+                    write_features(conn, row["id"], version, fut.result(), h)
                     done += 1
                 except Exception as e:
                     msg = f"{type(e).__name__}: {e}"[:500]
@@ -149,8 +201,10 @@ def analyse_pending(conn: sqlite3.Connection, cfg, limit: int | None = None, wor
                 rate = done / (time.monotonic() - started)
                 log.info("analysed %d/%d (%.2f tracks/s)", done, len(todo), rate)
     finally:
-        pool.shutdown(wait=True, cancel_futures=True)
-    log.info("analysis finished: %d analysed, %d failed/left", done, len(todo) - done)
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
+    log.info("analysis finished: %d analysed (%d reused by audio hash), %d failed/left", done, reused,
+             len(todo) - done)
     return done
 
 

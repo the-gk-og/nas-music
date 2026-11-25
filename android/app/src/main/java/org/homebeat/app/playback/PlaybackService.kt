@@ -1267,6 +1267,8 @@ class PlaybackService : MediaLibraryService() {
             val sp = SpokenMedia.item(item) ?: return item
             return SpokenMedia.mediaItems(sp, c.spoken.downloads::file).getOrNull(SpokenMedia.part(item)) ?: item
         }
+        // A song stored on the phone plays straight from MediaStore.
+        org.homebeat.app.local.LocalLibrary.contentUri(item.mediaId)?.let { return item.buildUpon().setUri(it).build() }
         val local = c.library.localPath(item.mediaId)?.let(::File)?.takeIf { it.exists() }
         val uri = local?.let(Uri::fromFile)
             ?: Uri.parse(MediaItems.streamUrl(item.mediaId, currentSpec()))
@@ -1310,7 +1312,9 @@ class PlaybackService : MediaLibraryService() {
         if (item == null || uri == null) { c.nowFormat.value = null; return }
         val id = item.mediaId
         scope.launch {
-            val nf = if (uri.scheme == "file") {
+            val nf = if (org.homebeat.app.local.LocalIds.isLocal(id)) {
+                NowFormat(id, "On this phone")
+            } else if (uri.scheme == "file") {
                 val d = withContext(Dispatchers.IO) { c.db.downloads().completed(id) }
                 if (d != null && d.format != "flac") NowFormat(id, "Opus ${if (d.kbps > 0) d.kbps else 160}", offline = true)
                 else NowFormat(id, originalLabel(id) ?: "Original file", offline = true)

@@ -1,4 +1,4 @@
--- Homebeat shared schema v12 (SQLite, WAL mode). Contract between server core and homebeat.ai.
+-- Homebeat shared schema v13 (SQLite, WAL mode). Contract between server core and homebeat.ai.
 -- v2 (docs/v2.md §2): multi-user. The music library and audio analysis are shared; everything about
 -- listening is per user. v3 (docs/v3-ux.md phase 1) adds pins, toget, catalog_items and queue source/radio
 -- columns. v4 adds lyrics_cache (LRCLIB) and bug_reports. v5 adds admin tag overrides (tracks.file_tags,
@@ -29,9 +29,11 @@
 -- v11 adds library cleanup: library_removed (the admin trash; tracks.missing = 3) and lossless_checks (the
 -- fake-lossless checker's spectral verdicts).
 -- v12 adds song credits (credit_lookups, track_credits: producers, songwriters, musicians from MusicBrainz).
+-- v13 adds audio-content hashes (audio_hashes, features.audio_hash, track_dj.audio_hash) so a retag or a move
+-- reuses the existing audio analysis instead of redoing it.
 -- Server core writes: users, invites, artists, albums, tracks, user_tracks, events, devices, pair_codes,
 --   playlists, queues, lyrics_overrides, playback_state, user_settings.
--- AI writes: features, analysis_jobs, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
+-- AI writes: features, analysis_jobs, audio_hashes, taste_snapshots, mixes, mix_tracks, suggestions (+ suggestions.status
 --   is also written by server core when a user answers), release_radar, blend_tracks (+ blends.match/built_at),
 --   radio_sessions, radio_stations, radio_feedback, track_dj.
 -- Server core writes blends / blend_members (membership and consent); the AI only reads them.
@@ -556,8 +558,10 @@ CREATE TABLE IF NOT EXISTS features (          -- global: audio analysis is shar
     danceability  REAL,                -- 0..1
     tags          TEXT,                -- JSON {"genre:rock": 0.8, "mood:happy": 0.4, ...}
     analysed_at   TEXT NOT NULL,
+    audio_hash    TEXT,                -- v13: audio_hashes.audio_hash of the file analysed (NULL = not known yet)
     PRIMARY KEY (track_id, model_version)
 );
+CREATE INDEX IF NOT EXISTS features_audio_hash ON features(audio_hash, model_version);
 
 CREATE TABLE IF NOT EXISTS analysis_jobs (     -- global
     track_id      TEXT NOT NULL REFERENCES tracks(id),
@@ -596,8 +600,23 @@ CREATE TABLE IF NOT EXISTS track_dj (
     energy_curve   TEXT,                   -- JSON [0..1, ...], one value per curve_step_s
     curve_step_s   REAL,
     duration_s     REAL,
-    analysed_at    TEXT NOT NULL
+    analysed_at    TEXT NOT NULL,
+    audio_hash     TEXT                    -- v13: audio_hashes.audio_hash of the file analysed (NULL = not known yet)
 );
+CREATE INDEX IF NOT EXISTS track_dj_audio_hash ON track_dj(audio_hash);
+
+-- v13 audio-content hashes (global, AI writes; homebeat.ai.audiohash). A hash of the audio payload only (tags,
+-- cover art and padding excluded), so a retag or a move/rename keeps the same hash. The analysers reuse a
+-- `features` / `track_dj` row with the same audio_hash instead of decoding the file again. Recomputed when
+-- tracks.mtime or tracks.flac_bytes change.
+CREATE TABLE IF NOT EXISTS audio_hashes (
+    track_id     TEXT PRIMARY KEY REFERENCES tracks(id),
+    mtime        REAL NOT NULL,            -- tracks.mtime the hash was computed from
+    bytes        INTEGER NOT NULL,         -- tracks.flac_bytes the hash was computed from
+    audio_hash   TEXT,                     -- '<scheme>:<hex>'; NULL when the file could not be read
+    computed_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audio_hashes_hash ON audio_hashes(audio_hash);
 
 CREATE TABLE IF NOT EXISTS taste_snapshots (
     id            TEXT PRIMARY KEY,

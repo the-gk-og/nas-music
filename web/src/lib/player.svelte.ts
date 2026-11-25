@@ -120,6 +120,10 @@ interface LocalPrefs {
   sinkId: string;
 }
 
+const EQ_PER_DEVICE_KEY = 'nm.eq.perDevice';
+/** Profile key used for every output when per-device EQ is off. */
+export const ALL_OUTPUTS_EQ = '*all';
+
 export class Player {
   // ---- queues ----
   queues = $state<Queue[]>([]);
@@ -364,8 +368,9 @@ export class Player {
     this.outputKey = prefs.outputKey;
     this.sinkId = prefs.sinkId;
     this.profiles = loadProfiles(storage);
+    this.eqPerDevice = loadJson<boolean>(EQ_PER_DEVICE_KEY, true);
     this.listening = loadListening(storage);
-    this.eq = this.profiles[this.outputKey] ?? defaultEq();
+    this.eq = this.profiles[this.eqKey] ?? defaultEq();
 
     this.setupAudio();
     this.setupMediaSession();
@@ -931,9 +936,30 @@ export class Player {
     else if (this.audio) this.audio.volume = s.volume;
   }
 
+  /** On: each output device keeps its own EQ (switched with the output). Off: one EQ for all outputs. */
+  eqPerDevice = $state(true);
+
+  /** The saved EQ profile in use: the output's own, or the shared one. */
+  get eqKey(): string {
+    return this.eqPerDevice ? this.outputKey : ALL_OUTPUTS_EQ;
+  }
+
+  setEqPerDevice(on: boolean) {
+    if (on === this.eqPerDevice) return;
+    // Turning it off: the shared EQ starts as what's playing now, so the sound doesn't jump.
+    if (!on && !this.profiles[ALL_OUTPUTS_EQ]) {
+      this.profiles[ALL_OUTPUTS_EQ] = { ...this.eq };
+      saveProfiles(storage, this.profiles);
+    }
+    this.eqPerDevice = on;
+    saveJson(EQ_PER_DEVICE_KEY, on);
+    this.eq = this.profiles[this.eqKey] ?? defaultEq();
+    this.applyEq();
+  }
+
   setEq(patch: Partial<EqSettings>) {
     this.eq = { ...this.eq, ...patch };
-    this.profiles[this.outputKey] = { ...this.eq };
+    this.profiles[this.eqKey] = { ...this.eq };
     saveProfiles(storage, this.profiles);
     this.applyEq();
   }
@@ -1000,7 +1026,7 @@ export class Player {
   useOutputProfile(key: string) {
     if (key === this.outputKey) return;
     this.outputKey = key;
-    this.eq = this.profiles[key] ?? { ...defaultEq() };
+    this.eq = this.profiles[this.eqKey] ?? { ...defaultEq() };
     this.applyEq();
     this.saveLocal();
   }

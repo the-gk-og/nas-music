@@ -9,7 +9,7 @@ import java.nio.ByteOrder
 
 /**
  * ExoPlayer audio processor running [EqEngine] on 16-bit or float PCM, mono or stereo. Settings
- * come from [current] and are re-read every buffer, so profile changes apply within ~20 ms.
+ * come from [current] and are re-read every buffer; changes glide in over a few ms instead of rebuilding the filters.
  */
 @UnstableApi
 class EqAudioProcessor(private val current: () -> EqSettings) : BaseAudioProcessor() {
@@ -31,7 +31,9 @@ class EqAudioProcessor(private val current: () -> EqSettings) : BaseAudioProcess
         if (remaining == 0) return
         val samples = remaining / bytesPerSample
         val s = current()
-        val e = engine?.takeIf { it.settings == s && it.sampleRate == fmt.sampleRate && it.channels == fmt.channelCount }
+        // Same stream: retune in place (filter state kept, gains glide) so moving a slider doesn't click.
+        val e = engine?.takeIf { it.sampleRate == fmt.sampleRate && it.channels == fmt.channelCount }
+            ?.also { if (it.settings != s) it.update(s) }
             ?: EqEngine(s, fmt.sampleRate, fmt.channelCount).also { engine = it }
 
         val out = replaceOutputBuffer(remaining)

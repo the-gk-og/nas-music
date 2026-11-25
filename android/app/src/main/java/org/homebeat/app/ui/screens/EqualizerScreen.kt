@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material.icons.filled.Waves
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,10 +64,12 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import org.homebeat.app.AppContainer
+import org.homebeat.app.eq.EqBand
+import org.homebeat.app.eq.EqEngine
 import org.homebeat.app.eq.EqSettings
 import org.homebeat.app.ui.LocalUi
 
-/** Equalizer per audio output (docs/v2.md §6): 10-band page and effects page. */
+/** Equalizer per audio output (docs/v2.md §6): bands page (10-band graphic or parametric) and effects page. */
 @Composable
 fun EqualizerScreen(c: AppContainer) {
     val ui = LocalUi.current
@@ -90,7 +93,7 @@ fun EqualizerScreen(c: AppContainer) {
                 Row(Modifier.clickable { outputs = true }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(outputIcon(editing.kind), null, tint = MaterialTheme.colorScheme.primary)
                     Text(
-                        editing.label + if (editing.key == output.key) "" else "  (not connected)",
+                        editing.label + if (editing.key == output.key || editing.kind == "all") "" else "  (not connected)",
                         color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f).padding(start = 12.dp),
                     )
                     Icon(Icons.Default.KeyboardArrowDown, "Choose output")
@@ -121,14 +124,29 @@ fun EqualizerScreen(c: AppContainer) {
 
 private fun outputIcon(kind: String) = when (kind) {
     "bluetooth" -> Icons.Default.Bluetooth
-    "wired" -> Icons.Default.Headphones
+    "wired", "usb" -> Icons.Default.Headphones
     else -> Icons.Default.Speaker
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun BandsPage(c: AppContainer, eq: EqSettings) {
     var presets by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = !eq.isParametric, onClick = { c.eq.update { it.copy(mode = EqSettings.GRAPHIC) } }, label = { Text("Graphic") })
+            FilterChip(selected = eq.isParametric, onClick = {
+                c.eq.update {
+                    // First time: start from the current sliders so switching doesn't change the sound.
+                    val bands = it.parametric.ifEmpty { EqBand.fromGraphic(it.bandsDb) }
+                    it.copy(mode = EqSettings.PARAMETRIC, parametric = bands, enabled = true)
+                }
+            }, label = { Text("Parametric") })
+        }
+        if (eq.isParametric) {
+            ParametricEqPage(c, eq)
+            return@Column
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = {}, shape = RoundedCornerShape(50)) { Icon(Icons.Default.Waves, null); Text("  10") }
             Box {
@@ -137,7 +155,7 @@ private fun BandsPage(c: AppContainer, eq: EqSettings) {
                     (EqSettings.PRESETS.keys + "Custom").forEach { name ->
                         DropdownMenuItem({ Text(name) }, {
                             presets = false
-                            EqSettings.PRESETS[name]?.let { bands -> c.eq.update { it.copy(bandsDb = bands, preset = name, enabled = true) } }
+                            EqSettings.PRESETS[name]?.let { bands -> c.eq.update { it.copy(bandsDb = bands, preset = name, enabled = true, mode = EqSettings.GRAPHIC) } }
                         })
                     }
                 }
@@ -201,7 +219,7 @@ private fun EffectsPage(c: AppContainer, eq: EqSettings, volume: Float) {
         HorizontalDivider(Modifier.padding(vertical = 16.dp))
         Text("Preamp", fontWeight = FontWeight.Bold)
         Row(Modifier.padding(vertical = 8.dp).border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))) {
-            listOf(Triple("Headroom", "-6 dB", -6f), Triple("Off", "0 dB", 0f), Triple("Boost", "+1 dB", 1f)).forEach { (name, sub, db) ->
+            listOf(Triple("Quieter", "-3 dB", -3f), Triple("Auto", "0 dB", 0f), Triple("Louder", "+3 dB", 3f)).forEach { (name, sub, db) ->
                 val sel = eq.preampDb == db
                 Column(
                     Modifier.clickable { c.eq.update { it.copy(preampDb = db, enabled = true) } }
@@ -215,6 +233,11 @@ private fun EffectsPage(c: AppContainer, eq: EqSettings, volume: Float) {
             }
         }
         Text("%+.1f dB".format(eq.preampDb), style = MaterialTheme.typography.bodySmall)
+        val auto = remember(eq) { EqEngine.headroomDb(eq) }
+        Text(
+            if (auto < -0.05) "Auto headroom %.1f dB keeps your boosts from clipping".format(auto) else "Auto headroom: nothing to take off",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Slider(eq.preampDb, { v -> c.eq.update { it.copy(preampDb = (v * 2).roundToInt() / 2f, enabled = true) } }, valueRange = -12f..6f, modifier = Modifier.padding(horizontal = 24.dp))
         HorizontalDivider(Modifier.padding(vertical = 16.dp))
         Text("Volume", fontWeight = FontWeight.Bold)

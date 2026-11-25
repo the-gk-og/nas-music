@@ -202,7 +202,12 @@ def _create_indexes(conn: sqlite3.Connection, stmts: list[str]) -> None:
         if s.upper().startswith("CREATE INDEX"):
             m = _INDEX_TABLE.search(s)
             if m and _table_exists(conn, m.group(1)):
-                conn.execute(s)
+                try:
+                    conn.execute(s)
+                except sqlite3.OperationalError as e:
+                    # an index on a column a later step adds (e.g. v13 features.audio_hash): that step makes it
+                    if "no such column" not in str(e):
+                        raise
 
 
 # ---------- v2 -> v3 (docs/v3-ux.md phase 1): additive only ----------
@@ -634,4 +639,43 @@ def migrate_v11_to_v12(conn: sqlite3.Connection, schema_sql: str, make_backup: b
         conn.execute("ROLLBACK")
         raise
     log.warning("schema v11 -> v12 done")
+    return True
+
+
+# ---------- v12 -> v13 (additive): audio-content hashes ----------
+
+V13_TABLES = ("audio_hashes",)
+V13_COLUMNS = (("features", "audio_hash", "TEXT"), ("track_dj", "audio_hash", "TEXT"))
+
+
+def migrate_v12_to_v13(conn: sqlite3.Connection, schema_sql: str, make_backup: bool = True) -> bool:
+    """audio_hashes + features/track_dj.audio_hash (additive). Existing analysis is kept: rows start with
+    audio_hash NULL and the analysers fill it in the background (homebeat.ai.audiohash.backfill).
+    Returns True if it migrated."""
+    if current_version(conn) != 12:
+        return False
+    if make_backup:
+        dest = backup(conn, "v12-backup")
+        if dest:
+            log.warning("schema v12 -> v13: backed up the database to %s", dest)
+    stmts = statements(schema_sql)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if current_version(conn) != 12:
+            conn.execute("ROLLBACK")
+            return False
+        for table, col, decl in V13_COLUMNS:
+            if _table_exists(conn, table) and col not in _columns(conn, table):
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        for t in V13_TABLES:
+            if not _table_exists(conn, t):
+                conn.execute(_create_table(stmts, t))
+        _create_indexes(conn, stmts)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (13)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    log.warning("schema v12 -> v13 done")
     return True

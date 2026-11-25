@@ -58,6 +58,9 @@ class QueueSync(private val api: () -> HomebeatApi, private val scope: Coroutine
         val seq = ++createSeq
         _currentId.value = null
         pendingProgress = null
+        // A list with songs stored on the phone can't be a server queue (the server doesn't know them):
+        // it plays as a phone-only queue, like a podcast.
+        if (org.homebeat.app.local.LocalIds.anyLocal(tracks)) return scope.launch { }
         return scope.launch {
             runCatching { api().createQueue(NewQueue(name, tracks.map { it.id }, startIndex)) }
                 .onSuccess { q ->
@@ -76,10 +79,17 @@ class QueueSync(private val api: () -> HomebeatApi, private val scope: Coroutine
         scope.launch { runCatching { api().block(id) }; refresh() }
     }
 
+    /** Adding phone songs to a server queue: stop mirroring it (the server can't hold them). */
+    private fun detachForLocal(trackIds: List<String>): Boolean {
+        if (trackIds.none(org.homebeat.app.local.LocalIds::isLocal)) return false
+        setCurrent(null)
+        return true
+    }
+
     fun moved(from: Int, to: Int) = mutate { moveQueueTrack(it, MoveBody(from, to)) }
     fun removed(position: Int) = mutate { removeFromQueue(it, position) }
-    fun inserted(trackIds: List<String>, position: Int) = mutate { addToQueue(it, TrackIdsBody(trackIds, JsonPrimitive(position))) }
-    fun added(trackIds: List<String>, next: Boolean) =
+    fun inserted(trackIds: List<String>, position: Int) = if (detachForLocal(trackIds)) Unit else mutate { addToQueue(it, TrackIdsBody(trackIds, JsonPrimitive(position))) }
+    fun added(trackIds: List<String>, next: Boolean) = if (detachForLocal(trackIds)) Unit else
         mutate { addToQueue(it, TrackIdsBody(trackIds, JsonPrimitive(if (next) "next" else "end"))) }
     fun progress(index: Int, positionMs: Long) {
         if (_currentId.value == null) { pendingProgress = index to positionMs; return }

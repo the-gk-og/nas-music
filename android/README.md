@@ -70,6 +70,7 @@ Testing with the Desktop Head Unit (sideloaded APK):
 | `feedback` | play/skip classification (80 % rule), event recorder, batch uploader |
 | `sync` | `SyncWorker` (manifest diff, resumable downloads, storage limit, LAN-only unless allowed), scheduler |
 | `voice` | Mic button in search: offline speech-to-text with Vosk (model downloaded on first use, ~40 MB, kept in app storage), text sent to `POST /me/voice/command`, `local` answers played/controlled on this phone |
+| `local` | Music on this phone (Settings, off by default): MediaStore scan (optionally chosen folders) into normal `Track`s with `local:` ids, shown in Library → On this phone and in Search. They play from MediaStore, also offline, and never reach the server (no events, queues, playlists, Cast or Connect) |
 | `ui` | Today, Favourites, Library (artists → albums → tracks + search), Now Playing, Discover, Settings, Pairing |
 
 ## Licences

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ArrowLeft, AudioLines, Headphones, Waves } from '@lucide/svelte';
-  import { EQ_LABELS, EQ_MAX_DB, PRESET_NAMES, PRESETS, balanceLabel, presetFor, type PreampMode } from '../lib/eq';
+  import ParametricEq from '../components/ParametricEq.svelte';
+  import { EQ_LABELS, EQ_MAX_DB, PRESET_NAMES, PRESETS, autoHeadroomDb, balanceLabel, bandsFromGraphic, presetFor, type PreampMode } from '../lib/eq';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
   import type { AutoEqEntry } from '../lib/types';
@@ -48,6 +49,7 @@
 
   let page = $state<'bands' | 'effects'>('bands');
   const eq = $derived(player.eq);
+  const autoDb = $derived(autoHeadroomDb(eq));
 
   function setBand(i: number, v: number) {
     const bands = eq.bands.slice();
@@ -56,7 +58,12 @@
   }
   function preset(name: string) {
     if (name === 'Custom') return;
-    player.setEq({ bands: [...PRESETS[name]], preset: name, enabled: true });
+    player.setEq({ bands: [...PRESETS[name]], preset: name, enabled: true, mode: 'graphic' });
+  }
+  function toParametric() {
+    // First time: start from the sliders so switching doesn't change the sound.
+    const parametric = eq.parametric?.length ? eq.parametric : bandsFromGraphic(eq.bands);
+    player.setEq({ mode: 'parametric', parametric, enabled: true });
   }
 
   // Rotary knob: drag vertically or use the wheel / arrow keys.
@@ -132,14 +139,17 @@
     <span class="sep"></span>
     <input type="checkbox" class="switch" aria-label="Equalizer on" checked={eq.enabled} onchange={(e) => player.setEq({ enabled: e.currentTarget.checked })} />
   </div>
-  <p class="muted note">Settings are saved per output device. {player.sinkSupported ? '' : 'This browser cannot switch outputs; the profile follows the system default.'}</p>
+  <p class="muted note">{player.eqPerDevice ? 'Settings are saved per output device and switch with it.' : 'One EQ for all outputs (per-device EQ is off in Settings).'} {player.sinkSupported ? '' : 'This browser cannot switch outputs; the profile follows the system default.'}</p>
 
   {#if page === 'bands'}
     <div class="chips">
-      <span class="chip"><Waves size={20} /> 10</span>
-      <select class="chip sel" aria-label="Preset" value={presetFor(eq.bands)} onchange={(e) => preset(e.currentTarget.value)}>
-        {#each PRESET_NAMES as p}<option value={p} disabled={p === 'Custom'}>{p}</option>{/each}
-      </select>
+      <button class="chip" class:on={eq.mode !== 'parametric'} onclick={() => player.setEq({ mode: 'graphic' })}><Waves size={18} /> Graphic</button>
+      <button class="chip" class:on={eq.mode === 'parametric'} onclick={toParametric}><AudioLines size={18} /> Parametric</button>
+      {#if eq.mode !== 'parametric'}
+        <select class="chip sel" aria-label="Preset" value={presetFor(eq.bands)} onchange={(e) => preset(e.currentTarget.value)}>
+          {#each PRESET_NAMES as p}<option value={p} disabled={p === 'Custom'}>{p}</option>{/each}
+        </select>
+      {/if}
     </div>
     <div class="hp">
       <Headphones size={20} />
@@ -163,6 +173,9 @@
         <p class="muted small">Profiles come from the AutoEq project (MIT) and are fetched by your server when you pick one. They apply on this output only, with the EQ switched on.</p>
       </div>
     {/if}
+    {#if eq.mode === 'parametric'}
+      <ParametricEq />
+    {:else}
     <div class="bands" class:off={!eq.enabled}>
       {#each EQ_LABELS as label, i}
         <div class="band">
@@ -181,6 +194,7 @@
         </div>
       {/each}
     </div>
+    {/if}
   {:else}
     <div class="knobs">
       <div class="k">
@@ -202,12 +216,13 @@
     <div class="center">
       <b>Preamp</b>
       <div class="seg">
-        {#each [['headroom', 'Headroom', '-6 dB'], ['off', 'Off', '0 dB'], ['boost', 'Boost', '+1 dB']] as [k, a, b]}
+        {#each [['headroom', 'Quieter', '-3 dB'], ['off', 'Auto', '0 dB'], ['boost', 'Louder', '+3 dB']] as [k, a, b]}
           <button class:on={eq.preampMode === k} onclick={() => player.setEq({ preampMode: k as PreampMode, enabled: true })}>{a}<br />{b}</button>
         {/each}
       </div>
       <input type="range" min="-12" max="12" step="0.5" value={eq.preampDb} style:--p="{((eq.preampDb + 12) / 24) * 100}%" aria-label="Preamp adjust" oninput={(e) => player.setEq({ preampDb: +e.currentTarget.value, enabled: true })} />
       <span class="muted">{eq.preampDb > 0 ? '+' : ''}{eq.preampDb} dB</span>
+      <span class="muted small">{autoDb < -0.05 ? `Auto headroom ${autoDb.toFixed(1)} dB keeps your boosts from clipping` : 'Auto headroom: nothing to take off'}</span>
     </div>
     <hr />
     <div class="center">

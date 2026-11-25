@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -116,8 +117,26 @@ fun GlobalSearchScreen(c: AppContainer) {
             FilterChip(!lyricsOnly, { lyricsOnly = false }, label = { Text("All") })
             FilterChip(lyricsOnly, { lyricsOnly = true }, label = { Text("Lyrics") })
         }
-        val r = result ?: return@Column Message(if (query.isBlank()) "Search your library and beyond." else "Searching…")
         val q = query.trim()
+        // Songs stored on the phone (Settings → Music on this phone) are searched right here, so they show
+        // even offline or while the server is still answering.
+        val phoneReady = rememberLocalMusicReady(c)
+        val phoneTracks by c.localMusic.tracks.collectAsStateWithLifecycle()
+        val phoneHits = remember(q, phoneTracks, phoneReady) {
+            if (phoneReady && q.isNotEmpty()) org.homebeat.app.local.LocalIds.search(phoneTracks, q) else emptyList()
+        }
+        val r = result ?: run {
+            if (!lyricsOnly && phoneHits.isNotEmpty()) {
+                LazyColumn(Modifier.fillMaxSize()) {
+                    item(key = "h-phone") { ShelfHeader("On this phone") }
+                    songItems(c, phoneHits, "Search: ${q.take(12)}", PlaySource.SEARCH, searchQuery = q)
+                }
+                return@Column
+            }
+            return@Column Message(if (query.isBlank()) "Search your library and beyond." else "Searching…")
+        }
+        // A song the server also has shows once, as the server's.
+        val phone = org.homebeat.app.local.LocalIds.withoutNasCopies(phoneHits, r.tracks + r.lyrics.map { it.track })
         val lyricTracks = r.lyrics.map { it.track }
         fun playLyric(i: Int) = c.player.play(lyricTracks, i, PlaySource.SEARCH, "Lyrics: ${q.take(12)}", searchQuery = q)
         if (lyricsOnly) {
@@ -131,6 +150,8 @@ fun GlobalSearchScreen(c: AppContainer) {
             r.top?.let { top -> item(key = "top") { ShelfHeader("Top result"); TopResult(c, top, onSample = ::toggleSample, previewing = previewing) } }
             if (r.tracks.isNotEmpty()) item(key = "h-songs") { ShelfHeader("Songs") }
             songItems(c, r.tracks.take(8), "Search: ${q.take(12)}", PlaySource.SEARCH, searchQuery = q)
+            if (phone.isNotEmpty()) item(key = "h-phone") { ShelfHeader("On this phone") }
+            songItems(c, phone.take(8), "Search: ${q.take(12)}", PlaySource.SEARCH, searchQuery = q)
             if (r.albums.isNotEmpty()) item(key = "albums") {
                 ShelfHeader("Albums")
                 ShelfRow(c, r.albums.map { ShelfItem("album", it.id, it.title, it.artist, artUrl = org.homebeat.app.data.FeedRepository.art(it.id), album = it) })
@@ -153,7 +174,7 @@ fun GlobalSearchScreen(c: AppContainer) {
                 CatalogRow(item, previewing == item.id, onSample = { toggleSample(item) }, onAdd = { addToGet(item) }, onSimilar = { item.artist?.let { query = it } })
             }
             r.catalogError?.let { err -> item(key = "caterr") { Text("Online catalogue unavailable: $err", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(16.dp)) } }
-            if (r.tracks.isEmpty() && r.albums.isEmpty() && r.artists.isEmpty() && r.catalog.isEmpty() && r.lyrics.isEmpty()) item { Message("No results.") }
+            if (r.tracks.isEmpty() && phone.isEmpty() && r.albums.isEmpty() && r.artists.isEmpty() && r.catalog.isEmpty() && r.lyrics.isEmpty()) item { Message("No results.") }
         }
     }
 }

@@ -38,18 +38,24 @@ class ArtProvider : ContentProvider() {
         val dir = File(ctx.cacheDir, "art").apply { mkdirs() }
         val file = File(dir, req.fileName())
         if (file.length() > 0) { file.setLastModified(System.currentTimeMillis()); return file }
-        val app = ctx.applicationContext as? HomebeatApp ?: return null
-        val call = app.container.callFactory.newCall(Request.Builder().url(MediaItems.artUrl(req.albumId, req.size)).build())
-        call.timeout().timeout(15, TimeUnit.SECONDS)
-        val bytes = runCatching {
-            call.execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
-        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return null
+        val bytes = if (org.homebeat.app.local.LocalIds.isLocalAlbum(req.albumId)) {
+            org.homebeat.app.local.LocalLibrary.artBytes(ctx, req.albumId, req.size) ?: return null
+        } else serverArt(ctx, req) ?: return null
         // Write-then-rename so a reader never sees half a file.
         val tmp = File.createTempFile(req.fileName(), ".part", dir)
         tmp.writeBytes(bytes)
         if (!tmp.renameTo(file)) { tmp.delete(); return file.takeIf { it.length() > 0 } }
         trim(dir)
         return file
+    }
+
+    private fun serverArt(ctx: Context, req: ArtRequest): ByteArray? {
+        val app = ctx.applicationContext as? HomebeatApp ?: return null
+        val call = app.container.callFactory.newCall(Request.Builder().url(MediaItems.artUrl(req.albumId, req.size)).build())
+        call.timeout().timeout(15, TimeUnit.SECONDS)
+        return runCatching {
+            call.execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
+        }.getOrNull()?.takeIf { it.isNotEmpty() }
     }
 
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? = null

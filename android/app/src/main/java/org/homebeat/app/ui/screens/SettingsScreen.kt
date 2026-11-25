@@ -195,6 +195,10 @@ fun SettingsScreen(c: AppContainer) {
         OutlinedButton(enabled = settings.offlineFavourites || settings.smartDownloads, onClick = { SyncScheduler.syncNow(c.context) }) { Text("Sync now") }
 
         HorizontalDivider()
+        Section("Music on this phone")
+        LocalMusicSettings(c)
+
+        HorizontalDivider()
         Section("Family mode")
         org.homebeat.app.ui.FamilySettings(c)
 
@@ -205,6 +209,18 @@ fun SettingsScreen(c: AppContainer) {
         HorizontalDivider()
         Section("Playback")
         PlaybackSettings(c)
+        val perDeviceEq by c.eq.perDevice.collectAsStateWithLifecycle()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("EQ per output device")
+                Text(
+                    "On: speaker, wired, each Bluetooth device (headphones, car…) and USB DAC keep their own EQ, switched automatically. " +
+                        "Off: one EQ for everything.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Switch(perDeviceEq, { on -> c.eq.setPerDevice(on) })
+        }
 
         DjVoiceSettings(c) {
             HorizontalDivider()

@@ -24,6 +24,8 @@ class EventRecorder(
         rating: Int? = null,
         context: kotlinx.serialization.json.JsonObject? = null,
     ) {
+        // Songs stored on the phone aren't in the server's library: nothing to learn from or scrobble.
+        if (org.homebeat.app.local.LocalIds.isLocal(trackId)) return
         val online = isOnline()
         val e = EventEntity(
             id = UUID.randomUUID().toString(),
