@@ -6,7 +6,9 @@
   import { player } from './lib/player.svelte';
   import { session } from './lib/session.svelte';
   import { ui } from './lib/ui.svelte';
-  import { desktopInit } from './lib/desktop';
+  import { desktopInit } from './lib/desktop.svelte';
+  import { pwa } from './lib/pwa.svelte';
+  import OfflineBanner from './components/OfflineBanner.svelte';
   import ConnectScreen from './screens/ConnectScreen.svelte';
   import Home from './screens/Home.svelte';
   import ForYou from './screens/ForYou.svelte';
@@ -69,12 +71,24 @@
   }
 
   function afterSignIn() {
+    pwa.watch(refreshData);
     void player.init();
     void appearance.load();
     void library.refreshPlaylists();
     void library.refreshPins();
     void family.load();
     void notifications.load();
+  }
+
+  /** The server came back after being unreachable: reload what the offline shell couldn't fetch. */
+  function refreshData() {
+    void session.refresh();
+    void appearance.load();
+    void library.refreshPlaylists();
+    void library.refreshPins();
+    void family.load();
+    void notifications.load();
+    ui.toast('Connected to your server again');
   }
 
   function onSignedIn() {
@@ -144,6 +158,7 @@
   }
 
   onMount(() => {
+    pwa.init();
     void start();
     void desktopInit();
   });
@@ -191,6 +206,8 @@
     {/if}
   {/snippet}
 
+  <div class="appwrap">
+  <OfflineBanner />
   <div class="shell {form}" class:fullnow={fullNow} class:portrait={appearance.portrait}>
     {#if !(fullNow && form === 'phone')}<Nav />{/if}
     <main>
@@ -207,6 +224,7 @@
       <aside class="side">{#if fullNow}<Queues compact />{:else}<NowPlaying />{/if}</aside>
     {/if}
     {#if form === 'desktop'}<div class="playerbar"><PlayerBar /></div>{/if}
+  </div>
   </div>
   <Dialogs />
   <SelectionBar />
@@ -239,6 +257,16 @@
     to {
       transform: rotate(360deg);
     }
+  }
+  .appwrap {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .appwrap > .shell {
+    flex: 1;
+    min-height: 0;
+    height: auto;
   }
   .shell {
     height: 100%;
