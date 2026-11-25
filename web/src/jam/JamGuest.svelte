@@ -242,7 +242,7 @@
   });
 </script>
 
-<svelte:head><title>{snap ? `Jam with ${snap.jam.hostName}` : 'Jam'} · nas-music</title></svelte:head>
+<svelte:head><title>{snap ? `Jam with ${snap.jam.hostName}` : 'Jam'} · Homebeat</title></svelte:head>
 
 <main class="page">
   {#if phase === 'loading'}

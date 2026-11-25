@@ -1,4 +1,4 @@
-"""Spotify / Last.fm / M3U imports and M3U export (nasmusic.app.imports)."""
+"""Spotify / Last.fm / M3U imports and M3U export (homebeat.app.imports)."""
 from __future__ import annotations
 
 import io
@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from nasmusic.app import imports
+from homebeat.app import imports
 from tests.conftest import track_ids
 
 

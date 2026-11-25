@@ -81,7 +81,7 @@ class SessionStore {
     return isSameOrigin(origin) ? 'cookie' : 'bearer';
   }
 
-  /** Check the address answers like a nas-music server; returns server info (v1 servers: health only). */
+  /** Check the address answers like a Homebeat server; returns server info (v1 servers: health only). */
   async probe(address: string): Promise<{ origin: string; info: ServerInfo | null }> {
     const origin = normaliseServerAddress(address);
     const here = typeof location !== 'undefined' ? location.origin : '';
@@ -90,7 +90,7 @@ class SessionStore {
     try {
       await c.health();
     } catch (e) {
-      if (e instanceof ApiError) throw new Error(`That address answered, but not like a nas-music server (HTTP ${e.status}).`, { cause: e });
+      if (e instanceof ApiError) throw new Error(`That address answered, but not like a Homebeat server (HTTP ${e.status}).`, { cause: e });
       throw new Error(
         "Can't reach that server. Check the address; for a LAN address with a self-signed certificate, open it once in this browser and accept the certificate.",
         { cause: e },

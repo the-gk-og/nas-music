@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "nas-music"
+rootProject.name = "homebeat"
 include(":app")
 include(":wear")

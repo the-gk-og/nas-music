@@ -34,26 +34,26 @@ kotlin {
 val phoneShared = tasks.register<Sync>("syncPhoneSharedSources") {
     from(rootProject.file("app/src/main/java")) {
         include(
-            "org/nasmusic/app/net/**",
-            "org/nasmusic/app/data/api/**",
-            "org/nasmusic/app/eq/EqSettings.kt", // plain data classes referenced by NasMusicApi
-            "org/nasmusic/app/data/FeedRepository.kt",
-            "org/nasmusic/app/connect/ConnectProtocol.kt",
-            "org/nasmusic/app/pairing/SecureStore.kt",
-            "org/nasmusic/app/auth/AuthRepository.kt",
-            "org/nasmusic/app/sync/Downloader.kt",
-            "org/nasmusic/app/lyrics/LyricsTimeline.kt", // current lyric line on Now Playing
+            "org/homebeat/app/net/**",
+            "org/homebeat/app/data/api/**",
+            "org/homebeat/app/eq/EqSettings.kt", // plain data classes referenced by HomebeatApi
+            "org/homebeat/app/data/FeedRepository.kt",
+            "org/homebeat/app/connect/ConnectProtocol.kt",
+            "org/homebeat/app/pairing/SecureStore.kt",
+            "org/homebeat/app/auth/AuthRepository.kt",
+            "org/homebeat/app/sync/Downloader.kt",
+            "org/homebeat/app/lyrics/LyricsTimeline.kt", // current lyric line on Now Playing
         )
     }
     into(layout.buildDirectory.dir("generated/phoneShared"))
 }
 
 android {
-    namespace = "org.nasmusic.wear"
+    namespace = "org.homebeat.wear"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "org.nasmusic.wear"
+        applicationId = "org.homebeat.wear"
         // Wear OS 3 (Galaxy Watch 4 and newer).
         minSdk = 30
         targetSdk = 35

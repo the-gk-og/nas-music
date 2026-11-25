@@ -5,7 +5,7 @@ import httpx
 import pytest
 from mutagen.flac import FLAC
 
-from nasmusic.library.lrclib import Lrclib
+from homebeat.library.lrclib import Lrclib
 from tests.conftest import track_ids
 
 API = "/api/v1"
@@ -49,7 +49,7 @@ def test_get_hit_synced_and_cached(client, conn, lrc):
     assert r["lines"][0] == {"timeMs": 1000, "text": "la la"}
     q = dict(lrc.calls[0].url.params)
     assert q == {"artist_name": "Artist One", "track_name": "Song 1", "album_name": "First Album", "duration": "2"}
-    assert lrc.calls[0].headers["user-agent"] == "nas-music/9.9 (https://github.com/the-gk-og/nas-music)"
+    assert lrc.calls[0].headers["user-agent"] == "Homebeat/9.9 (https://github.com/the-gk-og/nas-music)"
     client.get(f"{API}/tracks/{tid}/lyrics")
     assert len(lrc.calls) == 1  # cached in the database
     assert conn.execute("SELECT status, lrclib_id FROM lyrics_cache").fetchone()[:] == ("found", 7)
@@ -156,7 +156,7 @@ def test_prefetch_stops_when_lrclib_is_down(client, conn, app, lrc):
 
 
 def test_strict_title():
-    from nasmusic.library.lrclib import strict_title
+    from homebeat.library.lrclib import strict_title
 
     assert strict_title("Song 2") != strict_title("Song 2 (Live)")
     assert strict_title("Café feat. X") == strict_title("cafe")

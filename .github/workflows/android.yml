@@ -6,7 +6,7 @@ name: android
 # Pull requests: build both debug APKs and the watch app + unit tests.
 # Pushes to main that touch the app: both APKs signed with the permanent release key (GitHub secrets),
 # version 0.1.<run number>, published as one GitHub Release:
-#   nasmusic-foss-v0.1.N.apk, nasmusic-full-v0.1.N.apk
+#   homebeat-foss-v0.1.N.apk, homebeat-full-v0.1.N.apk
 
 on:
   push:
@@ -68,22 +68,22 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           ./gradlew assembleFossRelease assembleFullRelease :wear:assembleRelease
-          mv app/build/outputs/apk/foss/release/app-foss-release.apk "nasmusic-foss-v0.1.${VERSION_CODE}.apk"
-          mv app/build/outputs/apk/full/release/app-full-release.apk "nasmusic-full-v0.1.${VERSION_CODE}.apk"
-          mv wear/build/outputs/apk/release/wear-release.apk "nasmusic-wear-v0.1.${VERSION_CODE}.apk"
+          mv app/build/outputs/apk/foss/release/app-foss-release.apk "homebeat-foss-v0.1.${VERSION_CODE}.apk"
+          mv app/build/outputs/apk/full/release/app-full-release.apk "homebeat-full-v0.1.${VERSION_CODE}.apk"
+          mv wear/build/outputs/apk/release/wear-release.apk "homebeat-wear-v0.1.${VERSION_CODE}.apk"
           rm -f "$RUNNER_TEMP/release.jks"
 
       - name: Build debug APKs (pull requests)
         if: github.event_name == 'pull_request'
         run: |
           ./gradlew assembleFossDebug assembleFullDebug :wear:assembleDebug
-          mv app/build/outputs/apk/foss/debug/app-foss-debug.apk "nasmusic-foss-v0.1.${VERSION_CODE}.apk"
-          mv app/build/outputs/apk/full/debug/app-full-debug.apk "nasmusic-full-v0.1.${VERSION_CODE}.apk"
+          mv app/build/outputs/apk/foss/debug/app-foss-debug.apk "homebeat-foss-v0.1.${VERSION_CODE}.apk"
+          mv app/build/outputs/apk/full/debug/app-full-debug.apk "homebeat-full-v0.1.${VERSION_CODE}.apk"
 
       - name: FOSS APK has no Google Play Services code
         run: |
-          scripts/check-no-gms.sh "nasmusic-foss-v0.1.${VERSION_CODE}.apk"
-          scripts/check-no-gms.sh --expect-gms "nasmusic-full-v0.1.${VERSION_CODE}.apk"
+          scripts/check-no-gms.sh "homebeat-foss-v0.1.${VERSION_CODE}.apk"
+          scripts/check-no-gms.sh --expect-gms "homebeat-full-v0.1.${VERSION_CODE}.apk"
 
       - name: Publish GitHub Release
         if: github.event_name != 'pull_request'
@@ -91,11 +91,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v0.1.${VERSION_CODE}"
-          gh release create "$tag" "nasmusic-foss-${tag}.apk" "nasmusic-full-${tag}.apk" "nasmusic-wear-${tag}.apk" \
+          gh release create "$tag" "homebeat-foss-${tag}.apk" "homebeat-full-${tag}.apk" "homebeat-wear-${tag}.apk" \
             --target "${{ github.sha }}" \
-            --title "nas-music ${tag}" \
+            --title "Homebeat ${tag}" \
             --notes "Android app build ${tag} from ${GITHUB_SHA::7}. Installs as an update over any earlier release.
-          nasmusic-foss: no Google code; cast to speakers through the server (Devices list).
-          nasmusic-full: also has a Google Cast button (needs Google Play Services on the phone).
-          nasmusic-wear: the Wear OS watch app." \
+          homebeat-foss: no Google code; cast to speakers through the server (Devices list).
+          homebeat-full: also has a Google Cast button (needs Google Play Services on the phone).
+          homebeat-wear: the Wear OS watch app." \
             --latest

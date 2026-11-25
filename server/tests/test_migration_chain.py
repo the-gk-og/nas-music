@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from nasmusic import db
-from nasmusic.db import migrations
+from homebeat import db
+from homebeat.db import migrations
 
 FIXTURES = Path(__file__).parent / "fixtures"
 OLD_VERSIONS = list(range(1, db.SCHEMA_VERSION))
@@ -115,7 +115,7 @@ def _assert_rows_kept(before: dict, conn: sqlite3.Connection, changed: dict[str,
 
 @pytest.fixture(scope="module")
 def fresh_shape(tmp_path_factory):
-    conn = db.connect(tmp_path_factory.mktemp("fresh") / "nasmusic.db")
+    conn = db.connect(tmp_path_factory.mktemp("fresh") / "homebeat.db")
     db.init(conn)
     yield _shape(conn)
     conn.close()
@@ -130,7 +130,7 @@ def test_every_old_version_has_a_fixture():
 
 
 def test_schema_sql_header_names_the_current_version():
-    assert db.schema_sql().startswith(f"-- nas-music shared schema v{db.SCHEMA_VERSION} ")
+    assert db.schema_sql().startswith(f"-- Homebeat shared schema v{db.SCHEMA_VERSION} ")
 
 
 def test_each_fixture_is_the_version_it_claims():
@@ -141,7 +141,7 @@ def test_each_fixture_is_the_version_it_claims():
 
 
 def test_fresh_install_is_current_version(tmp_path):
-    conn = db.connect(tmp_path / "nasmusic.db")
+    conn = db.connect(tmp_path / "homebeat.db")
     db.init(conn)
     assert migrations.current_version(conn) == db.SCHEMA_VERSION
     assert conn.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 1
@@ -151,7 +151,7 @@ def test_fresh_install_is_current_version(tmp_path):
 
 @pytest.mark.parametrize("version", OLD_VERSIONS)
 def test_migrated_schema_matches_fresh_install(tmp_path, version, fresh_shape):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     _make(path, version).close()
     conn = db.connect(path)
     db.init(conn, admin_password_hash="!")
@@ -162,12 +162,12 @@ def test_migrated_schema_matches_fresh_install(tmp_path, version, fresh_shape):
     detail = "\n".join(f"  {k}:\n    fresh:    {fresh_shape.get(k)}\n    migrated: {got.get(k)}" for k in diff[:10])
     assert not diff, f"v{version} -> v{db.SCHEMA_VERSION} differs from a fresh install in {len(diff)} places:\n{detail}"
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert len(list(tmp_path.glob("nasmusic.db.*-backup-*"))) == 1, "one backup per start, however many steps"
+    assert len(list(tmp_path.glob("homebeat.db.*-backup-*"))) == 1, "one backup per start, however many steps"
 
 
 @pytest.mark.parametrize("version", OLD_VERSIONS)
 def test_chain_is_idempotent(tmp_path, version):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     _make(path, version).close()
     conn = db.connect(path)
     db.init(conn, admin_password_hash="!")
@@ -175,14 +175,14 @@ def test_chain_is_idempotent(tmp_path, version):
     for _ in range(2):
         db.init(conn, admin_password_hash="!")
     assert _shape(conn) == shape
-    assert len(list(tmp_path.glob("nasmusic.db.*-backup-*"))) == 1
+    assert len(list(tmp_path.glob("homebeat.db.*-backup-*"))) == 1
 
 
 # ---------- no data is lost ----------
 
 @pytest.mark.parametrize("version", FILLABLE)
 def test_every_row_survives(tmp_path, version):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = _make(path, version)
     _fill(conn)
     before = _rows(conn)
@@ -199,7 +199,7 @@ def test_v1_rows_survive(tmp_path):
     they land); v3 -> v4 zeroes tracks.mtime so the next scan re-reads tags. Everything else is kept."""
     from tests.test_migration import make_v1
 
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = make_v1(path)
     before = _rows(conn)
     conn.close()
@@ -213,7 +213,7 @@ def test_v4_rows_survive(tmp_path):
     """v4 -> v5 renumbers playlist_tracks.position (fractional positions, same order)."""
     from tests.test_migration_v5 import make_v4
 
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = make_v4(path)
     order = [r[0] for r in conn.execute("SELECT track_id FROM playlist_tracks ORDER BY position")]
     before = _rows(conn)
@@ -228,7 +228,7 @@ def test_v4_rows_survive(tmp_path):
 
 @pytest.mark.parametrize("version", sorted(STEPS))
 def test_failed_step_rolls_back(tmp_path, monkeypatch, version):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = _make(path, version)
     _fill(conn)
     before_rows, before_shape = _rows(conn), _shape(conn)
@@ -253,7 +253,7 @@ def test_failed_step_rolls_back(tmp_path, monkeypatch, version):
 
 def test_failure_mid_chain_keeps_finished_steps_and_resumes(tmp_path, monkeypatch):
     """v5 started up with a failing v7 -> v8: v5 -> v6 -> v7 stay committed, the next start finishes the job."""
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = _make(path, 5)
     _fill(conn)
     before = _rows(conn)
@@ -274,5 +274,5 @@ def test_failure_mid_chain_keeps_finished_steps_and_resumes(tmp_path, monkeypatc
     db.init(conn)
     assert migrations.current_version(conn) == db.SCHEMA_VERSION
     _assert_rows_kept(before, conn)
-    backups = sorted(p.name.split(".")[2].split("-")[0] for p in tmp_path.glob("nasmusic.db.*-backup-*"))
+    backups = sorted(p.name.split(".")[2].split("-")[0] for p in tmp_path.glob("homebeat.db.*-backup-*"))
     assert backups == ["v5", "v7"], "each start backs up the version it starts from"

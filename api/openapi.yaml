@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: nas-music API
+  title: Homebeat API
   version: 0.12.0
   description: |
-    Contract between the nas-music server and its clients (Android app, web player, desktop app). All paths
+    Contract between the Homebeat server and its clients (Android app, web player, desktop app). All paths
     are under /api/v1. v2 (docs/v2.md): multi-user and invite-only; everything about listening is per user.
     Auth: `Authorization: Bearer <deviceToken>` on every endpoint except /health, /server-info, /auth/login,
     /auth/register and /pair. The web player may instead rely on the httpOnly `nm_session` cookie (same token)
@@ -3385,7 +3385,7 @@ paths:
       summary: |
         Admin only. Replace the database with this backup: a local one (id from GET /admin/backups) or, with
         source=offsite, an off-site one (name from GET /admin/backups/offsite). The file is checked first
-        (integrity, a nas-music database, not from a newer schema); a `prerestore` safety backup of the current
+        (integrity, a Homebeat database, not from a newer schema); a `prerestore` safety backup of the current
         database is taken; an older schema is migrated up. Applies at once, no restart. Devices paired after the
         backup was made are signed out (possibly including the caller).
       parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
@@ -3397,7 +3397,7 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/RestoreResult' } } }
         '404': { description: no such backup }
         '409': { description: from a newer server, or a backup/restore is running }
-        '422': { description: damaged or not a nas-music database }
+        '422': { description: damaged or not a Homebeat database }
         '502': { description: the off-site copy could not be fetched }
   /admin/backups/{id}:
     get:
@@ -3721,7 +3721,7 @@ paths:
   /me/scrobble/lastfm/connect:
     post:
       summary: |
-        v7. Step 1 of Last.fm web auth: open `authUrl` in a browser and approve nas-music there, then call
+        v7. Step 1 of Last.fm web auth: open `authUrl` in a browser and approve Homebeat there, then call
         /me/scrobble/lastfm/complete (poll it every few seconds; 409 until approved). 503 when the server has no
         `lastfm_api_key` / `lastfm_api_secret` (ScrobbleService.available false).
       responses:
@@ -4816,7 +4816,7 @@ components:
     OffsiteBackup:
       type: object
       properties:
-        name: { type: string, description: 'e.g. nasmusic-scheduled-20261124T041500Z.db.gz; the id for restore' }
+        name: { type: string, description: 'e.g. homebeat-scheduled-20261124T041500Z.db.gz; the id for restore' }
         kind: { type: string, enum: [manual, scheduled, prune, prerestore] }
         bytes: { type: integer, description: compressed size }
         createdAt: { type: string, format: date-time }

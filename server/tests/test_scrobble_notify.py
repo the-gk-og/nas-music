@@ -10,8 +10,8 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
-from nasmusic.app import notify, scrobble
-from nasmusic.core import get_setting, iso
+from homebeat.app import notify, scrobble
+from homebeat.core import get_setting, iso
 from tests.conftest import track_ids
 
 NOW = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
@@ -293,7 +293,7 @@ def test_import_and_remove(client, conn, long_tracks):
 
 
 def _add_album(conn, artist, album, titles, when):
-    from nasmusic.library.scanner import sha1
+    from homebeat.library.scanner import sha1
 
     ar = sha1(artist)
     conn.execute("INSERT OR IGNORE INTO artists (id, name, sort_name) VALUES (?, ?, ?)", (ar, artist, artist))

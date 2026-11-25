@@ -66,7 +66,7 @@
       const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `nas-music-data-${session.saved.username}.json`;
+      a.download = `homebeat-data-${session.saved.username}.json`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) {

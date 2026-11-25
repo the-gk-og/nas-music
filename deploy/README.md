@@ -21,7 +21,7 @@ Under **Datasets**, create (adjust `POOL` to your pool name):
 | --- | --- | --- |
 | `POOL/media/music` | Your FLAC library (probably exists already) | `apps` (568) needs read |
 | `POOL/apps/navidrome` | Navidrome database (Phase 1) | owner `apps` (568) |
-| `POOL/apps/nasmusic` | Custom server data (Phase 2+) | owner `apps` (568) |
+| `POOL/apps/homebeat` | Custom server data (Phase 2+) | owner `apps` (568) |
 
 To let the `apps` user read the music, edit the music dataset's ACL and add **read + execute** for user `apps`.
 
@@ -33,7 +33,7 @@ To let the `apps` user read the music, edit the music dataset's ACL and add **re
    That is `PASTE_TUNNEL_TOKEN_HERE`. Treat it like a password.
 4. **Public hostname**: subdomain `music`, your domain, service type **HTTP**, URL:
    - Phase 1: `navidrome:4533`
-   - Phase 2+: `nasmusic:8080`
+   - Phase 2+: `homebeat:8080`
 5. **Cloudflare Access**: leave it off for Phase 1. Navidrome has its own login, and third-party
    test apps can't send Access tokens. In Phase 2 we add an Access application for `music.<domain>`
    with two policies: **Service Auth** (a service token the app sends) and **email one-time PIN** for you
@@ -72,7 +72,7 @@ The server can identify songs itself and suggest tags that you review in the web
 (**Admin → Tag fixing**). Accepted suggestions are stored on the server as tag overrides; the music share
 stays read-only.
 1. Get a free AcoustID application key: sign in at https://acoustid.org/new-application, register an
-   application (any name, e.g. "nas-music"), copy its **API key**.
+   application (any name, e.g. "Homebeat"), copy its **API key**.
 2. Add it to `config.toml` in the data volume: `acoustid_api_key = "<key>"`, then restart the container.
 3. Admin → Tag fixing → **Run now** (it also runs every night at 05:00). Each run works for up to 50
    minutes and carries on next time: ~1,850 songs take one to two runs. Review albums, accept/reject, or
@@ -88,7 +88,7 @@ whichever device (or speaker) played it; unsent scrobbles are queued and retried
   https://listenbrainz.org/settings/. They can also import their ListenBrainz history so mixes learn from it
   (imported listens are marked and can be removed again).
 - **Last.fm** needs one API account for the server: sign in at https://www.last.fm/api/account/create,
-  create an application (name e.g. "nas-music"; callback URL can stay empty), then add to `config.toml`:
+  create an application (name e.g. "Homebeat"; callback URL can stay empty), then add to `config.toml`:
   `lastfm_api_key = "<API key>"` and `lastfm_api_secret = "<Shared secret>"`, and restart the container.
   Users then press **Connect Last.fm**, approve it on last.fm, and the app finishes the connection.
 - **New music added**: users switch on **Settings → Notifications → New music added**. After each scan that
@@ -98,7 +98,7 @@ whichever device (or speaker) played it; unsent scrobbles are queued and retried
 
 ## Getting the server image (Phase 2)
 
-GitHub Actions builds `ghcr.io/the-gk-og/nasmusic:latest` on every push to `main` that changes `server/`.
+GitHub Actions builds `ghcr.io/the-gk-og/homebeat:latest` on every push to `main` that changes `server/`.
 The repository is private, so the NAS needs a token to pull it:
 
 1. On GitHub: **Settings → Developer settings → Personal access tokens → Tokens (classic) → Generate new token**.
@@ -106,7 +106,7 @@ The repository is private, so the NAS needs a token to pull it:
 2. On TrueNAS: **System → Shell** (or SSH in), then log in and pull. Paste the token when it asks for a password:
    ```bash
    sudo docker login ghcr.io -u the-gk-og
-   sudo docker pull ghcr.io/the-gk-og/nasmusic:latest
+   sudo docker pull ghcr.io/the-gk-og/homebeat:latest
    ```
 3. Install `full/compose.yaml` via **Install via YAML**. Because it uses `pull_policy: missing`, the app uses
    the image you just pulled.
@@ -118,7 +118,7 @@ If you make the repository public, the package can be made public too, and the l
 ## Getting the APK
 
 Every push to `main` that changes `android/` publishes a GitHub Release (`v0.1.<build number>`) with a
-signed APK attached: **github.com/the-gk-og/nas-music → Releases → latest → `nas-music-v0.1.N.apk`**.
+signed APK attached: **github.com/the-gk-og/nas-music → Releases → latest → `homebeat-v0.1.N.apk`**.
 Open that page on the phone (signed in to GitHub, since the repo is private) and tap the APK.
 
 All releases are signed with the same permanent key, so a new release installs as an update over the
@@ -207,7 +207,7 @@ If speakers should use another address (a reverse proxy, another port), set `cas
 
 **Finding speakers (Docker networking).** Chromecast discovery uses mDNS and DLNA discovery uses SSDP. Both
 are multicast, so neither gets through Docker's default bridge network. Choose one of these:
-- `network_mode: host` on the nasmusic service. Discovery then just works. Remove the `ports:` block, because
+- `network_mode: host` on the homebeat service. Discovery then just works. Remove the `ports:` block, because
   the ports are bound on the host directly. Check that 8443/8090 (and 8080 if you use it) are free on the NAS.
 - Keep bridge networking and list the speakers by hand in `config.toml`: `chromecast_hosts = ["<ip>", …]`
   (Cast port 8009 is polled directly) and `dlna_renderers = ["http://<ip>:<port>/<description>.xml"]`.
@@ -222,14 +222,14 @@ the track. If it can't be reached within about 10 s, refuses the track, or drops
 same spot, to the device that picked it. "Stop casting" does the same on purpose. Being discovered is not the
 same as being reachable: the container must reach each Chromecast's TCP port 8009 (a Cast group uses its own
 port, e.g. 32202, on the group's current leader). To test from the NAS:
-`docker exec nasmusic python -c "import socket; socket.create_connection(('<ip>', 8009), 3)"`.
+`docker exec homebeat python -c "import socket; socket.create_connection(('<ip>', 8009), 3)"`.
 
 **Home Assistant.** Set `homeassistant_url` and `homeassistant_token` (HA → your profile → Security →
 Long-lived access tokens) in `/data/config.toml`. Never put the token in the repo. Optionally limit the list
 with `homeassistant_entities`. If HA also exposes a Chromecast the server finds directly, it appears twice.
 List only the entities you want, or turn off `cast_discovery`.
 
-**Snapcast.** Add a TCP source to `snapserver.conf` and point nasmusic at the server:
+**Snapcast.** Add a TCP source to `snapserver.conf` and point homebeat at the server:
 
 ```ini
 [stream]
@@ -241,7 +241,7 @@ snapcast_host = "192.168.1.20"
 ```
 
 Every Snapcast group with a connected client becomes a speaker. Playing on one switches that group to the
-`nasmusic` stream. The server decodes the track with ffmpeg in real time and feeds PCM to that source. There
+`nasmusic` stream (the name is kept from before the Homebeat rename). The server decodes the track with ffmpeg in real time and feeds PCM to that source. There
 is a single feed, so two groups playing at once hear the same thing. Group the rooms in Snapcast for
 multi-room.
 
@@ -256,7 +256,7 @@ port 8090 must be reachable from the Chromecast.
 ## Voice control (Home Assistant Assist)
 
 "Play my Pop radio in the bedroom", "skip", "what's playing?" from Home Assistant voice satellites or the HA
-app: create a voice token in nas-music's Settings → Voice control and follow
+app: create a voice token in Homebeat's Settings → Voice control and follow
 [`homeassistant/README.md`](homeassistant/README.md) (one YAML package, no add-ons).
 
 ## Radio DJ voice
@@ -269,8 +269,8 @@ each user switches it on (Settings → Radio DJ, synced to all their devices; "e
   two-sentence intro should take a second or two on the i5-3470, and players ask for it ~25 s ahead. The image
   includes it by default (`--build-arg WITH_DJVOICE=0` leaves it out). Nothing goes to an online speech service.
 - The voice itself (about 60 MB) downloads into `/data/dj-voices` from huggingface.co/rhasspy/piper-voices the first
-  time someone uses the DJ. To fetch it up front: `docker exec nasmusic nasmusic dj-voice download`; to hear it:
-  `docker exec nasmusic nasmusic dj-voice say "Hello from the NAS"` (prints the .ogg it wrote).
+  time someone uses the DJ. To fetch it up front: `docker exec homebeat homebeat dj-voice download`; to hear it:
+  `docker exec homebeat homebeat dj-voice say "Hello from the NAS"` (prints the .ogg it wrote).
 - Pick another voice with `dj_voice = "en_GB-alan-medium"` (any Piper voice name), or point `dj_voice_model` at a
   local `.onnx` (with its `.onnx.json`) and set `dj_voice_download = false`. Each voice has its own licence (see its
   MODEL_CARD); the default `en_GB-cori-medium` was trained on a public-domain LibriVox reading.

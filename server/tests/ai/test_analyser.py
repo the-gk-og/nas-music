@@ -7,9 +7,9 @@ import httpx
 import numpy as np
 import pytest
 
-from nasmusic.ai import analyser, api, models
-from nasmusic.ai.common import from_blob, iso
-from nasmusic.ai.extractors import BasicExtractor, effective_version, key_from_chroma
+from homebeat.ai import analyser, api, models
+from homebeat.ai.common import from_blob, iso
+from homebeat.ai.extractors import BasicExtractor, effective_version, key_from_chroma
 from tests.ai.conftest import ffmpeg_ok, write_tone
 
 pytestmark = pytest.mark.skipif(not ffmpeg_ok(), reason="ffmpeg not installed")
@@ -80,8 +80,8 @@ def test_analyse_pending_resumable_and_failures(conn, cfg):
 def test_model_download_failure_falls_back(conn, cfg, monkeypatch):
     from dataclasses import replace
 
-    from nasmusic.ai import extractors
-    from nasmusic.ai.common import read_status
+    from homebeat.ai import extractors
+    from homebeat.ai.common import read_status
     monkeypatch.setattr(extractors, "essentia_available", lambda: True)
 
     def offline(*a, **k):
@@ -105,13 +105,13 @@ def test_essentia_fallback(conn, cfg, monkeypatch):
     """Requesting the Essentia model without Essentia installed falls back to basic-1."""
     from dataclasses import replace
 
-    from nasmusic.ai import extractors
+    from homebeat.ai import extractors
     monkeypatch.setattr(extractors, "essentia_available", lambda: False)
     write_tone(cfg.library_root / "y.flac", 500)
     add_track(conn, "y.flac")
     assert api.analyse_pending(conn, replace(cfg, model_version="effnet-discogs-1")) == 1
     assert conn.execute("SELECT model_version FROM features").fetchone()[0] == "basic-1"
-    from nasmusic.ai.common import STATUS_KEY, read_status
+    from homebeat.ai.common import STATUS_KEY, read_status
     st = read_status(conn)
     assert st["requested"] == "effnet-discogs-1" and st["analysing"] == "basic-1"
     assert "Essentia" in st["fallback_reason"]
@@ -151,7 +151,7 @@ def test_effnet_model_set_is_pinned():
 
 
 def test_segments():
-    from nasmusic.ai.extractors import segments
+    from homebeat.ai.extractors import segments
     # long track, 3 excerpts at 20/50/80 %
     assert segments(300, 480, 3, 40) == [(40.0, 40), (130.0, 40), (220.0, 40)]
     # short track: whole thing

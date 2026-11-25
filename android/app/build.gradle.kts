@@ -15,12 +15,12 @@ kotlin {
 }
 
 android {
-    namespace = "org.nasmusic.app"
+    namespace = "org.homebeat.app"
     // compileSdk is the newest API the libraries need; behaviour is pinned by targetSdk.
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "org.nasmusic.app"
+        applicationId = "org.homebeat.app"
         minSdk = 26
         targetSdk = 35
         // CI sets VERSION_CODE to the workflow run number so every build installs as an update.

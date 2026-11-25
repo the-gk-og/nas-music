@@ -1,4 +1,4 @@
-//! nas-music desktop: a Tauri v2 shell around the web player (`../web/dist`).
+//! Homebeat desktop: a Tauri v2 shell around the web player (`../web/dist`).
 //! Extras over the browser: tray icon (play/pause, next, previous, show, quit), global media keys,
 //! a native notification on track change, single instance, the window size/position remembered, and
 //! optional "start with the computer", which launches straight into the tray (`--minimized`).
@@ -135,14 +135,14 @@ pub fn run() {
             let toggle = MenuItem::with_id(app, "toggle", "Play / Pause", true, None::<&str>)?;
             let next = MenuItem::with_id(app, "next", "Next", true, None::<&str>)?;
             let prev = MenuItem::with_id(app, "prev", "Previous", true, None::<&str>)?;
-            let show = MenuItem::with_id(app, "show", "Show nas-music", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "Show Homebeat", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let menu = Menu::with_items(app, &[&toggle, &next, &prev, &sep, &show, &quit])?;
 
             TrayIconBuilder::with_id(TRAY_ID)
                 .icon(app.default_window_icon().cloned().expect("bundle icon"))
-                .tooltip("nas-music")
+                .tooltip("Homebeat")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, ev| match ev.id().as_ref() {
@@ -169,5 +169,5 @@ pub fn run() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("error while running nas-music");
+        .expect("error while running Homebeat");
 }

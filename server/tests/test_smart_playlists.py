@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from nasmusic.app import smart
+from homebeat.app import smart
 from tests.conftest import track_ids
 
 API = "/api/v1"
@@ -199,7 +199,7 @@ def test_in_playlist_and_nightly_refresh(client, conn, cfg):
     assert titles(client, D(R("inPlaylist", "is", a["id"]))) == ["Closing", "Opening"]
     # the nightly job refreshes stale caches
     conn.execute("UPDATE smart_playlists SET stamp = 'old'")
-    from nasmusic.app.scheduler import Jobs
+    from homebeat.app.scheduler import Jobs
 
     rec = Jobs(cfg).run("smart", "manual")
     assert rec["ok"] and rec["result"]["smartPlaylists"] == 1
@@ -219,7 +219,7 @@ def test_pin_queue_and_radio_seed(client, conn):
     assert client.post(f"{API}/pins", json={"type": "smart_playlist", "id": sp["id"]}).status_code == 200
     pins = client.get(f"{API}/pins").json()
     assert pins[0]["type"] == "smart_playlist" and pins[0]["title"] == "Rocky" and pins[0]["subtitle"] == "2 songs"
-    from nasmusic.app import discover
+    from homebeat.app import discover
 
     assert discover.seed_title(conn, client.user_id, {"type": "smart_playlist", "id": sp["id"]}) == "Rocky"
     with pytest.raises(discover.NotFound):
@@ -229,8 +229,8 @@ def test_pin_queue_and_radio_seed(client, conn):
 
 
 def test_migration_v6_to_v7(tmp_path):
-    from nasmusic import db
-    from nasmusic.db import migrations
+    from homebeat import db
+    from homebeat.db import migrations
 
     path = tmp_path / "x.db"
     conn = db.connect(path)

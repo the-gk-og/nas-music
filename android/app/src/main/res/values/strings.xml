@@ -1,8 +1,8 @@
 <resources>
-    <string name="app_name">nas-music</string>
-    <string name="widget_name">nas-music player</string>
+    <string name="app_name">Homebeat</string>
+    <string name="widget_name">Homebeat player</string>
     <string name="widget_description">What\'s playing, with controls. Resize for more.</string>
-    <string name="tile_playback">nas-music</string>
+    <string name="tile_playback">Homebeat</string>
     <string name="tile_family">Family mode</string>
-    <string name="share_upload_label">Upload to nas-music</string>
+    <string name="share_upload_label">Upload to Homebeat</string>
 </resources>

@@ -7,9 +7,9 @@ from datetime import UTC, date, datetime, timedelta
 import httpx
 import pytest
 
-from nasmusic import db
-from nasmusic.ai import api, blend, release_radar, wrapped
-from nasmusic.ai.discovery import Http
+from homebeat import db
+from homebeat.ai import api, blend, release_radar, wrapped
+from homebeat.ai.discovery import Http
 from tests.ai.conftest import build_library
 from tests.ai.schema_v2 import add_user
 
@@ -259,7 +259,7 @@ def test_release_radar_job(conn5, lib5, cfg):
 
     def handler(req: httpx.Request):
         calls.append(req.url)
-        assert "nas-music" in req.headers["user-agent"] and "@" not in req.headers["user-agent"]
+        assert "Homebeat" in req.headers["user-agent"] and "@" not in req.headers["user-agent"]
         return httpx.Response(200, json=RG)
 
     sleeps = []

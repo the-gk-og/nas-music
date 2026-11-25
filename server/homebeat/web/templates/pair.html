@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Pair a phone{% endblock %}
+{% block content %}
+<h1>Pair a phone</h1>
+<section class="card">
+  <p>Open the Homebeat app and scan this code to sign the phone in as <b>{{ username }}</b>.
+    It works once and expires at
+    <b>{{ expires|localtime(tz, '%H:%M') }}</b> (10 minutes).</p>
+  <img class="qr" src="{{ qr }}" alt="Pairing QR code">
+  <p>Code: <span class="code mono">{{ code }}</span></p>
+  <form method="get" action="/admin/pair"><button class="secondary">New code</button></form>
+</section>
+<section class="card">
+  <h2>What the code contains</h2>
+  <table>
+    <tr><td>LAN address</td><td class="mono">{{ payload.lanUrl }}</td></tr>
+    <tr><td>Tunnel address</td><td class="mono">{{ payload.tunnelUrl or "not configured" }}</td></tr>
+    <tr><td>Certificate SHA-256</td><td class="mono">{{ payload.certSha256 or "–" }}</td></tr>
+    <tr><td>Cloudflare Access token</td><td>{{ "included" if payload.cfAccessClientId else "not configured" }}</td></tr>
+  </table>
+  <p class="muted">The QR includes the Cloudflare Access secret. Don't share a photo of it.</p>
+</section>
+{% endblock %}

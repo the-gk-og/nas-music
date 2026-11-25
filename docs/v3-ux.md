@@ -1,4 +1,4 @@
-# nas-music v3 — UI/UX redesign (phase 1)
+# Homebeat v3 — UI/UX redesign (phase 1)
 
 Owner's answers (2026-11-19) turned into a spec. Builds on `docs/v2.md` (accounts, Connect, lyrics,
 EQ, data settings all stay). Phase 1 is the redesign plus the features it needs to have something to

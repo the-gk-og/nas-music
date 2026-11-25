@@ -49,7 +49,7 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:noHistory="true"
-            android:taskAffinity="org.nasmusic.wear.tileaction"
+            android:taskAffinity="org.homebeat.wear.tileaction"
             android:theme="@style/Theme.NasWear.Trampoline" />
 
         <service

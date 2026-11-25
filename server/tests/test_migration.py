@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from nasmusic import db
-from nasmusic.db import migrations
+from homebeat import db
+from homebeat.db import migrations
 
 V1_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v1.sql").read_text()
 T1, T2, T3 = "a" * 40, "b" * 40, "c" * 40
@@ -52,7 +52,7 @@ def make_v1(path: Path, old_event_check: bool = False):
 
 @pytest.mark.parametrize("old_check", [False, True])
 def test_v1_to_v2_keeps_everything(tmp_path, old_check):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v1(path, old_check).close()
     conn = db.connect(path)
     db.init(conn, admin_username="owner", admin_password_hash="scrypt$x")
@@ -97,7 +97,7 @@ def test_v1_to_v2_keeps_everything(tmp_path, old_check):
     idx = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
     assert {"events_user", "events_track", "tracks_folder", "mixes_user", "suggestions_user"} <= idx
     # Backup of the v1 file next to it.
-    backups = list(tmp_path.glob("nasmusic.db.v1-backup-*"))
+    backups = list(tmp_path.glob("homebeat.db.v1-backup-*"))
     assert len(backups) == 1
     b = db.connect(backups[0])
     assert b.execute("SELECT version FROM schema_version").fetchone()[0] == 1
@@ -105,7 +105,7 @@ def test_v1_to_v2_keeps_everything(tmp_path, old_check):
 
 
 def test_migration_is_idempotent(tmp_path):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v1(path).close()
     for _ in range(3):
         conn = db.connect(path)
@@ -119,7 +119,7 @@ def test_migration_is_idempotent(tmp_path):
 
 
 def test_failed_migration_leaves_v1_untouched(tmp_path, monkeypatch):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v1(path).close()
 
     real = migrations._migrate
@@ -156,12 +156,12 @@ def test_live_server_start_migrates_and_keeps_admin_login(tmp_path, base_flac):
     """build_context on a v1 data dir: admin can log in with the old config password and sees their stars."""
     from fastapi.testclient import TestClient
 
-    from nasmusic import auth, config
-    from nasmusic.app import create_app
+    from homebeat import auth, config
+    from homebeat.app import create_app
 
     data = tmp_path / "data"
     data.mkdir()
-    make_v1(data / "nasmusic.db").close()
+    make_v1(data / "homebeat.db").close()
     music = tmp_path / "music"
     music.mkdir()
     cfg = config.from_dict({"library_root": str(music), "data_dir": str(data),
@@ -172,6 +172,6 @@ def test_live_server_start_migrates_and_keeps_admin_login(tmp_path, base_flac):
         assert r.status_code == 200, r.text
         assert r.json()["isAdmin"] is True
         # The v1 phone's token still works and is now the admin's device.
-        conn = db.connect(data / "nasmusic.db")
+        conn = db.connect(data / "homebeat.db")
         assert conn.execute("SELECT u.username FROM devices d JOIN users u ON u.id = d.user_id "
                             "WHERE d.id = 'd1'").fetchone()[0] == "admin"

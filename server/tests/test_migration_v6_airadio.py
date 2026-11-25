@@ -1,11 +1,11 @@
 """v5 -> v6 (AI radio): radio_sessions.station_key/params, radio_stations, radio_feedback. Additive."""
-from nasmusic import db
-from nasmusic.db import migrations
+from homebeat import db
+from homebeat.db import migrations
 from tests.test_migration_v5 import make_v4
 
 
 def test_v5_to_v6(tmp_path):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = make_v4(path)
     assert migrations.migrate_v4_to_v5(conn, db.schema_sql(), make_backup=False)
     assert migrations.current_version(conn) == 5

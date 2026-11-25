@@ -1,7 +1,7 @@
-# nas-music server image, including the web player. Build from the REPO ROOT (BuildKit required):
-#   docker build -f server/Dockerfile -t nasmusic:latest .
-#   docker build -f server/Dockerfile --build-arg WITH_ANALYSIS=1 -t nasmusic:latest .   # + Essentia extra
-#   docker build -f server/Dockerfile --build-arg WITH_DJVOICE=0 -t nasmusic:latest .    # without the radio DJ voice
+# Homebeat server image, including the web player. Build from the REPO ROOT (BuildKit required):
+#   docker build -f server/Dockerfile -t homebeat:latest .
+#   docker build -f server/Dockerfile --build-arg WITH_ANALYSIS=1 -t homebeat:latest .   # + Essentia extra
+#   docker build -f server/Dockerfile --build-arg WITH_DJVOICE=0 -t homebeat:latest .    # without the radio DJ voice
 # The build context is filtered by server/Dockerfile.dockerignore.
 # Runs as uid/gid 568 (TrueNAS "apps"). Expects /data (rw: config.toml, db, cert, caches) and /music (ro).
 
@@ -37,7 +37,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     EXTRA=""; if [ "$WITH_ANALYSIS" = "1" ]; then EXTRA="--extra analysis"; fi; \
     if [ "$WITH_DJVOICE" = "1" ]; then EXTRA="$EXTRA --extra djvoice"; fi; \
     uv sync --frozen --no-dev --no-install-project $EXTRA
-COPY server/nasmusic ./nasmusic
+COPY server/homebeat ./homebeat
 RUN --mount=type=cache,target=/root/.cache/uv \
     EXTRA=""; if [ "$WITH_ANALYSIS" = "1" ]; then EXTRA="--extra analysis"; fi; \
     if [ "$WITH_DJVOICE" = "1" ]; then EXTRA="$EXTRA --extra djvoice"; fi; \
@@ -55,16 +55,16 @@ RUN apt-get update \
  && mkdir -p /data /music \
  && chown 568:568 /data
 COPY --from=build /opt/venv /opt/venv
-COPY server/config.example.toml /opt/nasmusic/config.example.toml
-COPY --from=web /out /opt/nasmusic/web
+COPY server/config.example.toml /opt/homebeat/config.example.toml
+COPY --from=web /out /opt/homebeat/web
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    NASMUSIC_CONFIG=/data/config.toml \
+    HOMEBEAT_CONFIG=/data/config.toml \
     RCLONE_CONFIG=/data/rclone.conf
 USER 568:568
 WORKDIR /data
 EXPOSE 8443 8080
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=3 \
     CMD ["python", "-c", "import ssl,urllib.request; urllib.request.urlopen('https://127.0.0.1:8443/api/v1/health', timeout=4, context=ssl._create_unverified_context())"]
-CMD ["nasmusic", "serve"]
+CMD ["homebeat", "serve"]

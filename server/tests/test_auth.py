@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from nasmusic import auth
-from nasmusic.auth import tls
+from homebeat import auth
+from homebeat.auth import tls
 
 
 def _admin_id(conn):

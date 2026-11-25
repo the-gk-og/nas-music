@@ -7,8 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from nasmusic import auth
-from nasmusic.jam import clean_name
+from homebeat import auth
+from homebeat.jam import clean_name
 from tests.conftest import make_user, track_ids
 
 API = "/api/v1"

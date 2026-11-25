@@ -10,8 +10,8 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from nasmusic.cast.backends import chromecast, dlna, homeassistant, snapcast
-from nasmusic.cast.base import Media
+from homebeat.cast.backends import chromecast, dlna, homeassistant, snapcast
+from homebeat.cast.base import Media
 
 
 def media(mime="audio/flac", codec="FLAC", path=None, duration=200.0) -> Media:

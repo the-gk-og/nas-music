@@ -6,10 +6,10 @@ from itertools import pairwise
 import numpy as np
 import pytest
 
-from nasmusic.ai import api
-from nasmusic.ai.common import ensure_default_settings
-from nasmusic.ai.mixes import MixBuilder, energy_target
-from nasmusic.ai.recommender import Recommender
+from homebeat.ai import api
+from homebeat.ai.common import ensure_default_settings
+from homebeat.ai.mixes import MixBuilder, energy_target
+from homebeat.ai.recommender import Recommender
 from tests.ai.conftest import NOW, USER, build_library, mix_rows
 
 
@@ -155,7 +155,7 @@ def test_library_without_events_still_gets_mixes(conn, cfg):
 
 
 def test_nightly_never_raises(conn, cfg, synth, monkeypatch):
-    from nasmusic.ai import recommender
+    from homebeat.ai import recommender
 
     def boom(*a, **k):
         raise RuntimeError("boom")
@@ -164,7 +164,7 @@ def test_nightly_never_raises(conn, cfg, synth, monkeypatch):
 
 
 def test_more_like_mixes_do_not_pile_up(conn, cfg, synth):
-    from nasmusic.ai.common import iso
+    from homebeat.ai.common import iso
     seeds = [synth.by_cluster(c)[0]["id"] for c in range(5)]
     old = api.more_like(conn, cfg, USER, seeds[0])
     conn.execute("UPDATE mixes SET created_at = ? WHERE id = ?", (iso(NOW - timedelta(hours=25)), old))

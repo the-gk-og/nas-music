@@ -55,7 +55,7 @@
     if (!canvas || !card || !data) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    drawCard(ctx, card, cardColors(data, index, accentColor(appearance.prefs.accent)), images, `nas-music · ${data.year}`);
+    drawCard(ctx, card, cardColors(data, index, accentColor(appearance.prefs.accent)), images, `Homebeat · ${data.year}`);
   });
 
   const go = (d: number) => (index = Math.max(0, Math.min(cards.length - 1, index + d)));

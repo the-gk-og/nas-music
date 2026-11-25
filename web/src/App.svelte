@@ -105,7 +105,7 @@
   const fullNow = $derived(name === 'now');
 
   // The playing song in the browser tab / taskbar title.
-  const docTitle = $derived(signedIn ? tabTitle(player.shown.track, player.shown.playing) : 'nas-music');
+  const docTitle = $derived(signedIn ? tabTitle(player.shown.track, player.shown.playing) : 'Homebeat');
   $effect(() => {
     if (document.title !== docTitle) document.title = docTitle;
   });

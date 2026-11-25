@@ -1,11 +1,11 @@
 """v2 -> v3 against a database created by the exact v2 schema that is live on the NAS
-(tests/fixtures/schema_v2.sql = server/nasmusic/db/schema.sql at main 85940d9)."""
+(tests/fixtures/schema_v2.sql = server/homebeat/db/schema.sql at main 85940d9)."""
 from pathlib import Path
 
 import pytest
 
-from nasmusic import db
-from nasmusic.db import migrations
+from homebeat import db
+from homebeat.db import migrations
 
 V2_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v2.sql").read_text()
 
@@ -33,7 +33,7 @@ def make_v2(path: Path):
 
 
 def test_v2_to_v3_is_additive(tmp_path):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v2(path).close()
     conn = db.connect(path)
     db.init(conn)
@@ -50,7 +50,7 @@ def test_v2_to_v3_is_additive(tmp_path):
     assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
     assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert "toget_user" in {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
-    backups = list(tmp_path.glob("nasmusic.db.v2-backup-*"))
+    backups = list(tmp_path.glob("homebeat.db.v2-backup-*"))
     assert len(backups) == 1
     assert db.connect(backups[0]).execute("SELECT version FROM schema_version").fetchone()[0] == 2
     # New things work.
@@ -61,7 +61,7 @@ def test_v2_to_v3_is_additive(tmp_path):
 
 
 def test_v2_to_v3_idempotent(tmp_path):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v2(path).close()
     for _ in range(3):
         c = db.connect(path)
@@ -76,7 +76,7 @@ def test_v2_to_v3_idempotent(tmp_path):
 
 
 def test_v2_to_v3_failure_rolls_back(tmp_path, monkeypatch):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v2(path).close()
     real = migrations._create_indexes
 
@@ -99,7 +99,7 @@ def test_v2_to_v3_failure_rolls_back(tmp_path, monkeypatch):
 def test_v1_chains_to_v3_with_one_backup(tmp_path):
     from tests.test_migration import make_v1
 
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     make_v1(path).close()
     conn = db.connect(path)
     db.init(conn)
@@ -110,7 +110,7 @@ def test_v1_chains_to_v3_with_one_backup(tmp_path):
 
 def test_v2_db_where_the_ai_already_created_radio_sessions(tmp_path):
     """The v3 AI engine creates radio_sessions itself if missing; the migration must not trip over it."""
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = make_v2(path)
     conn.execute("CREATE TABLE radio_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) "
                  "ON DELETE CASCADE, seed_type TEXT NOT NULL, seed_id TEXT, title TEXT NOT NULL, anchors TEXT NOT NULL, "

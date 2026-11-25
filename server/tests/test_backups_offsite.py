@@ -1,4 +1,4 @@
-"""Off-site backup copies (a second folder or an rclone remote) and one-click restore (nasmusic.app.backups)."""
+"""Off-site backup copies (a second folder or an rclone remote) and one-click restore (homebeat.app.backups)."""
 from __future__ import annotations
 
 import gzip
@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from nasmusic import config as config_mod
-from nasmusic import db
-from nasmusic.app import backups
+from homebeat import config as config_mod
+from homebeat import db
+from homebeat.app import backups
 from tests.conftest import track_ids
 
 API = "/api/v1"
@@ -75,7 +75,7 @@ def test_keep_prunes_offsite_and_local_scheduled(client, app, tmp_path):
     (dest / "holiday-photos.jpg").write_bytes(b"x")     # never ours: never touched
     for _ in range(5):
         assert app.state.ctx.jobs.run("backup")["ok"]
-    assert len(list(dest.glob("nasmusic-*.db.gz"))) == 2 and (dest / "holiday-photos.jpg").exists()
+    assert len(list(dest.glob("homebeat-*.db.gz"))) == 2 and (dest / "holiday-photos.jpg").exists()
     local = [b for b in client.get(f"{ADMIN}/backups").json() if b["kind"] == "scheduled"]
     assert len(local) == backups.KEEP_LOCAL_SCHEDULED
 
@@ -87,7 +87,7 @@ def test_manual_backup_copied_on_request(client, app, tmp_path):
     r = client.post(f"{ADMIN}/backups/{b['id']}/offsite")
     assert r.status_code == 200 and r.json()["configCopied"] is False and not (dest / "config").exists()
     assert (dest / f"{b['id']}.gz").is_file()
-    assert client.post(f"{ADMIN}/backups/nasmusic-manual-20990101T000000Z.db/offsite").status_code == 404
+    assert client.post(f"{ADMIN}/backups/homebeat-manual-20990101T000000Z.db/offsite").status_code == 404
     assert client.post(f"{ADMIN}/backups/..%2F..%2Fetc%2Fpasswd/offsite").status_code in (404, 400, 405)
 
 
@@ -194,7 +194,7 @@ def test_restore_brings_back_settings_and_server_id(client, app, conn):
 
 
 def test_restore_migrates_an_older_backup(client, app, cfg):
-    old = cfg.data_dir / "nasmusic.db.v7-backup-20260101T000000Z"
+    old = cfg.data_dir / "homebeat.db.v7-backup-20260101T000000Z"
     c = sqlite3.connect(old)
     c.executescript((FIXTURES / "schema_v7.sql").read_text())
     c.execute("INSERT INTO schema_version (version) VALUES (7)")
@@ -216,10 +216,10 @@ def test_restore_migrates_an_older_backup(client, app, cfg):
 def test_restore_refuses_bad_files(client, app, cfg):
     d = cfg.data_dir / "backups"
     d.mkdir(exist_ok=True)
-    (d / "nasmusic-manual-20260101T000000Z.db").write_bytes(b"this is not sqlite" * 100)
-    r = client.post(f"{ADMIN}/backups/nasmusic-manual-20260101T000000Z.db/restore")
+    (d / "homebeat-manual-20260101T000000Z.db").write_bytes(b"this is not sqlite" * 100)
+    r = client.post(f"{ADMIN}/backups/homebeat-manual-20260101T000000Z.db/restore")
     assert r.status_code == 422
-    newer = d / "nasmusic-manual-20260102T000000Z.db"
+    newer = d / "homebeat-manual-20260102T000000Z.db"
     b = client.post(f"{ADMIN}/backups").json()
     (d / b["id"]).rename(newer)
     c = sqlite3.connect(newer)
@@ -228,7 +228,7 @@ def test_restore_refuses_bad_files(client, app, cfg):
     c.close()
     r = client.post(f"{ADMIN}/backups/{newer.name}/restore")
     assert r.status_code == 409 and "newer server" in r.json()["detail"]
-    other = d / "nasmusic-manual-20260103T000000Z.db"
+    other = d / "homebeat-manual-20260103T000000Z.db"
     c = sqlite3.connect(other)
     c.execute("CREATE TABLE notes (x)")
     c.close()
@@ -251,7 +251,7 @@ def test_non_admin_cannot_restore(bob):
 
 
 def test_cli_restore(cfg, conn, tmp_path, capsys, monkeypatch):
-    from nasmusic.__main__ import main
+    from homebeat.__main__ import main
 
     toml = tmp_path / "config.toml"
     dest = tmp_path / "off"
@@ -269,7 +269,7 @@ def test_cli_restore(cfg, conn, tmp_path, capsys, monkeypatch):
     assert "restored" in capsys.readouterr().out
     assert conn.execute("SELECT 1 FROM settings WHERE key = 'marker'").fetchone() is None
     with pytest.raises(SystemExit, match="no such backup"):
-        main(["restore", "--config", str(toml), "nasmusic-manual-20990101T000000Z.db"])
+        main(["restore", "--config", str(toml), "homebeat-manual-20990101T000000Z.db"])
 
 
 @pytest.mark.parametrize("value,ok", [("/mnt/backup", True), ("b2:bucket/music", True), ("relative/dir", False),

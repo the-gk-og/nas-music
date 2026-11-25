@@ -1,5 +1,5 @@
 [project]
-name = "nasmusic"
+name = "homebeat"
 version = "0.1.0"
 description = "Self-hosted AI-curated music server"
 license = "AGPL-3.0-only"
@@ -38,14 +38,16 @@ dev = [
 ]
 
 [project.scripts]
-nasmusic = "nasmusic.__main__:main"
+homebeat = "homebeat.__main__:main"
+# Old command name, so `docker exec <container> nasmusic ...` from before the Homebeat rename still works.
+nasmusic = "homebeat.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["nasmusic"]
+packages = ["homebeat"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

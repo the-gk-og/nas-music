@@ -6,9 +6,9 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from nasmusic.app.cast_api import cast_app, cast_key
-from nasmusic.cast import Renderer, Status, signing
-from nasmusic.cast import session as session_mod
+from homebeat.app.cast_api import cast_app, cast_key
+from homebeat.cast import Renderer, Status, signing
+from homebeat.cast import session as session_mod
 from tests.conftest import track_ids
 from tests.test_connect import URL, drain, hello, token, until, until_devices
 
@@ -331,7 +331,7 @@ def test_a_second_user_takes_the_speaker(tc, conn, speaker):
 def test_registry_keeps_a_playing_speaker_that_vanishes(app):
     import asyncio
 
-    from nasmusic.app.cast_api import make_registry
+    from homebeat.app.cast_api import make_registry
 
     reg = make_registry(app.state.ctx)
     spk = FakeSpeaker()
@@ -371,10 +371,10 @@ def test_sign_base_uses_public_address_when_reached_through_the_relay(cfg):
 
     from starlette.requests import Request
 
-    from nasmusic.app.cast_api import sign_base
+    from homebeat.app.cast_api import sign_base
 
     def req(port):
-        return Request({"type": "http", "server": ("nasmusic", port), "headers": []})
+        return Request({"type": "http", "server": ("homebeat", port), "headers": []})
 
     assert sign_base(req(cfg.http_port), cfg) == "https://music.example.com"
     assert sign_base(req(cfg.https_port), cfg) == "http://192.168.1.50:8090"

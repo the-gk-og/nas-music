@@ -2,8 +2,8 @@
 import numpy as np
 import pytest
 
-from nasmusic.ai import api
-from nasmusic.ai.common import iso
+from homebeat.ai import api
+from homebeat.ai.common import iso
 from tests.ai.conftest import USER
 from tests.ai.schema_v2 import add_user
 

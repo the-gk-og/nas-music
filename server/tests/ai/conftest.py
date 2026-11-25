@@ -10,9 +10,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from nasmusic import db
-from nasmusic.ai.api import AIConfig
-from nasmusic.ai.common import iso, to_blob
+from homebeat import db
+from homebeat.ai.api import AIConfig
+from homebeat.ai.common import iso, to_blob
 from tests.ai.schema_v2 import add_user, init_v2
 
 NOW = datetime.now(UTC).replace(microsecond=0)

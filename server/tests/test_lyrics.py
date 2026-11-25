@@ -1,6 +1,6 @@
 from mutagen.flac import FLAC
 
-from nasmusic.library import lyrics
+from homebeat.library import lyrics
 from tests.conftest import make_flac, track_ids
 
 LRC = """[ar:Someone]
@@ -88,7 +88,7 @@ def test_api_lyrics_requires_auth(anon, conn):
 # ---------- 0.8.1: enhanced LRC word timings ----------
 
 def test_enhanced_lrc_keeps_word_timings():
-    from nasmusic.library import lyrics as L
+    from homebeat.library import lyrics as L
 
     synced, lines = L.parse("[00:12.00]<00:12.00>Hello <00:12.50>big <00:13.00>world <00:13.80>\n[00:15.00]plain line")
     assert synced
@@ -101,7 +101,7 @@ def test_enhanced_lrc_keeps_word_timings():
 
 
 def test_enhanced_lrc_leading_text_offset_and_repeats():
-    from nasmusic.library import lyrics as L
+    from homebeat.library import lyrics as L
 
     _, lines = L.parse("[offset:+500]\n[00:10.00][00:30.00]Oh <00:11.00>yeah")
     assert [ln["timeMs"] for ln in lines] == [9500, 29500]
@@ -110,7 +110,7 @@ def test_enhanced_lrc_leading_text_offset_and_repeats():
 
 
 def test_word_stamps_never_go_backwards():
-    from nasmusic.library import lyrics as L
+    from homebeat.library import lyrics as L
 
     _, lines = L.parse("[00:20.00]<00:19.00>a <00:21.00>b")
     assert [w["timeMs"] for w in lines[0]["words"]] == [20000, 21000]

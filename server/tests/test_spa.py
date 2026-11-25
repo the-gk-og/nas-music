@@ -4,8 +4,8 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
-from nasmusic.app import create_app
-from nasmusic.web import spa
+from homebeat.app import create_app
+from homebeat.web import spa
 
 
 @pytest.fixture
@@ -15,7 +15,7 @@ def web_dist(tmp_path):
     (d / "index.html").write_text("<!doctype html><title>player</title><div id=app></div>")
     (d / "assets" / "app-1234.js").write_text("console.log('hi')")
     (d / "favicon.svg").write_text("<svg/>")
-    (d / "manifest.webmanifest").write_text('{"name": "nas-music"}')
+    (d / "manifest.webmanifest").write_text('{"name": "Homebeat"}')
     (d / "sw.js").write_text("self.addEventListener('fetch', () => {})")
     (tmp_path / "secret.txt").write_text("nope")
     return d
@@ -56,7 +56,7 @@ def test_spa_routes_and_fallback(player):
 def test_placeholder_and_join_form_without_web_build(cfg, scanned, conn, monkeypatch):
     monkeypatch.setattr(spa, "DOCKER_WEB", cfg.data_dir / "none")
     monkeypatch.setattr(spa, "REPO_WEB", cfg.data_dir / "none")
-    from nasmusic.auth import users
+    from homebeat.auth import users
     from tests.conftest import make_user
 
     admin = make_user(conn, "alice", admin=True)

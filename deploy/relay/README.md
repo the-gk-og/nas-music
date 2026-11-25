@@ -4,7 +4,7 @@ Cloudflare's terms don't allow streaming media through its tunnel, so the public
 `https://music.whoactuallyneeds.men` goes through a friend's server instead:
 
 ```
-phone ──HTTPS──▶ friend's server :443 ─▶ friend's server (frps) ══tunnel (NAS dialled out, :2333)══▶ NAS: frpc ─▶ Caddy (HTTPS, Let's Encrypt) ─▶ nasmusic
+phone ──HTTPS──▶ friend's server :443 ─▶ friend's server (frps) ══tunnel (NAS dialled out, :2333)══▶ NAS: frpc ─▶ Caddy (HTTPS, Let's Encrypt) ─▶ homebeat
 ```
 
 - **Your home router: nothing to forward.** The NAS connects out.
@@ -24,9 +24,9 @@ Portainer/Dockhand and deploy. Also ask for their **public address** (DDNS name 
   **Proxy status: DNS only (grey cloud)** — orange would put Cloudflare back in the middle.
 
 ## 3. NAS side
-1. Put `frpc.toml` (with FRIEND_ADDRESS + FRP_TOKEN filled) and `Caddyfile` into the nasmusic data
+1. Put `frpc.toml` (with FRIEND_ADDRESS + FRP_TOKEN filled) and `Caddyfile` into the homebeat data
    volume at `/data/relay/` (the coordinator does this through the Dockhand shell).
-2. Add `nas-services.yaml`'s two services and two volumes to the nasmusic stack; Save & redeploy.
+2. Add `nas-services.yaml`'s two services and two volumes to the homebeat stack; Save & redeploy.
 3. Check: `https://music.whoactuallyneeds.men/api/v1/health` shows a valid certificate and
    `{"status":"ok"}`. Caddy's log shows "certificate obtained successfully".
 

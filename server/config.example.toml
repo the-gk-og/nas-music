@@ -1,5 +1,5 @@
-# nas-music server configuration. Copy to config.toml (gitignored) or /data/config.toml in Docker,
-# and point NASMUSIC_CONFIG (or `nasmusic --config PATH`) at it. Relative paths are relative to this file.
+# Homebeat server configuration. Copy to config.toml (gitignored) or /data/config.toml in Docker,
+# and point HOMEBEAT_CONFIG (or `homebeat --config PATH`) at it. Relative paths are relative to this file.
 
 library_root = "/music"            # read-only music library
 data_dir = "/data"                 # database, TLS cert, Opus + art caches, AI models
@@ -18,13 +18,13 @@ cf_access_client_id = ""
 cf_access_client_secret = ""
 
 # The first admin user. On a fresh install it is created with this password hash; a v1 database's
-# listening history is migrated to this user. Run `nasmusic hash-password` and paste the output here.
+# listening history is migrated to this user. Run `homebeat hash-password` and paste the output here.
 # Other people join with invites (admin pages -> Users). Changing the hash later does not change an
-# existing password: use `nasmusic user passwd <name>` or the admin pages for that.
+# existing password: use `homebeat user passwd <name>` or the admin pages for that.
 admin_username = "admin"
 admin_password_hash = ""
 
-# Web player: built web/dist. Default: /opt/nasmusic/web (Docker image), else ../web/dist next to server/.
+# Web player: built web/dist. Default: /opt/homebeat/web (Docker image), else ../web/dist next to server/.
 # web_root = "/path/to/web/dist"
 # Extra CORS origins (the Tauri desktop app's origins are always allowed), e.g. a Vite dev server:
 # cors_origins = ["http://localhost:5173"]
@@ -81,7 +81,7 @@ opus_cache_gb = 20                 # LRU limit for transcoded Opus files
 # ---- Off-site backups (deploy/docker/README.md "Backups") ----
 # The database is backed up every night at 04:15 into the data folder. Set this to also copy each nightly backup
 # (gzipped) somewhere else: a folder on ANOTHER disk or dataset mounted into the container, or an rclone remote
-# ("name:path", configured in /data/rclone.conf). Restore from Admin > Backups, or `nasmusic restore`.
+# ("name:path", configured in /data/rclone.conf). Restore from Admin > Backups, or `homebeat restore`.
 # backup_copy_to = "/backup"
 # backup_keep = 14                 # nightly copies kept there
 # backup_include_config = true     # also copy config.toml + the HTTPS certificate (default: yes for a folder,

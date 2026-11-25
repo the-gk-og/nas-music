@@ -1,4 +1,4 @@
-# nas-music server + web player for any Docker host: Synology, Unraid, QNAP, OpenMediaVault, TrueNAS, a plain
+# Homebeat server + web player for any Docker host: Synology, Unraid, QNAP, OpenMediaVault, TrueNAS, a plain
 # Linux box. Step-by-step guide: deploy/docker/README.md.
 #
 #   cp .env.example .env      # then edit .env: at least MUSIC_DIR and LAN_HOST
@@ -7,13 +7,13 @@
 #
 # Settings come from .env. On the FIRST start the server writes config.toml into the data folder from them;
 # after that, change settings in config.toml (LAN_HOST, SERVER_NAME, ... in .env no longer apply).
-# The project name appears only in .env (STACK_NAME, IMAGE) and the image's NASMUSIC_* variables below.
+# The project name appears only in .env (STACK_NAME, IMAGE) and the image's HOMEBEAT_* variables below.
 
-name: ${STACK_NAME:-nasmusic}
+name: ${STACK_NAME:-homebeat}
 
 services:
   server:
-    image: ${IMAGE:-ghcr.io/the-gk-og/nasmusic:latest}
+    image: ${IMAGE:-ghcr.io/the-gk-og/homebeat:latest}
     # `docker compose build` builds the image from this repository instead of pulling it.
     build:
       context: ../..
@@ -30,20 +30,20 @@ services:
       - "127.0.0.1:${HTTP_PORT:-8080}:8080"  # plain HTTP, this machine only: for a reverse proxy or tunnel
       - "${CAST_PORT:-8090}:8090"            # speakers fetch signed media URLs here (plain HTTP, LAN only)
     environment:
-      NASMUSIC_CONFIG: /data/config.toml
+      HOMEBEAT_CONFIG: /data/config.toml
       TZ: ${TIMEZONE:-Europe/London}
       # First start only (written into /data/config.toml):
-      NASMUSIC_LAN_HOST: ${LAN_HOST:?set LAN_HOST in .env to your NAS's LAN IP address}
-      NASMUSIC_LAN_PORT: ${LAN_PORT:-8443}
-      NASMUSIC_CAST_PORT: ${CAST_PORT:-8090}
-      NASMUSIC_SERVER_NAME: ${SERVER_NAME:-Home NAS}
-      NASMUSIC_TIMEZONE: ${TIMEZONE:-Europe/London}
-      NASMUSIC_ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      NASMUSIC_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}   # empty = generate one and print it in the log
-      NASMUSIC_TUNNEL_URL: ${PUBLIC_URL:-}
-      NASMUSIC_OPUS_CACHE_GB: ${OPUS_CACHE_GB:-10}
-      NASMUSIC_UPLOAD_ROOT: ${UPLOAD_ROOT:-}         # "/uploads" once the uploads mount below is enabled
-      NASMUSIC_AUDIOBOOKS_ROOT: ${AUDIOBOOKS_ROOT:-} # "/audiobooks" once that mount is enabled
+      HOMEBEAT_LAN_HOST: ${LAN_HOST:?set LAN_HOST in .env to your NAS's LAN IP address}
+      HOMEBEAT_LAN_PORT: ${LAN_PORT:-8443}
+      HOMEBEAT_CAST_PORT: ${CAST_PORT:-8090}
+      HOMEBEAT_SERVER_NAME: ${SERVER_NAME:-Home NAS}
+      HOMEBEAT_TIMEZONE: ${TIMEZONE:-Europe/London}
+      HOMEBEAT_ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      HOMEBEAT_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}   # empty = generate one and print it in the log
+      HOMEBEAT_TUNNEL_URL: ${PUBLIC_URL:-}
+      HOMEBEAT_OPUS_CACHE_GB: ${OPUS_CACHE_GB:-10}
+      HOMEBEAT_UPLOAD_ROOT: ${UPLOAD_ROOT:-}         # "/uploads" once the uploads mount below is enabled
+      HOMEBEAT_AUDIOBOOKS_ROOT: ${AUDIOBOOKS_ROOT:-} # "/audiobooks" once that mount is enabled
     volumes:
       - ${MUSIC_DIR:?set MUSIC_DIR in .env to your music folder}:/music:ro   # never written to
       - ${DATA_DIR:-server-data}:/data       # database, certificate, caches: back this up

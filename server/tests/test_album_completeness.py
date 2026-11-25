@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from nasmusic.library import completeness, musicbrainz
+from homebeat.library import completeness, musicbrainz
 
 RG_SECOND = "33333333-3333-3333-3333-333333333333"   # "Second" is tagged with this release group (conftest)
 RG_FIRST = "44444444-4444-4444-4444-444444444444"

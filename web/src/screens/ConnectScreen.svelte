@@ -58,7 +58,7 @@
 
 <div class="wrap">
   <form class="card form" onsubmit={submit}>
-    <div class="logo"><span class="ring"></span><h1>nas-music</h1></div>
+    <div class="logo"><span class="ring"></span><h1>Homebeat</h1></div>
     <p class="muted">{joining ? 'Create your account with an invite code.' : 'Connect to your music server.'}</p>
     <label>Server address
       <input bind:value={address} placeholder="192.168.68.2:8443 or https://music.example.com" autocomplete="url" required />

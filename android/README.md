@@ -1,6 +1,6 @@
-# nas-music Android app
+# Homebeat Android app
 
-Kotlin + Jetpack Compose (Material 3, dark), Media3, WorkManager, Room. Package `org.nasmusic.app`,
+Kotlin + Jetpack Compose (Material 3, dark), Media3, WorkManager, Room. Package `org.homebeat.app`,
 minSdk 26, targetSdk 35 (compileSdk 36 because current AndroidX needs it).
 
 ## Build
@@ -50,11 +50,11 @@ Testing with the Desktop Head Unit (sideloaded APK):
    ⋮ → *Start head unit server*.
 2. PC: SDK Manager → *Android Auto Desktop Head Unit Emulator*; `adb forward tcp:5277 tcp:5277`;
    `~/Android/Sdk/extras/google/auto/desktop-head-unit`.
-3. Check: nas-music appears in the media app list; tabs For you / Library / Radio / Downloads; Albums is a
+3. Check: Homebeat appears in the media app list; tabs For you / Library / Radio / Downloads; Albums is a
    grid with covers; tapping a song plays its album from that song (queue shows the album); For you →
    *Play something for now* starts the smart shuffle; a *Continue listening* entry resumes at the saved
    position; search (magnifier) shows Songs / Albums / Artists; voice (`m` in DHU, or "Hey Google, play
-   <artist> on nas-music") starts artist radio; now-playing and the lock screen show the cover.
+   <artist> on Homebeat") starts artist radio; now-playing and the lock screen show the cover.
 4. Offline: turn Wi-Fi and data off → Library rows say "Can't reach your music server", Downloads still
    plays; turn the network back on → the open tab reloads by itself.
 5. If the tree is empty: `adb logcat -s MLSLegacyStub PlaybackService` (root / browse errors are logged there).

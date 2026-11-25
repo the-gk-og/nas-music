@@ -7,9 +7,9 @@ from datetime import timedelta
 import numpy as np
 import pytest
 
-from nasmusic import db
-from nasmusic.ai import api
-from nasmusic.ai.recommender import Recommender
+from homebeat import db
+from homebeat.ai import api
+from homebeat.ai.recommender import Recommender
 from tests.ai.conftest import NOW, USER, build_library, mix_rows
 from tests.ai.schema_v2 import add_user
 
@@ -191,6 +191,6 @@ def test_transitional_v1_database(tmp_path, cfg, monkeypatch):
     assert conn.execute("SELECT kind FROM mixes WHERE id = ?", (mid,)).fetchone()[0] == "more_like"
     reason, similar = api.explain(conn, cfg, mix_rows(conn, mid)[1][1])     # v1 shape
     assert reason.startswith("Sounds like") and len(similar) == 3
-    from nasmusic.ai import discovery
+    from homebeat.ai import discovery
     monkeypatch.setattr(discovery, "run", lambda *a, **k: 3)
     assert api.run_weekly_discovery(conn, cfg) == 3

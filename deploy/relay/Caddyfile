@@ -1,6 +1,6 @@
-# nas-music relay HTTPS — lives on the NAS at /data/relay/Caddyfile.
+# Homebeat relay HTTPS — lives on the NAS at /data/relay/Caddyfile.
 # Caddy gets a Let's Encrypt certificate for the music hostname automatically (through the relay's
-# ports 80/443) and forwards to the nasmusic server's internal HTTP port.
+# ports 80/443) and forwards to the homebeat server's internal HTTP port.
 {
 	servers {
 		listener_wrappers {
@@ -26,7 +26,7 @@ music.whoactuallyneeds.men {
 	request_body /api/v1/uploads/* {
 		max_size 32MB
 	}
-	reverse_proxy nasmusic:8080 {
+	reverse_proxy homebeat:8080 {
 		# stream audio and the Connect WebSocket without buffering
 		flush_interval -1
 	}

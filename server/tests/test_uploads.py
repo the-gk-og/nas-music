@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from nasmusic import config as config_mod
-from nasmusic import db
-from nasmusic.db import migrations
-from nasmusic.library import scanner, uploads
-from nasmusic.library.tags import TrackTags
+from homebeat import config as config_mod
+from homebeat import db
+from homebeat.db import migrations
+from homebeat.library import scanner, uploads
+from homebeat.library.tags import TrackTags
 from tests.conftest import make_flac, offline, user_client
 
 V6_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v6.sql").read_text()
@@ -36,9 +36,9 @@ def ucfg(cfg, upload_root):
 
 @pytest.fixture
 def uapp(ucfg, scanned, monkeypatch):
-    from nasmusic.app import create_app
-    from nasmusic.app.scheduler import Jobs
-    from nasmusic.core import open_db
+    from homebeat.app import create_app
+    from homebeat.app.scheduler import Jobs
+    from homebeat.core import open_db
 
     jobs = Jobs(ucfg)
 
@@ -372,7 +372,7 @@ def test_config_upload_root_validation(tmp_path):
 
 
 def test_migration_v6_to_v7(tmp_path):
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = db.connect(path)
     conn.executescript(V6_SCHEMA)
     conn.execute("INSERT INTO schema_version (version) VALUES (6)")
@@ -383,6 +383,6 @@ def test_migration_v6_to_v7(tmp_path):
     assert migrations.current_version(conn) == db.SCHEMA_VERSION
     for t in ("upload_access", "uploads", "upload_sessions"):
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
-    assert len(list(tmp_path.glob("nasmusic.db.v6-backup-*"))) == 1
+    assert len(list(tmp_path.glob("homebeat.db.v6-backup-*"))) == 1
     db.init(conn)
     assert len(list(tmp_path.glob("*-backup-*"))) == 1

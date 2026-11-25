@@ -1,4 +1,4 @@
-// Types for the nas-music HTTP API v1 (+ v2 additions from docs/v2.md §4/§5).
+// Types for the Homebeat HTTP API v1 (+ v2 additions from docs/v2.md §4/§5).
 // Keep in sync with api/openapi.yaml.
 
 export interface Artist {

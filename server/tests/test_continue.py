@@ -6,8 +6,8 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from nasmusic.cast import Media, SpokenMedia
-from nasmusic.cast.session import CastHooks, SpeakerSession
+from homebeat.cast import Media, SpokenMedia
+from homebeat.cast.session import CastHooks, SpeakerSession
 from tests.conftest import track_ids
 from tests.test_cast import FakeSpeaker
 from tests.test_connect import URL, hello, token, until
@@ -84,7 +84,7 @@ def test_play_spoken_and_media_state(sapp, sconn, alice, up):  # noqa: F811
     eid = sconn.execute("SELECT id FROM podcast_episodes WHERE guid = 'ep-2'").fetchone()[0]
     sapp.state.ctx.hub.persist_every_s = 0.05
     h = {"Authorization": f"Bearer {alice.token}"}
-    from nasmusic import auth
+    from homebeat import auth
 
     _, wtok = auth.create_device(sconn, alice.user_id, "watch", "watch")
     with TestClient(sapp) as tc, tc.websocket_connect(URL, headers=h) as phone, \
@@ -177,7 +177,7 @@ def test_continue_mixes_queues_and_spoken_and_dismiss(sapp, sconn, alice, up):  
     up.routes[FEED_URL] = httpx.Response(200, content=RSS)
     alice.post(f"{API}/podcasts", json={"feedUrl": FEED_URL})
     eid = sconn.execute("SELECT id FROM podcast_episodes WHERE guid = 'ep-2'").fetchone()[0]
-    from nasmusic.library import scanner
+    from homebeat.library import scanner
 
     scanner.scan(sapp.state.ctx.cfg, sconn)
     ids = list(track_ids(sconn).values())

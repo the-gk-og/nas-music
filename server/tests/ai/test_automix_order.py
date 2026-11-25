@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from nasmusic.ai.automix import Item, arc_target, order, pair_cost, tempo_match, transition_info
+from homebeat.ai.automix import Item, arc_target, order, pair_cost, tempo_match, transition_info
 
 
 def test_tempo_match_half_double():

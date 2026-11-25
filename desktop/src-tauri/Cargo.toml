@@ -1,13 +1,13 @@
 [package]
-name = "nas-music-desktop"
+name = "homebeat-desktop"
 version = "0.1.0"
-description = "nas-music desktop player"
+description = "Homebeat desktop player"
 license = "AGPL-3.0-only"
 edition = "2021"
 rust-version = "1.77"
 
 [lib]
-name = "nas_music_desktop_lib"
+name = "homebeat_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

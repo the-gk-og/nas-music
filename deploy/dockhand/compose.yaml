@@ -1,4 +1,4 @@
-# nas-music for a Docker host managed with Dockhand (or any Compose UI) where cloudflared already
+# Homebeat for a Docker host managed with Dockhand (or any Compose UI) where cloudflared already
 # runs on host networking with a remotely managed tunnel.
 #
 # - Config lives in the data volume at /data/config.toml (see "First install" below), NOT in a Compose
@@ -19,7 +19,7 @@
 #   http_port = 8080
 #   server_name = "Home NAS"
 #   tunnel_url = "https://music.example.com"
-#   admin_password_hash = "<output of: nasmusic hash-password>"
+#   admin_password_hash = "<output of: homebeat hash-password>"
 #   timezone = "Europe/London"
 #   opus_cache_gb = 10
 #   upload_root = "/uploads"
@@ -27,9 +27,14 @@
 # then restart the container. Music path, LAN IP and tunnel URL above are examples; change them.
 
 services:
-  nasmusic:
-    image: ghcr.io/the-gk-og/nasmusic:latest
-    container_name: nasmusic
+  homebeat:
+    image: ghcr.io/the-gk-og/homebeat:latest
+    container_name: homebeat
+    networks:
+      default:
+        # Old name from before the Homebeat rename, so an existing Caddyfile / tunnel hostname pointing at
+        # http://nasmusic:8080 keeps working. (Drop this block if you switch to network_mode: host.)
+        aliases: [nasmusic]
     user: "568:568"
     group_add:
       - "3000"                 # group that owns the music folder (770 perms); read-only access via group
@@ -40,7 +45,7 @@ services:
       - "8090:8090"              # casting: speakers fetch signed media URLs (plain HTTP, LAN only).
                                  # Speaker discovery needs network_mode: host; see deploy/README.md "Casting".
     environment:
-      NASMUSIC_CONFIG: /data/config.toml
+      HOMEBEAT_CONFIG: /data/config.toml
     volumes:
       # Read-only. To let the admin trash delete removed songs, drop `:ro` AND set library_delete_files = true
       # in /data/config.toml (deploy/README.md "Deleting songs").
@@ -55,7 +60,7 @@ services:
   # Public HTTPS via the friend's relay (deploy/relay). Caddy gets the Let's Encrypt certificate.
   caddy:
     image: caddy:2.11.9
-    container_name: nasmusic-caddy
+    container_name: homebeat-caddy
     restart: unless-stopped
     command: ["caddy", "run", "--config", "/relay/Caddyfile", "--adapter", "caddyfile"]
     volumes:
@@ -68,11 +73,11 @@ services:
       - caddy-data:/data         # certificates (keep!)
       - caddy-config:/config
     depends_on:
-      - nasmusic
+      - homebeat
 
   frpc:
     image: fatedier/frpc:v0.71.1
-    container_name: nasmusic-frpc
+    container_name: homebeat-frpc
     restart: unless-stopped
     command: ["-c", "/relay/frpc.toml"]
     volumes:
@@ -86,6 +91,8 @@ services:
       - caddy
 
 volumes:
+  # Name kept from before the Homebeat rename: renaming this key would give the server a new, EMPTY volume.
+  # (Compose names it <stack>_nasmusic-data, so also keep the stack's name in Dockhand.)
   nasmusic-data:
   caddy-data:
   caddy-config:

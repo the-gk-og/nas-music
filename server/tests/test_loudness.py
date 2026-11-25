@@ -6,9 +6,9 @@ import pytest
 from mutagen.flac import FLAC
 from tests.conftest import make_flac, track_ids
 
-from nasmusic import db
-from nasmusic.db import migrations
-from nasmusic.library import loudness, scanner, tags
+from homebeat import db
+from homebeat.db import migrations
+from homebeat.library import loudness, scanner, tags
 
 SUMMARY = """
 [Parsed_ebur128_0 @ 0x1] Summary:
@@ -124,7 +124,7 @@ def test_api_exposes_replay_gain(client, conn, cfg):
 
 
 def test_loudness_job_registered(cfg):
-    from nasmusic.app.scheduler import JOB_NAMES, Jobs
+    from homebeat.app.scheduler import JOB_NAMES, Jobs
 
     assert "loudness" in JOB_NAMES
     rec = Jobs(cfg).run("loudness")
@@ -137,7 +137,7 @@ V3_SCHEMA = (Path(__file__).parent / "fixtures" / "schema_v3.sql").read_text()
 def test_v4_to_v5(tmp_path):
     from tests.test_migration_v4 import make_v3
 
-    path = tmp_path / "nasmusic.db"
+    path = tmp_path / "homebeat.db"
     conn = make_v3(path)
     migrations.migrate_v3_to_v4(conn, db.schema_sql(), make_backup=False)
     assert migrations.current_version(conn) == 4
@@ -148,7 +148,7 @@ def test_v4_to_v5(tmp_path):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(tracks)")}
     assert {c for c, _ in migrations.V5_TRACK_COLUMNS} <= cols
     assert conn.execute("SELECT title, rg_source FROM tracks").fetchone()[:] == ("T", None)
-    assert len(list(tmp_path.glob("nasmusic.db.v4-backup-*"))) == 1
+    assert len(list(tmp_path.glob("homebeat.db.v4-backup-*"))) == 1
     db.init(conn)  # idempotent
     assert len(list(tmp_path.glob("*-backup-*"))) == 1
 

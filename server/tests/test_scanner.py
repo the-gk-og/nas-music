@@ -3,7 +3,7 @@ import shutil
 
 from tests.conftest import make_flac, png_bytes
 
-from nasmusic.library import art, queries, scanner
+from homebeat.library import art, queries, scanner
 
 
 def test_tags_ids_and_grouping(cfg, conn):
@@ -137,8 +137,8 @@ def test_corrupt_file_is_reported_not_fatal(cfg, conn):
 
 def test_scan_speed_many_files(tmp_path, base_flac):
     """600 files scan quickly, and an unchanged rescan is near-instant (mtime only)."""
-    from nasmusic import config
-    from nasmusic.core import init_db, open_db
+    from homebeat import config
+    from homebeat.core import init_db, open_db
 
     root = tmp_path / "big"
     src = make_flac(base_flac, tmp_path / "tmpl.flac", title="T", artist="A", album="B")

@@ -8,10 +8,10 @@ import httpx
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
-from nasmusic import auth
-from nasmusic.app import MAX_BODY_BYTES
-from nasmusic.app.context import origin_allowed
-from nasmusic.spoken import net
+from homebeat import auth
+from homebeat.app import MAX_BODY_BYTES
+from homebeat.app.context import origin_allowed
+from homebeat.spoken import net
 from tests.conftest import make_user, user_client
 
 API = "/api/v1"
@@ -37,7 +37,7 @@ def test_origin_allowed_rules(cfg):
     assert origin_allowed({"host": "internal:8080", "x-forwarded-host": "music.example.org",
                            "origin": "https://music.example.org"}, cfg)
     cfg.tunnel_url = "https://music.example.org"
-    assert origin_allowed({"host": "nasmusic:8080", "origin": "https://music.example.org"}, cfg)
+    assert origin_allowed({"host": "homebeat:8080", "origin": "https://music.example.org"}, cfg)
 
 
 def test_cookie_session_csrf_refused_from_other_sites(app, conn):
@@ -153,7 +153,7 @@ def test_password_change_signs_out_other_devices(app, conn):
 def test_idle_device_login_expires(conn):
     from datetime import UTC, datetime, timedelta
 
-    from nasmusic.core import iso
+    from homebeat.core import iso
 
     u = make_user(conn, "hank")
     dev, tok = auth.create_device(conn, u.id, "old phone", "android")
@@ -193,7 +193,7 @@ def test_station_on_home_network_admin_only(app, conn, client, bob):
 
 
 def test_http_bind_host_setting(tmp_path):
-    from nasmusic import config as config_mod
+    from homebeat import config as config_mod
 
     p = tmp_path / "c.toml"
     p.write_text(f'library_root = "{tmp_path}"\ndata_dir = "{tmp_path / "d"}"\nhttp_bind_host = "127.0.0.1"\n')
