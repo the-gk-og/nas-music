@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Check, Ellipsis, Equal } from '@lucide/svelte';
+  import { appearance } from '../lib/appearance.svelte';
+  import { artistLine, movementTitle } from '../lib/classical';
   import { fmtTime } from '../lib/format';
   import type { Track } from '../lib/types';
   import Cover from './Cover.svelte';
@@ -10,6 +12,7 @@
     current = false,
     handle = false,
     showAlbum = true,
+    movement = false,
     onplay,
     onmenu,
     onhandledown,
@@ -21,6 +24,8 @@
     current?: boolean;
     handle?: boolean;
     showAlbum?: boolean;
+    /** v10: under a work heading, show the movement name instead of the full title. */
+    movement?: boolean;
     onplay: () => void;
     onmenu: (ev: MouseEvent) => void;
     onhandledown?: (ev: PointerEvent) => void;
@@ -82,8 +87,8 @@
   >
     <div class="thumb"><Cover albumId={track.albumId} size={128} />{#if selected}<span class="tick"><Check size={30} strokeWidth={3} /></span>{/if}</div>
     <div class="text">
-      <div class="title ellipsis"><ExplicitBadge status={track.explicit} />{track.title}</div>
-      <div class="artist ellipsis">{track.artist}</div>
+      <div class="title ellipsis"><ExplicitBadge status={track.explicit} />{movement ? movementTitle(track) : track.title}</div>
+      <div class="artist ellipsis">{artistLine(track, appearance.prefs.classical)}</div>
       {#if showAlbum}
         <div class="album"><span class="ellipsis">{track.album}</span><span class="dur">{fmtTime(track.durationS)}</span></div>
       {:else}

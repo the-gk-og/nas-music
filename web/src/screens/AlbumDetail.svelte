@@ -1,9 +1,12 @@
 <script lang="ts">
-  import { Check, ChevronDown, ListEnd, ListPlus, Plus, Tags } from '@lucide/svelte';
+  import { Check, ChevronDown, ListEnd, ListPlus, Play, Plus, Tags } from '@lucide/svelte';
   import Card from '../components/Card.svelte';
   import PageHeader from '../components/PageHeader.svelte';
   import Shelf from '../components/Shelf.svelte';
   import TrackList from '../components/TrackList.svelte';
+  import TrackRow from '../components/TrackRow.svelte';
+  import { appearance } from '../lib/appearance.svelte';
+  import { groupByWork, hasWorks } from '../lib/classical';
   import { fmtTime } from '../lib/format';
   import { library } from '../lib/library.svelte';
   import { player } from '../lib/player.svelte';
@@ -57,6 +60,12 @@
   const name = $derived(album ? `Album: ${album.title}` : '');
   const meta = { source: 'library' as const, addedFrom: 'album' };
   const item = $derived<ShelfItem | null>(album ? { type: 'album', id: album.id, title: album.title, subtitle: album.artist, albumId: album.id, album } : null);
+  // v10 classical mode: movements grouped under their work, each work playable on its own.
+  const groups = $derived(album && appearance.prefs.classical && hasWorks(album.tracks) ? groupByWork(album.tracks) : null);
+  const currentId = $derived(player.shown.track?.id);
+  function playWork(tracks: Track[], work: string) {
+    void player.playList(tracks, 0, `Work: ${work}`, { source: 'library', addedFrom: 'work' });
+  }
   const moreItems = $derived(more.map((a): ShelfItem => ({ type: 'album', id: a.id, title: a.title, subtitle: String(a.year ?? ''), albumId: a.id })));
 </script>
 
@@ -114,7 +123,33 @@
         </ul>
       {/if}
     {/if}
-    <TrackList tracks={album.tracks} queueName={name} {meta} showAlbum={false} />
+    {#if groups}
+      <div role="list">
+        {#each groups as g (g.start)}
+          {#if g.workId}
+            <div class="work">
+              <div class="grow">
+                <div class="wt">{g.work}</div>
+                <div class="muted small">{g.composer ? `${g.composer} · ` : ''}{g.tracks.length} movement{g.tracks.length === 1 ? '' : 's'} · {fmtTime(g.tracks.reduce((s, t) => s + t.durationS, 0))}</div>
+              </div>
+              <button class="icon-btn" aria-label="Play {g.work}" title="Play whole work" onclick={() => playWork(g.tracks, g.work ?? '')}><Play size={20} fill="currentColor" /></button>
+            </div>
+          {/if}
+          {#each g.tracks as t, j (t.id + ':' + (g.start + j))}
+            <TrackRow
+              track={t}
+              showAlbum={false}
+              movement={!!g.workId}
+              current={t.id === currentId}
+              onplay={() => player.playList(album!.tracks, g.start + j, name, meta)}
+              onmenu={() => ui.open({ kind: 'songMenu', ctx: { track: t, list: album!.tracks } })}
+            />
+          {/each}
+        {/each}
+      </div>
+    {:else}
+      <TrackList tracks={album.tracks} queueName={name} {meta} showAlbum={false} />
+    {/if}
     {#if moreItems.length}
       <div class="more"><Shelf title="More by {album.artist}">{#each moreItems as it (it.id)}<Card item={it} />{/each}</Shelf></div>
     {/if}
@@ -178,6 +213,17 @@
   }
   .gaps .dur {
     font-variant-numeric: tabular-nums;
+  }
+  .work {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 18px var(--gutter, 16px) 4px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+  }
+  .wt {
+    font-weight: 700;
   }
   .more {
     --gutter: clamp(16px, 3vw, 32px);

@@ -58,6 +58,8 @@ def _validate(key: str, value: Any) -> None:
         raise ValueError("dj.voice must be true or false")
     if base == "dj.every" and (isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 10):
         raise ValueError("dj.every must be a whole number from 1 to 10")
+    if base == "library.classical" and not isinstance(value, bool):  # v10 classical mode
+        raise ValueError("library.classical must be true or false")
     if base in _SHELF_LISTS and not (isinstance(value, list) and all(isinstance(x, str) for x in value)):
         raise ValueError(f"{base} must be a list of shelf ids")
 

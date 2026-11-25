@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Download, Pencil, Trash2, Users, X } from '@lucide/svelte';
+  import { Download, FolderInput, Pencil, Trash2, Users, X } from '@lucide/svelte';
   import PageHeader from '../components/PageHeader.svelte';
   import { fmtTime } from '../lib/format';
   import type { ShelfItem } from '../lib/types';
@@ -120,6 +120,7 @@
       {#snippet menu()}
         <button onclick={() => ui.open({ kind: 'playlistShare', playlistId: id })}><Users size={18} /> {isOwner ? 'Share / members' : 'Members & activity'}</button>
         <button onclick={exportM3u}><Download size={18} /> Export as M3U</button>
+        <button onclick={() => library.movePlaylist({ ...pl!, folderId: library.playlists.find((x) => x.id === id)?.folderId ?? pl!.folderId })}><FolderInput size={18} /> Move to folder</button>
         {#if isOwner}
           <button onclick={rename}><Pencil size={18} /> Rename</button>
           <button onclick={del}><Trash2 size={18} /> Delete playlist</button>

@@ -1,8 +1,11 @@
 <script lang="ts">
   // Navigation for every form (§2, §6): phone bottom tabs, tablet rail, desktop sidebar with playlists.
-  import { Compass, House, Library, ListMusic, Plus, Search } from '@lucide/svelte';
+  import { ChevronDown, ChevronRight, Compass, FolderPlus, House, Library, ListMusic, Plus, Search } from '@lucide/svelte';
   import { appearance } from '../lib/appearance.svelte';
   import { library } from '../lib/library.svelte';
+  import { loadJson, saveJson } from '../lib/platform';
+  import { buildTree } from '../lib/playlistFolders';
+  import type { PlaylistFolder } from '../lib/types';
   import { session } from '../lib/session.svelte';
   import { TABS, ui, type TabId } from '../lib/ui.svelte';
   import Avatar from './Avatar.svelte';
@@ -11,11 +14,57 @@
   const form = $derived(appearance.form);
   const tabs = $derived(form === 'desktop' ? TABS.filter((t) => t.id !== 'queue') : TABS);
 
-  async function newPlaylist() {
+  // v10 playlist folders: a collapsible tree; drag a playlist or folder onto a folder (or the header) to move it.
+  const tree = $derived(buildTree(library.folders, library.playlists));
+  let open = $state<Record<string, boolean>>(loadJson('nm.navFolders', {}));
+  function toggle(id: string) {
+    open = { ...open, [id]: !open[id] };
+    saveJson('nm.navFolders', open);
+  }
+  let dropAt = $state<string | null>(null);
+  function dragStart(e: DragEvent, kind: 'playlist' | 'folder', id: string) {
+    e.dataTransfer?.setData('text/x-nm-move', `${kind}:${id}`);
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+  }
+  function dragOver(e: DragEvent, target: string) {
+    if (!e.dataTransfer?.types.includes('text/x-nm-move')) return;
+    e.preventDefault();
+    dropAt = target;
+  }
+  async function drop(e: DragEvent, folderId: string | null) {
+    e.preventDefault();
+    dropAt = null;
+    const [kind, id] = (e.dataTransfer?.getData('text/x-nm-move') ?? '').split(':');
+    if (kind === 'playlist') {
+      const p = library.playlists.find((x) => x.id === id);
+      if (p) await library.movePlaylist(p, folderId);
+    } else if (kind === 'folder' && id && id !== folderId) {
+      await library.moveFolder(id, folderId);
+    }
+  }
+  function folderMenu(e: MouseEvent, f: PlaylistFolder) {
+    e.preventDefault();
+    void (async () => {
+      const act = await ui.pick(f.name, [
+        { value: 'playlist', label: 'New playlist here' },
+        { value: 'sub', label: 'New folder inside' },
+        { value: 'rename', label: 'Rename' },
+        { value: 'move', label: 'Move to…' },
+        { value: 'delete', label: 'Delete folder' },
+      ]);
+      if (act === 'playlist') await newPlaylist(f.id);
+      if (act === 'sub') await library.newFolder(f.id);
+      if (act === 'rename') await library.renameFolder(f);
+      if (act === 'move') await library.moveFolderTo(f);
+      if (act === 'delete') await library.deleteFolder(f);
+    })();
+  }
+
+  async function newPlaylist(folderId: string | null = null) {
     const name = await ui.prompt('New playlist', 'Name', '', 'Create');
     if (!name) return;
     try {
-      const p = await session.api.createPlaylist(name);
+      const p = await session.api.createPlaylist(name, folderId);
       await library.refreshPlaylists();
       ui.go('playlist', p.id);
     } catch (e) {
@@ -44,14 +93,41 @@
   {#if form === 'desktop'}
     <div class="lists">
       <div class="lh">
-        <span>Your playlists</span>
-        <button class="icon-btn sm" aria-label="New playlist" title="New playlist" onclick={newPlaylist}><Plus size={18} /></button>
+        <span class:drop={dropAt === ''} role="presentation" ondragover={(e) => dragOver(e, '')} ondragleave={() => (dropAt = null)} ondrop={(e) => drop(e, null)}>Your playlists</span>
+        <span>
+          <button class="icon-btn sm" aria-label="New folder" title="New folder" onclick={() => library.newFolder()}><FolderPlus size={18} /></button>
+          <button class="icon-btn sm" aria-label="New playlist" title="New playlist" onclick={() => newPlaylist()}><Plus size={18} /></button>
+        </span>
       </div>
       <div class="scroll">
         <button class="pl" class:active={ui.route.name === 'list' && ui.route.param === 'favourites'} onclick={() => ui.go('list', 'favourites')}>Favorites</button>
-        {#each library.playlists as p (p.id)}
-          <button class="pl ellipsis" class:active={ui.route.name === 'playlist' && ui.route.param === p.id} onclick={() => ui.go('playlist', p.id)}>{p.name}</button>
-        {/each}
+        {#snippet playlist(p: import('../lib/types').Playlist, depth: number)}
+          <button class="pl ellipsis" style:padding-left="{10 + depth * 16}px" draggable="true" ondragstart={(e) => dragStart(e, 'playlist', p.id)} class:active={ui.route.name === 'playlist' && ui.route.param === p.id} onclick={() => ui.go('playlist', p.id)}>{p.name}</button>
+        {/snippet}
+        {#snippet folder(n: import('../lib/playlistFolders').FolderNode)}
+          <button
+            class="pl fo ellipsis"
+            class:drop={dropAt === n.folder.id}
+            style:padding-left="{4 + n.depth * 16}px"
+            draggable="true"
+            aria-expanded={!!open[n.folder.id]}
+            title="Right-click for folder options"
+            ondragstart={(e) => dragStart(e, 'folder', n.folder.id)}
+            ondragover={(e) => dragOver(e, n.folder.id)}
+            ondragleave={() => (dropAt = null)}
+            ondrop={(e) => drop(e, n.folder.id)}
+            oncontextmenu={(e) => folderMenu(e, n.folder)}
+            onclick={() => toggle(n.folder.id)}
+          >
+            {#if open[n.folder.id]}<ChevronDown size={16} />{:else}<ChevronRight size={16} />{/if}{n.folder.name}
+          </button>
+          {#if open[n.folder.id]}
+            {#each n.children as c (c.folder.id)}{@render folder(c)}{/each}
+            {#each n.playlists as p (p.id)}{@render playlist(p, n.depth + 1)}{/each}
+          {/if}
+        {/snippet}
+        {#each tree.roots as n (n.folder.id)}{@render folder(n)}{/each}
+        {#each tree.loose as p (p.id)}{@render playlist(p, 0)}{/each}
       </div>
     </div>
   {/if}
@@ -222,6 +298,17 @@
   }
   .pl.active {
     color: var(--accent);
+  }
+  .pl.fo {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+  }
+  .pl.drop,
+  .lh .drop {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .me {
     display: flex;

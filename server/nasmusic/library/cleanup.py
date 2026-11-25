@@ -1,4 +1,4 @@
-"""Library cleanup for the admin console (schema v10 `library_removed`): reports of songs worth pruning, removal
+"""Library cleanup for the admin console (schema v11 `library_removed`): reports of songs worth pruning, removal
 into a trash, restore, and purge.
 
 Removing a track sets tracks.missing = 3: it disappears from every listing at once (like a hidden duplicate)

@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 
 from nasmusic.config import UPLOADS_PREFIX, Config
 from nasmusic.core import now_iso
-from nasmusic.library import art, overrides, tags
+from nasmusic.library import art, classical, overrides, tags
 
 log = logging.getLogger(__name__)
 
@@ -243,13 +243,16 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool, uploads_only: bool 
             file_tags = overrides.file_tags_json(t)
             t = overrides.apply(t, all_overrides.get(tid))
             ta_id, al_id = upsert_names(conn, f.rel, t, now)
+            mv = classical.parse(t.title, t.composer, t.work, t.movement, t.movement_no)
             prev = existing.get(f.rel)
             conn.execute(
                 "INSERT INTO tracks (id, path, album_id, artist_id, title, track_no, disc_no, year, genre, "
                 "duration_s, flac_bytes, mtime, mbid, added_at, missing, composer, lyricist, comment, album_artist, "
                 "codec, bitrate, sample_rate, bits_per_sample, channels, folder, file_tags, "
-                "rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, rg_source, loudness_lufs) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak, rg_source, loudness_lufs, "
+                "work, movement, movement_no) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                "?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET album_id = excluded.album_id, artist_id = excluded.artist_id, "
                 "title = excluded.title, track_no = excluded.track_no, disc_no = excluded.disc_no, "
                 "year = excluded.year, genre = excluded.genre, duration_s = excluded.duration_s, "
@@ -262,11 +265,13 @@ def _scan(cfg: Config, conn: sqlite3.Connection, full: bool, uploads_only: bool 
                 # A changed file is re-levelled: gain tags if it has them, else measured again by the loudness job.
                 "rg_track_gain = excluded.rg_track_gain, rg_track_peak = excluded.rg_track_peak, "
                 "rg_album_gain = excluded.rg_album_gain, rg_album_peak = excluded.rg_album_peak, "
-                "rg_source = excluded.rg_source, loudness_lufs = excluded.loudness_lufs",
+                "rg_source = excluded.rg_source, loudness_lufs = excluded.loudness_lufs, "
+                "work = excluded.work, movement = excluded.movement, movement_no = excluded.movement_no",
                 (tid, f.rel, al_id, ta_id, t.title or Path(f.rel).stem, t.track_no, t.disc_no, t.year,
                  t.genre, t.duration_s, f.size, f.mtime, t.mb_track, now, t.composer, t.lyricist, t.comment,
                  t.albumartist, t.codec, t.bitrate, t.sample_rate, t.bits_per_sample, t.channels,
-                 "" if rel_dir in ("", ".") else rel_dir, file_tags, *_gain_values(t)),
+                 "" if rel_dir in ("", ".") else rel_dir, file_tags, *_gain_values(t),
+                 mv.work, mv.movement, mv.movement_no),
             )
             if prev is None:
                 res.added += 1

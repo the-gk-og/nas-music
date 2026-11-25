@@ -47,7 +47,7 @@ class TrackIds(BaseModel):
 class ResolveBody(BaseModel):
     keepTrackId: str
     hideTrackIds: list[str] = Field(min_length=1, max_length=100)
-    # v10: also move the other copies to the trash (deleted when it is purged) instead of only hiding them.
+    # v11: also move the other copies to the trash (deleted when it is purged) instead of only hiding them.
     remove: bool = False
 
 

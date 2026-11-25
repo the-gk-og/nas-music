@@ -1,4 +1,4 @@
-"""Fake-lossless checker (schema v10): the spectral cliff of a lossy source, upsampled hi-res, padded 24-bit,
+"""Fake-lossless checker (schema v11): the spectral cliff of a lossy source, upsampled hi-res, padded 24-bit,
 and the resumable job."""
 import shutil
 import subprocess

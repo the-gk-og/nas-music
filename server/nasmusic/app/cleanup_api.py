@@ -1,4 +1,4 @@
-"""Admin console "Cleanup" (schema v10): pruning reports, remove to trash, restore, purge, the delete list, the
+"""Admin console "Cleanup" (schema v11): pruning reports, remove to trash, restore, purge, the delete list, the
 fake-lossless verdicts, and an admin preview stream that also plays hidden and removed copies (to compare
 duplicates by ear). See nasmusic.library.cleanup / nasmusic.library.lossless."""
 from __future__ import annotations

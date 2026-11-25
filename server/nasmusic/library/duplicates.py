@@ -116,7 +116,7 @@ def groups(conn: sqlite3.Connection) -> list[dict]:
                    "bitrate": info[t]["bitrate"], "sampleRate": info[t]["sample_rate"],
                    "bitsPerSample": info[t]["bits_per_sample"], "bytes": info[t]["flac_bytes"],
                    "hidden": info[t]["missing"] == 2, "keptId": info[t]["kept_id"],
-                   # v10 fake-lossless checker: ok | lossy_source | suspect | upsampled | unknown | error | None
+                   # v11 fake-lossless checker: ok | lossy_source | suspect | upsampled | unknown | error | None
                    "losslessVerdict": info[t]["verdict"],
                    "losslessNote": lossless_note(info[t]["verdict"], info[t]["source_guess"], info[t]["cutoff_hz"])}
                   for t in tids if t in info]

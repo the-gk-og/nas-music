@@ -141,6 +141,10 @@
         {/each}
       </div>
     </div>
+    <label class="sig inline">
+      <div><div>Classical mode</div><div class="muted small">Group albums by work with a play-whole-work button, show movement names, put the composer before the performer, and add Composers to the library.</div></div>
+      <input type="checkbox" class="switch" checked={appearance.prefs.classical} onchange={(e) => appearance.set('classical', e.currentTarget.checked)} />
+    </label>
     <div class="opt">
       <div>Accent colour</div>
       <div class="swatches">

@@ -1,4 +1,4 @@
-"""Library cleanup (schema v10): remove to trash, restore, purge (files deleted only when library_delete_files is
+"""Library cleanup (schema v11): remove to trash, restore, purge (files deleted only when library_delete_files is
 on), the delete list, pruning reports, the admin preview stream, and duplicates resolved into the trash."""
 import os
 import shutil
