@@ -63,6 +63,7 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import org.homebeat.app.AppContainer
+import org.homebeat.app.eq.EqEngine
 import org.homebeat.app.eq.EqSettings
 import org.homebeat.app.ui.LocalUi
 
@@ -201,7 +202,7 @@ private fun EffectsPage(c: AppContainer, eq: EqSettings, volume: Float) {
         HorizontalDivider(Modifier.padding(vertical = 16.dp))
         Text("Preamp", fontWeight = FontWeight.Bold)
         Row(Modifier.padding(vertical = 8.dp).border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))) {
-            listOf(Triple("Headroom", "-6 dB", -6f), Triple("Off", "0 dB", 0f), Triple("Boost", "+1 dB", 1f)).forEach { (name, sub, db) ->
+            listOf(Triple("Quieter", "-3 dB", -3f), Triple("Auto", "0 dB", 0f), Triple("Louder", "+3 dB", 3f)).forEach { (name, sub, db) ->
                 val sel = eq.preampDb == db
                 Column(
                     Modifier.clickable { c.eq.update { it.copy(preampDb = db, enabled = true) } }
@@ -215,6 +216,11 @@ private fun EffectsPage(c: AppContainer, eq: EqSettings, volume: Float) {
             }
         }
         Text("%+.1f dB".format(eq.preampDb), style = MaterialTheme.typography.bodySmall)
+        val auto = remember(eq) { EqEngine.headroomDb(eq) }
+        Text(
+            if (auto < -0.05) "Auto headroom %.1f dB keeps your boosts from clipping".format(auto) else "Auto headroom: nothing to take off",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Slider(eq.preampDb, { v -> c.eq.update { it.copy(preampDb = (v * 2).roundToInt() / 2f, enabled = true) } }, valueRange = -12f..6f, modifier = Modifier.padding(horizontal = 24.dp))
         HorizontalDivider(Modifier.padding(vertical = 16.dp))
         Text("Volume", fontWeight = FontWeight.Bold)

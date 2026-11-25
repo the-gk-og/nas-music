@@ -1,6 +1,8 @@
 // Equalizer model + Web Audio graph (§6). The graph is:
 //   source → preamp → [AutoEq headphone filters] → 10 × peaking biquad → bass-boost low-shelf → [pitch worklet] → stereo matrix
-//   (width / mono) → balance (StereoPanner) → volume → destination
+//   (width / mono) → balance (StereoPanner) → [limiter, while the EQ is on] → volume → destination
+// The preamp includes automatic headroom: the biggest boost of the whole curve is taken off, so boosts never clip
+// (same maths as the Android EqEngine). The user's preamp is a trim on top; the limiter catches what's left.
 // The stereo matrix does both "surround" widening and mono: L' = a·L + b·R, R' = a·R + b·L with
 // a = (1+w)/2, b = (1−w)/2 and w = 0 (mono) … 1 (normal) … 2 (widest).
 
@@ -9,14 +11,18 @@ export const EQ_LABELS = ['31.5', '63', '125', '250', '500', '1 k', '2 k', '4 k'
 export const EQ_MAX_DB = 12;
 export const BAND_Q = 1.41; // ~1 octave
 
+/** Gentle curves: every boost costs headroom (auto headroom turns the whole signal down by the biggest boost).
+ *  Same values as android EqSettings.PRESETS. */
 export const PRESETS: Record<string, number[]> = {
   Flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  Bass: [6, 5, 4, 2, 0, 0, 0, 0, 0, 0],
-  Vocal: [-2, -2, -1, 1, 3, 4, 3, 1, 0, -1],
-  Treble: [0, 0, 0, 0, 0, 1, 2, 4, 5, 6],
-  Rock: [5, 4, 2, -1, -2, -1, 1, 3, 4, 5],
-  Pop: [-1, 1, 3, 4, 3, 0, -1, -1, 1, 2],
-  Classical: [4, 3, 2, 1, -1, -1, 0, 2, 3, 4],
+  Bass: [3, 4.5, 4, 2, 0.5, 0, 0, 0, 0, 0],
+  Vocal: [-2, -1.5, -1, 0, 1.5, 2.5, 3, 2, 0.5, 0],
+  Treble: [0, 0, 0, 0, 0, 0.5, 1.5, 3, 4, 4],
+  Rock: [2.5, 3, 1.5, -0.5, -1.5, -1, 0.5, 2, 3, 2.5],
+  Pop: [-1, 0.5, 2, 2.5, 1.5, 0, -0.5, 0, 1, 1.5],
+  Classical: [2, 2, 1, 0, 0, 0, 0, 0.5, 1.5, 2],
+  Loudness: [3.5, 3, 1, 0, -0.5, -0.5, 0, 1, 2.5, 2.5],
+  'Late night': [-3, -2, -1, 0, 0.5, 1, 1, 0, -1, -2],
 };
 export const PRESET_NAMES = [...Object.keys(PRESETS), 'Custom'];
 
@@ -67,13 +73,49 @@ export function presetFor(bands: number[]): string {
   return 'Custom';
 }
 
-export function preampGainDb(s: EqSettings): number {
+/** Trim from the preamp buttons: Quieter / Auto / Louder ('headroom' / 'off' / 'boost' kept as stored names). */
+export const PREAMP_MODE_DB: Record<PreampMode, number> = { headroom: -3, off: 0, boost: 3 };
+
+export function preampGainDb(s: EqSettings, fs = 48000): number {
   if (!s.enabled) return 0;
-  const base = s.preampMode === 'headroom' ? -6 : s.preampMode === 'boost' ? 1 : 0;
-  return base + s.preampDb + (s.headphone ? Math.min(0, s.headphone.preampDb) : 0);
+  return autoHeadroomDb(s, fs) + (PREAMP_MODE_DB[s.preampMode] ?? 0) + s.preampDb;
+}
+
+/** Every filter the EQ curve is made of, as RBJ coefficients (Web Audio's peaking / lowshelf use the same formulas). */
+export function curveFilters(s: EqSettings, fs = 48000): BiquadCoefficients[] {
+  if (!s.enabled) return [];
+  const out: BiquadCoefficients[] = [];
+  for (const f of s.headphone?.filters ?? []) out.push(rbjCoefficients(f.type, fs, f.fc, f.gainDb, f.q));
+  EQ_FREQS.forEach((f, i) => {
+    const g = clampBand(s.bands[i] ?? 0);
+    if (g !== 0 && f < fs / 2) out.push(rbjCoefficients('PK', fs, f, g, BAND_Q));
+  });
+  const bass = bassBoostDb(s);
+  if (bass > 0) out.push(rbjCoefficients('LSC', fs, BASS_HZ, bass, Math.SQRT1_2));
+  return out;
+}
+
+const clampBand = (v: number) => Math.max(-EQ_MAX_DB, Math.min(EQ_MAX_DB, v));
+
+/** Automatic headroom (dB, ≤ 0): minus the curve's highest boost between 20 Hz and 20 kHz. */
+export function autoHeadroomDb(s: EqSettings, fs = 48000): number {
+  const filters = curveFilters(s, fs);
+  if (!filters.length) return 0;
+  const top = Math.min(20000, fs * 0.45);
+  const probes = [...EQ_FREQS.filter((f) => f < top), BASS_HZ / 2];
+  for (let i = 0; i < 96; i++) probes.push(20 * Math.pow(top / 20, i / 95));
+  let peak = -Infinity;
+  for (const f of probes) {
+    let db = 0;
+    for (const c of filters) db += biquadResponseDb(c, fs, f);
+    peak = Math.max(peak, db);
+  }
+  return peak > 0 ? -peak : 0;
 }
 
 /** Bass boost: low shelf at 100 Hz, 0–100 % → 0–12 dB. */
+export const BASS_HZ = 100;
+
 export function bassBoostDb(s: EqSettings): number {
   return s.enabled ? (Math.max(0, Math.min(100, s.bassBoost)) / 100) * 12 : 0;
 }
@@ -148,6 +190,7 @@ export interface AudioCtxLike {
   createChannelSplitter(n?: number): ChannelSplitterNode;
   createChannelMerger(n?: number): ChannelMergerNode;
   createIIRFilter?(feedforward: number[], feedback: number[]): IIRFilterNode;
+  createDynamicsCompressor?(): DynamicsCompressorNode;
   readonly sampleRate?: number;
   readonly destination: AudioNode;
   readonly currentTime: number;
@@ -161,6 +204,8 @@ export interface EqGraph {
   bass: BiquadFilterNode;
   matrix: { ll: GainNode; lr: GainNode; rl: GainNode; rr: GainNode };
   panner: StereoPannerNode;
+  /** Peak limiter between balance and volume; only in the chain while the EQ is on. Null if unsupported. */
+  limiter: DynamicsCompressorNode | null;
   volume: GainNode;
   /** AutoEq filters currently in the chain (rebuilt when the profile changes). */
   headphone: AudioNode[];
@@ -188,7 +233,7 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
   });
   const bass = ctx.createBiquadFilter();
   bass.type = 'lowshelf';
-  bass.frequency.value = 100;
+  bass.frequency.value = BASS_HZ;
   bass.gain.value = 0;
 
   const splitter = ctx.createChannelSplitter(2);
@@ -208,6 +253,26 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
 
   const panner = ctx.createStereoPanner();
   const volume = ctx.createGain();
+  // Brick-wall-ish limiter: only acts on peaks near full scale (auto headroom keeps the EQ itself below it).
+  const limiter = ctx.createDynamicsCompressor ? ctx.createDynamicsCompressor() : null;
+  if (limiter) {
+    limiter.threshold.value = -1;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.15;
+  }
+  let limiting = false;
+  const setLimiter = (on: boolean) => {
+    if (!limiter || on === limiting) return;
+    limiting = on;
+    panner.disconnect();
+    limiter.disconnect();
+    if (on) {
+      panner.connect(limiter);
+      limiter.connect(volume);
+    } else panner.connect(volume);
+  };
 
   preamp.connect(bands[0]);
   for (let i = 0; i < bands.length - 1; i++) bands[i].connect(bands[i + 1]);
@@ -248,12 +313,14 @@ export function buildEqGraph(ctx: AudioCtxLike): EqGraph {
     bass,
     matrix: { ll, lr, rl, rr },
     panner,
+    limiter,
     volume,
     apply(s: EqSettings) {
       const t = ctx.currentTime;
       setHeadphone(s);
-      setParam(preamp.gain, dbToGain(preampGainDb(s)), t);
-      bands.forEach((b, i) => setParam(b.gain, s.enabled ? Math.max(-EQ_MAX_DB, Math.min(EQ_MAX_DB, s.bands[i] ?? 0)) : 0, t));
+      setLimiter(s.enabled);
+      setParam(preamp.gain, dbToGain(preampGainDb(s, ctx.sampleRate ?? 48000)), t);
+      bands.forEach((b, i) => setParam(b.gain, s.enabled ? clampBand(s.bands[i] ?? 0) : 0, t));
       setParam(bass.gain, bassBoostDb(s), t);
       const { same, cross } = matrixCoefficients(stereoWidth(s));
       setParam(ll.gain, same, t);

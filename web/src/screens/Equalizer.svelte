@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ArrowLeft, AudioLines, Headphones, Waves } from '@lucide/svelte';
-  import { EQ_LABELS, EQ_MAX_DB, PRESET_NAMES, PRESETS, balanceLabel, presetFor, type PreampMode } from '../lib/eq';
+  import { EQ_LABELS, EQ_MAX_DB, PRESET_NAMES, PRESETS, autoHeadroomDb, balanceLabel, presetFor, type PreampMode } from '../lib/eq';
   import { player } from '../lib/player.svelte';
   import { session } from '../lib/session.svelte';
   import type { AutoEqEntry } from '../lib/types';
@@ -48,6 +48,7 @@
 
   let page = $state<'bands' | 'effects'>('bands');
   const eq = $derived(player.eq);
+  const autoDb = $derived(autoHeadroomDb(eq));
 
   function setBand(i: number, v: number) {
     const bands = eq.bands.slice();
@@ -202,12 +203,13 @@
     <div class="center">
       <b>Preamp</b>
       <div class="seg">
-        {#each [['headroom', 'Headroom', '-6 dB'], ['off', 'Off', '0 dB'], ['boost', 'Boost', '+1 dB']] as [k, a, b]}
+        {#each [['headroom', 'Quieter', '-3 dB'], ['off', 'Auto', '0 dB'], ['boost', 'Louder', '+3 dB']] as [k, a, b]}
           <button class:on={eq.preampMode === k} onclick={() => player.setEq({ preampMode: k as PreampMode, enabled: true })}>{a}<br />{b}</button>
         {/each}
       </div>
       <input type="range" min="-12" max="12" step="0.5" value={eq.preampDb} style:--p="{((eq.preampDb + 12) / 24) * 100}%" aria-label="Preamp adjust" oninput={(e) => player.setEq({ preampDb: +e.currentTarget.value, enabled: true })} />
       <span class="muted">{eq.preampDb > 0 ? '+' : ''}{eq.preampDb} dB</span>
+      <span class="muted small">{autoDb < -0.05 ? `Auto headroom ${autoDb.toFixed(1)} dB keeps your boosts from clipping` : 'Auto headroom: nothing to take off'}</span>
     </div>
     <hr />
     <div class="center">

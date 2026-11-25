@@ -6,6 +6,9 @@ import {
   dbToGain,
   defaultEq,
   loadProfiles,
+  autoHeadroomDb,
+  biquadResponseDb,
+  curveFilters,
   matrixCoefficients,
   presetFor,
   PRESETS,
@@ -106,9 +109,12 @@ describe('buildEqGraph', () => {
 
   it('applies bands, preamp, bass boost, balance and volume when enabled', () => {
     const g = buildEqGraph(fakeCtx());
-    g.apply({ ...defaultEq(), enabled: true, bands: [...PRESETS.Rock], preampMode: 'headroom', preampDb: 1, bassBoost: 50, balance: -0.5, volume: 0.4 });
+    const s = { ...defaultEq(), enabled: true, bands: [...PRESETS.Rock], preampMode: 'headroom' as const, preampDb: 1, bassBoost: 50, balance: -0.5, volume: 0.4 };
+    g.apply(s);
     expect(g.bands.map((b) => b.gain.value)).toEqual(PRESETS.Rock);
-    expect(g.preamp.gain.value).toBeCloseTo(dbToGain(-5));
+    // auto headroom + Quieter (−3) + 1 dB trim
+    expect(autoHeadroomDb(s)).toBeLessThan(-6);
+    expect(g.preamp.gain.value).toBeCloseTo(dbToGain(autoHeadroomDb(s) - 2));
     expect(g.bass.gain.value).toBe(6);
     expect(g.panner.pan.value).toBe(-0.5);
     expect(g.volume.gain.value).toBe(0.4);
@@ -148,6 +154,43 @@ describe('buildEqGraph', () => {
     const extra = new FakeNode('pitch');
     g.insert(extra as unknown as AudioNode);
     expect(chain(g.bass as unknown as FakeNode).slice(0, 3)).toEqual(['biquad', 'pitch', 'splitter']);
+  });
+});
+
+describe('auto headroom', () => {
+  it('takes off the biggest boost of the whole curve, and nothing for cuts', () => {
+    const one = { ...defaultEq(), enabled: true, bands: [0, 0, 0, 0, 0, 12, 0, 0, 0, 0] };
+    expect(autoHeadroomDb(one)).toBeCloseTo(-12, 1);
+    expect(autoHeadroomDb({ ...one, bands: Array(10).fill(-6) })).toBe(0);
+    expect(autoHeadroomDb({ ...one, enabled: false })).toBe(0);
+    // Bass boost stacks with the low bands.
+    const stacked = autoHeadroomDb({ ...one, bands: [6, 6, 0, 0, 0, 0, 0, 0, 0, 0], bassBoost: 100 });
+    expect(stacked).toBeLessThan(-16);
+    // With it applied, nothing in the audible range is above 0 dB.
+    const s = { ...defaultEq(), enabled: true, bands: [...PRESETS.Rock], bassBoost: 40 };
+    for (let f = 20; f < 20000; f *= 1.05) {
+      const db = curveFilters(s).reduce((a, c) => a + biquadResponseDb(c, 48000, f), 0) + autoHeadroomDb(s);
+      expect(db).toBeLessThan(0.05);
+    }
+  });
+
+  it('keeps presets gentle', () => {
+    for (const [name, bands] of Object.entries(PRESETS)) {
+      expect(autoHeadroomDb({ ...defaultEq(), enabled: true, bands }), name).toBeGreaterThan(-7);
+    }
+  });
+
+  it('puts a limiter in the chain only while the EQ is on', () => {
+    const ctx = Object.assign(fakeCtx(), {
+      createDynamicsCompressor: () => Object.assign(new FakeNode('limiter'), {
+        threshold: new FakeParam(), knee: new FakeParam(), ratio: new FakeParam(), attack: new FakeParam(), release: new FakeParam(),
+      }),
+    });
+    const g = buildEqGraph(ctx as unknown as AudioCtxLike);
+    g.apply({ ...defaultEq(), enabled: true });
+    expect(chain(g.panner as unknown as FakeNode)).toEqual(['panner', 'limiter', 'gain', 'destination']);
+    g.apply({ ...defaultEq(), enabled: false });
+    expect(chain(g.panner as unknown as FakeNode)).toEqual(['panner', 'gain', 'destination']);
   });
 });
 
@@ -195,7 +238,9 @@ describe('AutoEq parametric filters', () => {
       { type: 'LSC' as const, fc: 105, gainDb: 6.4, q: 0.7 }, { type: 'PK' as const, fc: 8800, gainDb: 5.1, q: 1.42 }] };
     g.apply({ ...defaultEq(), enabled: true, headphone: hp });
     expect(chain(g.preamp as unknown as FakeNode).slice(0, 4)).toEqual(['gain', 'iir', 'iir', 'biquad']);
-    expect((g.preamp as unknown as FakeGain).gain.value).toBeCloseTo(dbToGain(-6));
+    // Auto headroom covers the profile's boosts (≈ its own −6 dB preamp).
+    expect((g.preamp as unknown as FakeGain).gain.value).toBeCloseTo(dbToGain(autoHeadroomDb({ ...defaultEq(), enabled: true, headphone: hp })));
+    expect(autoHeadroomDb({ ...defaultEq(), enabled: true, headphone: hp })).toBeLessThan(-6);
     g.apply({ ...defaultEq(), enabled: false, headphone: hp });
     expect(chain(g.preamp as unknown as FakeNode).slice(0, 2)).toEqual(['gain', 'biquad']);
   });

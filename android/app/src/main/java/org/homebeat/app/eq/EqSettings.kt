@@ -13,7 +13,7 @@ data class EqSettings(
     val bassBoost: Int = 0,
     /** 0..100 % stereo widening (mid/side). */
     val surround: Int = 0,
-    /** Preamp in dB, −12..+6 (Headroom = −6, Off = 0, Boost = +1). */
+    /** Preamp trim in dB, −12..+6, on top of the engine's automatic headroom (Quieter = −3, Auto = 0, Louder = +3). */
     val preampDb: Float = 0f,
     val mono: Boolean = false,
     /** −1 = left only … 0 centre … +1 = right only. */
@@ -27,14 +27,20 @@ data class EqSettings(
         val BANDS_HZ = floatArrayOf(31.5f, 63f, 125f, 250f, 500f, 1000f, 2000f, 4000f, 8000f, 16000f)
         val BAND_LABELS = listOf("31.5", "63", "125", "250", "500", "1 k", "2 k", "4 k", "8 k", "16 k")
 
+        /**
+         * Gentle curves: a few dB goes a long way, and every boost costs headroom (the engine turns the whole
+         * signal down by the biggest boost so nothing clips). Same values as web/src/lib/eq.ts.
+         */
         val PRESETS: Map<String, List<Float>> = linkedMapOf(
             "Flat" to List(10) { 0f },
-            "Bass" to listOf(6f, 5f, 4f, 2f, 0f, 0f, 0f, 0f, 0f, 0f),
-            "Vocal" to listOf(-2f, -2f, -1f, 1f, 3f, 4f, 3f, 1f, 0f, -1f),
-            "Treble" to listOf(0f, 0f, 0f, 0f, 0f, 1f, 2f, 4f, 5f, 6f),
-            "Rock" to listOf(5f, 4f, 2f, -1f, -2f, -1f, 1f, 3f, 4f, 4f),
-            "Pop" to listOf(-1f, 1f, 3f, 4f, 3f, 0f, -1f, -1f, 1f, 2f),
-            "Classical" to listOf(4f, 3f, 2f, 1f, -1f, -1f, 0f, 2f, 3f, 4f),
+            "Bass" to listOf(3f, 4.5f, 4f, 2f, 0.5f, 0f, 0f, 0f, 0f, 0f),
+            "Vocal" to listOf(-2f, -1.5f, -1f, 0f, 1.5f, 2.5f, 3f, 2f, 0.5f, 0f),
+            "Treble" to listOf(0f, 0f, 0f, 0f, 0f, 0.5f, 1.5f, 3f, 4f, 4f),
+            "Rock" to listOf(2.5f, 3f, 1.5f, -0.5f, -1.5f, -1f, 0.5f, 2f, 3f, 2.5f),
+            "Pop" to listOf(-1f, 0.5f, 2f, 2.5f, 1.5f, 0f, -0.5f, 0f, 1f, 1.5f),
+            "Classical" to listOf(2f, 2f, 1f, 0f, 0f, 0f, 0f, 0.5f, 1.5f, 2f),
+            "Loudness" to listOf(3.5f, 3f, 1f, 0f, -0.5f, -0.5f, 0f, 1f, 2.5f, 2.5f),
+            "Late night" to listOf(-3f, -2f, -1f, 0f, 0.5f, 1f, 1f, 0f, -1f, -2f),
         )
     }
 }

@@ -44,16 +44,46 @@ class EqAndContextTest {
         assertTrue(EqEngine(EqSettings(enabled = true), fs, 2).isIdentity)
     }
 
-    @Test fun `a 1 kHz boost raises 1 kHz by about 12 dB and leaves 63 Hz alone`() {
+    @Test fun `a 1 kHz boost lifts 1 kHz about 12 dB over 63 Hz, with auto headroom so neither clips`() {
         val s = EqSettings(enabled = true).withBand(5, 12f)
+        val e = EqEngine(s, fs, 2)
+        assertEquals(-12.0, e.autoHeadroomDb, 0.3)
         val hi = sine(1000.0); val before = rms(hi)
-        EqEngine(s, fs, 2).process(hi, hi.size / 2)
-        val gainDb = 20 * kotlin.math.log10(rms(hi) / before)
-        assertEquals(12.0, gainDb, 0.7)
+        e.process(hi, hi.size / 2)
+        val hiDb = 20 * kotlin.math.log10(rms(hi) / before)
+        assertEquals(0.0, hiDb, 0.7) // the boost is paid for by the headroom
 
         val lo = sine(63.0); val loBefore = rms(lo)
         EqEngine(s, fs, 2).process(lo, lo.size / 2)
-        assertEquals(0.0, 20 * kotlin.math.log10(rms(lo) / loBefore), 0.5)
+        val loDb = 20 * kotlin.math.log10(rms(lo) / loBefore)
+        assertEquals(12.0, hiDb - loDb, 0.7)
+    }
+
+    @Test fun `cuts need no headroom and presets stay gentle`() {
+        assertEquals(0.0, EqEngine.headroomDb(EqSettings(enabled = true, bandsDb = List(10) { -6f })), 1e-9)
+        assertEquals(0.0, EqEngine.headroomDb(EqSettings(enabled = false, bandsDb = List(10) { 6f })), 1e-9)
+        for ((name, bands) in EqSettings.PRESETS) {
+            val h = EqEngine.headroomDb(EqSettings(enabled = true, bandsDb = bands))
+            assertTrue("$name costs ${h} dB", h > -7.0)
+        }
+    }
+
+    @Test fun `changing a band glides without a click`() {
+        val e = EqEngine(EqSettings(enabled = true), fs, 2)
+        val a = sine(1000.0, frames = 4800, amp = 0.5)
+        e.process(a, 2400) // first half flat
+        e.update(EqSettings(enabled = true).withBand(5, -12f))
+        val b = a.copyOfRange(4800, a.size)
+        e.process(b, 2400)
+        // Sample-to-sample steps stay within what a 0.5 amplitude 1 kHz sine can do (2π·f/fs·A ≈ 0.065).
+        var maxStep = 0.0
+        var prev = a[4798].toDouble()
+        for (f in 0 until 2400) { val v = b[f * 2].toDouble(); maxStep = maxOf(maxStep, abs(v - prev)); prev = v }
+        assertTrue("step $maxStep", maxStep < 0.07)
+        // …and it does get there.
+        val c = sine(1000.0, amp = 0.5); val before = rms(c)
+        e.process(c, c.size / 2)
+        assertEquals(-12.0, 20 * kotlin.math.log10(rms(c) / before), 0.7)
     }
 
     @Test fun `mono, balance and preamp`() {
@@ -72,8 +102,8 @@ class EqAndContextTest {
 
     @Test fun `output never exceeds full scale`() {
         val buf = sine(100.0, amp = 0.9)
-        EqEngine(EqSettings(enabled = true, bassBoost = 100, preampDb = 6f).withBand(2, 12f), fs, 2).process(buf, buf.size / 2)
-        assertTrue(buf.all { abs(it) <= 1f })
+        EqEngine(EqSettings(enabled = true, bassBoost = 100, preampDb = 6f, surround = 100).withBand(2, 12f), fs, 2).process(buf, buf.size / 2)
+        assertTrue(buf.all { abs(it) <= EqEngine.LIMIT + 1e-6f })
     }
 
     @Test fun `presets have ten bands`() {
